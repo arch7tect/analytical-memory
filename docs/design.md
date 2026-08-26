@@ -3,7 +3,7 @@
 ## Status
 
 Proposed v1 architecture. This document defines logical behavior,
-implementation boundaries, repository organization, and acceptance criteria.
+implementation boundaries, and repository organization.
 
 ## Purpose
 
@@ -619,6 +619,8 @@ The planned repository layout is:
 ├── migrations/
 │   ├── sqlite/
 │   └── postgresql/
+├── examples/
+│   └── quickstart/         synthetic end-to-end input
 ├── src/
 │   └── analytical_memory/
 │       ├── domain/         records, value objects, and pure semantics
@@ -636,7 +638,8 @@ The planned repository layout is:
 │   ├── contract/           shared backend and interface conformance
 │   ├── integration/
 │   └── fixtures/           synthetic, non-sensitive fixtures
-└── scripts/                repository maintenance only
+├── scripts/                repository maintenance only
+└── .local/                 gitignored runtime state
 ```
 
 Placement rules:
@@ -651,112 +654,10 @@ Placement rules:
 - tests use synthetic data and shared contract fixtures;
 - one-off maintenance logic belongs in Python scripts executed with `uv run`.
 
-Planned development commands are:
-
-```text
-uv sync --all-groups
-uv run pytest
-uv run ruff check .
-uv run ruff format --check .
-uv run mypy src
-```
-
-The exact Python version and initial dependency set are selected in the
-foundation slice and pinned in `pyproject.toml` and `uv.lock`.
-
-## Implementation slices
-
-### 0. Foundation
-
-Add `pyproject.toml`, the `src` package, test groups, formatting, linting, type
-checking, and continuous integration. Freeze this design as the initial
-architectural baseline.
-
-Acceptance: a clean clone can install and run all empty-project checks through
-`uv` using documented commands.
-
-### 1. Metadata and domain
-
-Implement canonical JSON, schema compilation and fingerprints, domain records,
-stable keys, assertion and slot semantics, and synthetic golden fixtures.
-
-Acceptance: metadata compiles deterministically and pure domain tests cover
-current, contested, contradicted, superseded, and historical states.
-
-### 2. MemoryStore and SQLite
-
-Implement the storage port, migrations, transactional batch application,
-idempotency, canonical queries, integrity checks, and backup and restore.
-
-Acceptance: repeated ingestion preserves row counts, invalid batches fail
-atomically, and restored stores return identical canonical results.
-
-### 3. PostgreSQL conformance and transfer
-
-Implement the second relational adapter and canonical transfer before public
-query interfaces depend on backend-specific behavior.
-
-Acceptance: both adapters pass the same contract suite and preserve IDs,
-hashes, fact states, metrics, and deterministic result ordering.
-
-### 4. Evidence and snapshots
-
-Implement evidence catalog records, the filesystem provider, deterministic
-fragments, bindings, verification, retention planning, and private snapshots.
-
-Acceptance: every binding resolves to a verified fragment or an explicit
-unavailable state, and a clean restore reproduces canonical queries and catalog
-state without original source paths.
-
-### 5. Query and explanation
-
-Implement saved relational queries, bounded relation traversal, hybrid filters,
-full-text retrieval, and provenance explanation.
-
-Acceptance: query fixtures match canonical SQL, traversal enforces limits and
-state filters, and every result can return its provenance chain.
-
-### 6. Exact semantic retrieval
-
-Implement property-scoped search documents, embedding profiles and records,
-canonical float32 storage, exact application search, coverage reporting, and
-optional exact acceleration.
-
-Acceptance: indexes rebuild from canonical inputs, filtered exact results are
-deterministic, missing model artifacts degrade only semantic retrieval, and all
-accelerators match the application oracle.
-
-### 7. CLI and MCP
-
-Expose typed use cases through the CLI and local stdio MCP adapter.
-
-Acceptance: clients discover the active contract without filesystem access,
-stale writes fail by fingerprint, evidence reads are bounded, and no tool
-exposes arbitrary write SQL or migrations.
-
-### 8. Hardening
-
-Add crash recovery, integrity audits, measured limits, restore drills, schema
-compatibility tests, and retention safety checks.
-
-Acceptance: recovery and restore are exercised, not merely configured, and all
-destructive operations remain exact, planned, and explicit.
-
-## Verification strategy
-
-- Unit tests for canonicalization, stable keys, state derivation, privacy
-  propagation, and supersession.
-- Golden tests for schema documents, fingerprints, transfer manifests, and
-  deterministic fragments.
-- Shared contract tests for both relational adapters.
-- Transaction rollback and idempotent retry property tests.
-- Differential tests for backend transfer and exact vector engines.
-- Evidence corruption, missing-object, atomic-write, and snapshot restore
-  tests.
-- Interface contract tests shared by Python, CLI, and MCP adapters.
-- Negative tests for forbidden ingestion, stale schema writes, unsafe exports,
-  unbounded traversal, and unauthorized evidence reads.
-- Synthetic fixtures only; repository tests contain no private source data.
+Delivery sequencing, development commands, milestone acceptance criteria, and
+verification work are defined in the
+[implementation plan](implementation-plan.md). The plan may change as code is
+delivered; the invariants in this document remain the conformance boundary.
 
 ## Deferred capabilities
 
