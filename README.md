@@ -1,23 +1,14 @@
 # Analytical Memory
 
-Analytical Memory is an evidence-backed, local-first memory for durable
-analysis. It is designed to support relational, graph, full-text, vector, and
-hybrid queries without treating semantic similarity as truth.
+Analytical Memory is an evidence-backed, local-first memory with relational,
+graph, full-text, vector, and hybrid retrieval.
 
-The project is currently in the design and bootstrap phase. The planned v1
-focuses on:
+The project is in the design phase. Its architecture is defined in
+[docs/design.md](docs/design.md).
 
-- SQLite as the default local backend, with PostgreSQL as a conforming
-  replacement;
-- explicit nodes, attributes, relations, assertions, and analysis runs;
-- provenance bindings to immutable evidence objects and deterministic
-  fragments;
-- schema discovery through a backend-neutral API and local MCP adapter;
-- rebuildable full-text and exact vector-search projections;
-- portable private snapshots and separate sanitized exports.
-
-Implementation milestones and contribution guidance will be added with the
-first development slice.
+The implementation will be written in Python and managed with
+[uv](https://docs.astral.sh/uv/). Source, test, and development commands will be
+added with the first implementation slice.
 
 ## License
 
