@@ -1,17 +1,60 @@
 {
   "assertion": {
-    "basis": ["observed", "computed", "inferred", "declared"],
-    "lifecycle": ["active", "superseded", "retracted"],
-    "stances": ["supports", "contradicts"],
-    "target_kinds": ["node_attribute"]
+    "basis": [
+      "observed",
+      "computed",
+      "inferred",
+      "declared"
+    ],
+    "lifecycle": [
+      "active",
+      "superseded",
+      "retracted"
+    ],
+    "stable_key_versions": [
+      1,
+      2
+    ],
+    "stances": [
+      "supports",
+      "contradicts"
+    ],
+    "target_kinds": [
+      "node_attribute",
+      "relation"
+    ]
+  },
+  "attribute_slots": {
+    "multi": {
+      "result": "all_candidates_with_individual_state"
+    },
+    "single": {
+      "states": [
+        "missing",
+        "current",
+        "contested",
+        "conflict"
+      ]
+    }
   },
   "compatibility": {
     "minimum_reader": "1"
   },
-  "fact_states": ["supported", "contested", "contradicted", "unasserted"],
+  "fact_states": [
+    "supported",
+    "contested",
+    "contradicted",
+    "unasserted"
+  ],
   "ingestion_batch": {
-    "evidence_locator_kinds": ["whole_object"],
-    "format_version": "1",
+    "evidence_locator_kinds": [
+      "whole_object"
+    ],
+    "format_version": "2",
+    "optional": [
+      "relations",
+      "metrics"
+    ],
     "required": [
       "schema_fingerprint",
       "idempotency_key",
@@ -22,22 +65,53 @@
       "nodes"
     ]
   },
-  "ontology_version": "0.1.0",
-  "privacy_classes": ["public", "private", "restricted", "forbidden"],
+  "metric": {
+    "current_selection": [
+      "run_recorded_at_desc",
+      "run_id_desc",
+      "metric_id_desc"
+    ],
+    "dimensions": "canonical_json_object"
+  },
+  "ontology_version": "0.2.0",
+  "privacy_classes": [
+    "public",
+    "private",
+    "restricted",
+    "forbidden"
+  ],
   "record_types": [
     "Source",
     "AnalyticalRun",
     "Node",
     "NodeAttribute",
+    "Relation",
     "Assertion",
+    "Metric",
     "EvidenceObject",
     "EvidenceFragment",
     "EvidenceBinding",
-    "IngestionBatch"
+    "SearchDocument",
+    "IngestionBatch",
+    "SchemaMigration"
   ],
+  "relation": {
+    "directions": [
+      "outbound",
+      "inbound",
+      "both"
+    ],
+    "properties_allowed": false
+  },
   "saved_queries": {
     "current-facts": {
-      "ordering": ["namespace", "node_type", "natural_key", "attribute_name", "attribute_id"],
+      "ordering": [
+        "namespace",
+        "node_type",
+        "natural_key",
+        "attribute_name",
+        "attribute_id"
+      ],
       "result": [
         "attribute_id",
         "namespace",
@@ -48,8 +122,89 @@
         "state",
         "privacy_class"
       ]
+    },
+    "current-metric": {
+      "parameters": [
+        "definition_version",
+        "dimensions"
+      ],
+      "result": [
+        "metric",
+        "coverage"
+      ]
+    },
+    "current-slots": {
+      "candidate_ordering": [
+        "namespace",
+        "node_type",
+        "natural_key",
+        "attribute_name",
+        "attribute_id"
+      ],
+      "ordering": [
+        "namespace",
+        "node_type",
+        "natural_key",
+        "attribute_name",
+        "node_id"
+      ],
+      "result": [
+        "node_id",
+        "attribute_name",
+        "cardinality",
+        "status",
+        "candidates"
+      ]
+    },
+    "search-text": {
+      "parameters": [
+        "query",
+        "limit"
+      ],
+      "result": [
+        "results",
+        "coverage"
+      ]
+    },
+    "traverse-relations": {
+      "ordering": [
+        "depth",
+        "source_namespace",
+        "source_natural_key",
+        "relation_type",
+        "target_namespace",
+        "target_natural_key",
+        "logical_key",
+        "relation_id"
+      ],
+      "parameters": [
+        "start_node_id",
+        "relation_types",
+        "direction",
+        "max_depth",
+        "limit",
+        "states"
+      ],
+      "result": [
+        "nodes",
+        "edges",
+        "truncated"
+      ]
     }
   },
-  "schema_document_version": "1",
-  "schema_fingerprint": "21c6a71444f7d5725703ca31cc6e410c21958009b9bed902ad213a82a65c272f"
+  "schema_document_version": "2",
+  "schema_fingerprint": "5161ccab9612c1c6b4cf99a980e1c29305ccdde2acc721851d1e160d53d0c953",
+  "search_document": {
+    "coverage": "active_indexed_documents_vs_searchable_attributes",
+    "eligibility": {
+      "explicit_batch_flag": "searchable",
+      "target_kinds": [
+        "node_attribute"
+      ],
+      "value_types": [
+        "string"
+      ]
+    },
+    "fts_engine": "sqlite-fts5"
+  }
 }

@@ -26,7 +26,13 @@ def test_capabilities_are_discoverable_and_path_free(
         "initialized": False,
         "migration_version": 0,
     }
-    assert before["saved_queries"] == ["current-facts"]
+    assert before["saved_queries"] == [
+        "current-facts",
+        "current-metric",
+        "current-slots",
+        "search-text",
+        "traverse-relations",
+    ]
     assert "NodeAttribute" in before["record_types"]
     assert before["limits"]["ingestion_batch_bytes"] == 1_048_576
     assert before["evidence_store"]["raw_read"] == {

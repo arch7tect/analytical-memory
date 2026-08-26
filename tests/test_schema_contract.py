@@ -6,6 +6,12 @@ from typing import Any
 
 import pytest
 
+from analytical_memory.schema_compiler import (
+    SchemaCompilationError,
+    compile_schema,
+    render_schema,
+    schema_is_current,
+)
 from analytical_memory.schema_contract import SchemaContractError, load_schema
 
 from .conftest import REPOSITORY_ROOT
@@ -32,3 +38,23 @@ def test_schema_loader_rejects_tampered_document(tmp_path: Path) -> None:
 
     with pytest.raises(SchemaContractError, match="fingerprint mismatch"):
         load_schema(path)
+
+
+def test_compiler_reproduces_current_schema() -> None:
+    assert schema_is_current()
+    compiled = compile_schema()
+    current = _read_schema()
+    assert compiled == current
+    assert render_schema() == (REPOSITORY_ROOT / "schema" / "current.json").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_compiler_rejects_duplicate_top_level_keys(tmp_path: Path) -> None:
+    metadata = tmp_path / "metadata"
+    metadata.mkdir()
+    (metadata / "one.json").write_text('{"record_types": []}', encoding="utf-8")
+    (metadata / "two.json").write_text('{"record_types": []}', encoding="utf-8")
+
+    with pytest.raises(SchemaCompilationError, match="duplicate top-level"):
+        compile_schema(metadata)

@@ -50,7 +50,50 @@ class MemoryStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def current_slots(self) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def current_relations(self) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def traverse_relations(
+        self,
+        start_node_id: str,
+        *,
+        relation_types: list[str] | None,
+        direction: str,
+        max_depth: int,
+        limit: int,
+        states: list[str],
+    ) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_node(self, node_id: str) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def current_metric(
+        self, definition_version: str, dimensions_json: str
+    ) -> dict[str, Any] | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def search_text(self, query: str, limit: int) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
     def explain_attribute(self, attribute_id: str) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def explain_relation(self, relation_id: str) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def explain_metric(self, metric_id: str) -> dict[str, Any]:
         raise NotImplementedError
 
     @abstractmethod

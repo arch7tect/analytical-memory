@@ -1,0 +1,57 @@
+{
+  "assertion": {
+    "basis": ["observed", "computed", "inferred", "declared"],
+    "lifecycle": ["active", "superseded", "retracted"],
+    "stances": ["supports", "contradicts"],
+    "stable_key_versions": [1, 2],
+    "target_kinds": ["node_attribute", "relation"]
+  },
+  "attribute_slots": {
+    "multi": {
+      "result": "all_candidates_with_individual_state"
+    },
+    "single": {
+      "states": ["missing", "current", "contested", "conflict"]
+    }
+  },
+  "compatibility": {
+    "minimum_reader": "1"
+  },
+  "fact_states": ["supported", "contested", "contradicted", "unasserted"],
+  "ingestion_batch": {
+    "evidence_locator_kinds": ["whole_object"],
+    "format_version": "2",
+    "optional": ["relations", "metrics"],
+    "required": [
+      "schema_fingerprint",
+      "idempotency_key",
+      "recorded_at",
+      "source",
+      "run",
+      "evidence",
+      "nodes"
+    ]
+  },
+  "ontology_version": "0.2.0",
+  "privacy_classes": ["public", "private", "restricted", "forbidden"],
+  "record_types": [
+    "Source",
+    "AnalyticalRun",
+    "Node",
+    "NodeAttribute",
+    "Relation",
+    "Assertion",
+    "Metric",
+    "EvidenceObject",
+    "EvidenceFragment",
+    "EvidenceBinding",
+    "SearchDocument",
+    "IngestionBatch",
+    "SchemaMigration"
+  ],
+  "relation": {
+    "directions": ["outbound", "inbound", "both"],
+    "properties_allowed": false
+  },
+  "schema_document_version": "2"
+}

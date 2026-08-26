@@ -18,9 +18,12 @@ from analytical_memory.domain import (
     EvidenceBindingRecord,
     EvidenceFragmentRecord,
     EvidenceObjectRecord,
+    MetricRecord,
     NodeRecord,
     PreparedEvidence,
+    RelationRecord,
     RunRecord,
+    SearchDocumentRecord,
     SourceRecord,
 )
 from analytical_memory.errors import BatchValidationError, SchemaChangedError
@@ -73,6 +76,20 @@ def _confidence(value: object, field: str) -> float:
     return confidence
 
 
+def _optional_number(value: object, field: str) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise BatchValidationError(f"{field} must be a number or null")
+    return float(value)
+
+
+def _boolean(value: object, field: str) -> bool:
+    if not isinstance(value, bool):
+        raise BatchValidationError(f"{field} must be a boolean")
+    return value
+
+
 def _timestamp(value: object, field: str) -> str:
     try:
         return normalize_timestamp(value, field)
@@ -91,6 +108,103 @@ def _load_document(path: Path) -> dict[str, Any]:
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise BatchValidationError(f"cannot read batch: {path}") from exc
     return _mapping(value, "batch")
+
+
+def _plan_assertions(
+    values: object,
+    prefix: str,
+    *,
+    target_kind: str,
+    target_id: str,
+    source_id: str,
+    run_id: str,
+    default_valid_from: str,
+    default_valid_to: str | None,
+    recorded_at: str,
+    seen_assertions: set[str],
+) -> tuple[list[AssertionRecord], list[tuple[AssertionRecord, str, float, str]]]:
+    records: list[AssertionRecord] = []
+    bindings: list[tuple[AssertionRecord, str, float, str]] = []
+    for index, assertion_value in enumerate(_sequence(values, prefix)):
+        assertion_prefix = f"{prefix}[{index}]"
+        assertion_input = _mapping(assertion_value, assertion_prefix)
+        stance = _text(assertion_input.get("stance"), f"{assertion_prefix}.stance")
+        if stance not in STANCES:
+            raise BatchValidationError(f"{assertion_prefix}.stance is invalid")
+        basis = _text(assertion_input.get("basis"), f"{assertion_prefix}.basis")
+        if basis not in BASES:
+            raise BatchValidationError(f"{assertion_prefix}.basis is invalid")
+        valid_from = _timestamp(
+            assertion_input.get("valid_from", default_valid_from),
+            f"{assertion_prefix}.valid_from",
+        )
+        valid_to_raw = assertion_input.get("valid_to", default_valid_to)
+        valid_to = (
+            None
+            if valid_to_raw is None
+            else _timestamp(valid_to_raw, f"{assertion_prefix}.valid_to")
+        )
+        if valid_to is not None and valid_to < valid_from:
+            raise BatchValidationError(
+                f"{assertion_prefix}.valid_to must not be before valid_from"
+            )
+        method = _text(assertion_input.get("method"), f"{assertion_prefix}.method")
+        stable_key = sha256_json(
+            [
+                target_kind,
+                target_id,
+                stance,
+                basis,
+                source_id,
+                run_id,
+                valid_from,
+                valid_to,
+                method,
+            ]
+        )
+        if stable_key in seen_assertions:
+            raise BatchValidationError(f"duplicate assertion stable key: {stable_key}")
+        seen_assertions.add(stable_key)
+        record = AssertionRecord(
+            id=stable_uuid("assertion", stable_key),
+            target_kind=target_kind,
+            target_id=target_id,
+            attribute_id=target_id if target_kind == "node_attribute" else None,
+            relation_id=target_id if target_kind == "relation" else None,
+            stance=stance,
+            basis=basis,
+            confidence=_confidence(
+                assertion_input.get("confidence", 1.0),
+                f"{assertion_prefix}.confidence",
+            ),
+            review_status=_text(
+                assertion_input.get("review_status", "unreviewed"),
+                f"{assertion_prefix}.review_status",
+            ),
+            valid_from=valid_from,
+            valid_to=valid_to,
+            recorded_at=recorded_at,
+            method=method,
+            source_id=source_id,
+            run_id=run_id,
+            supersedes_assertion_id=_optional_text(
+                assertion_input.get("supersedes_assertion_id"),
+                f"{assertion_prefix}.supersedes_assertion_id",
+            ),
+            lifecycle="active",
+            stable_key=stable_key,
+            stable_key_version=2,
+        )
+        records.append(record)
+        bindings.append(
+            (
+                record,
+                "supports" if stance == "supports" else "contradicts",
+                record.confidence,
+                record.review_status,
+            )
+        )
+    return records, bindings
 
 
 def plan_batch(path: Path, schema: SchemaContract) -> BatchPlan:
@@ -140,10 +254,15 @@ def plan_batch(path: Path, schema: SchemaContract) -> BatchPlan:
 
     node_records: list[NodeRecord] = []
     attribute_records: list[AttributeRecord] = []
+    relation_records: list[RelationRecord] = []
     assertion_records: list[AssertionRecord] = []
+    metric_records: list[MetricRecord] = []
+    search_document_records: list[SearchDocumentRecord] = []
     binding_inputs: list[tuple[AssertionRecord, str, float, str]] = []
     seen_nodes: set[tuple[str, str, str]] = set()
+    nodes_by_key: dict[tuple[str, str, str], NodeRecord] = {}
     seen_attributes: set[tuple[str, str, str]] = set()
+    slot_cardinalities: dict[tuple[str, str], str] = {}
     seen_assertions: set[str] = set()
 
     for node_index, node_value in enumerate(_sequence(payload.get("nodes"), "nodes")):
@@ -172,9 +291,10 @@ def plan_batch(path: Path, schema: SchemaContract) -> BatchPlan:
             recorded_at=recorded_at,
         )
         node_records.append(node)
+        nodes_by_key[node_key] = node
 
         attributes = _sequence(
-            node_input.get("attributes"), f"nodes[{node_index}].attributes"
+            node_input.get("attributes", []), f"nodes[{node_index}].attributes"
         )
         for attribute_index, attribute_value in enumerate(attributes):
             prefix = f"nodes[{node_index}].attributes[{attribute_index}]"
@@ -185,6 +305,13 @@ def plan_batch(path: Path, schema: SchemaContract) -> BatchPlan:
             )
             if cardinality not in CARDINALITIES:
                 raise BatchValidationError(f"{prefix}.cardinality is invalid")
+            slot_key = (node.id, name)
+            existing_cardinality = slot_cardinalities.get(slot_key)
+            if existing_cardinality is not None and existing_cardinality != cardinality:
+                raise BatchValidationError(
+                    f"{prefix}.cardinality conflicts with the existing slot"
+                )
+            slot_cardinalities[slot_key] = cardinality
             try:
                 value_json = canonical_json(attribute_input.get("value"))
             except (TypeError, ValueError) as exc:
@@ -196,6 +323,14 @@ def plan_batch(path: Path, schema: SchemaContract) -> BatchPlan:
             if attribute_key in seen_attributes:
                 raise BatchValidationError(f"duplicate attribute key: {attribute_key}")
             seen_attributes.add(attribute_key)
+            searchable = _boolean(
+                attribute_input.get("searchable", False), f"{prefix}.searchable"
+            )
+            raw_value = attribute_input.get("value")
+            if searchable and not isinstance(raw_value, str):
+                raise BatchValidationError(
+                    f"{prefix}.value must be a string when searchable"
+                )
             attribute = AttributeRecord(
                 id=stable_uuid("node_attribute", *attribute_key),
                 node_id=node.id,
@@ -203,6 +338,7 @@ def plan_batch(path: Path, schema: SchemaContract) -> BatchPlan:
                 cardinality=cardinality,
                 value_json=value_json,
                 value_hash=value_hash,
+                searchable=int(searchable),
                 privacy_class=_privacy(
                     attribute_input.get("privacy_class", node.privacy_class),
                     f"{prefix}.privacy_class",
@@ -210,91 +346,162 @@ def plan_batch(path: Path, schema: SchemaContract) -> BatchPlan:
                 recorded_at=recorded_at,
             )
             attribute_records.append(attribute)
-
-            assertions = _sequence(
-                attribute_input.get("assertions", []), f"{prefix}.assertions"
+            planned_assertions, planned_bindings = _plan_assertions(
+                attribute_input.get("assertions", []),
+                f"{prefix}.assertions",
+                target_kind="node_attribute",
+                target_id=attribute.id,
+                source_id=source.id,
+                run_id=run.id,
+                default_valid_from=valid_from,
+                default_valid_to=valid_to,
+                recorded_at=recorded_at,
+                seen_assertions=seen_assertions,
             )
-            for assertion_index, assertion_value in enumerate(assertions):
-                assertion_prefix = f"{prefix}.assertions[{assertion_index}]"
-                assertion_input = _mapping(assertion_value, assertion_prefix)
-                stance = _text(
-                    assertion_input.get("stance"), f"{assertion_prefix}.stance"
-                )
-                if stance not in STANCES:
-                    raise BatchValidationError(f"{assertion_prefix}.stance is invalid")
-                basis = _text(assertion_input.get("basis"), f"{assertion_prefix}.basis")
-                if basis not in BASES:
-                    raise BatchValidationError(f"{assertion_prefix}.basis is invalid")
-                assertion_valid_from = _timestamp(
-                    assertion_input.get("valid_from", valid_from),
-                    f"{assertion_prefix}.valid_from",
-                )
-                assertion_valid_to_raw = assertion_input.get("valid_to", valid_to)
-                assertion_valid_to = (
-                    None
-                    if assertion_valid_to_raw is None
-                    else _timestamp(
-                        assertion_valid_to_raw, f"{assertion_prefix}.valid_to"
-                    )
-                )
-                method = _text(
-                    assertion_input.get("method"), f"{assertion_prefix}.method"
-                )
-                stable_key = sha256_json(
-                    [
-                        attribute.id,
-                        stance,
-                        basis,
-                        source.id,
-                        run.id,
-                        assertion_valid_from,
-                        assertion_valid_to,
-                        method,
-                    ]
-                )
-                if stable_key in seen_assertions:
-                    raise BatchValidationError(
-                        f"duplicate assertion stable key: {stable_key}"
-                    )
-                seen_assertions.add(stable_key)
-                assertion = AssertionRecord(
-                    id=stable_uuid("assertion", stable_key),
-                    attribute_id=attribute.id,
-                    stance=stance,
-                    basis=basis,
-                    confidence=_confidence(
-                        assertion_input.get("confidence", 1.0),
-                        f"{assertion_prefix}.confidence",
-                    ),
-                    review_status=_text(
-                        assertion_input.get("review_status", "unreviewed"),
-                        f"{assertion_prefix}.review_status",
-                    ),
-                    valid_from=assertion_valid_from,
-                    valid_to=assertion_valid_to,
-                    recorded_at=recorded_at,
-                    method=method,
-                    source_id=source.id,
-                    run_id=run.id,
-                    supersedes_assertion_id=_optional_text(
-                        assertion_input.get("supersedes_assertion_id"),
-                        f"{assertion_prefix}.supersedes_assertion_id",
-                    ),
-                    lifecycle="active",
-                    stable_key=stable_key,
-                )
-                assertion_records.append(assertion)
-                binding_inputs.append(
-                    (
-                        assertion,
-                        "supports" if stance == "supports" else "contradicts",
-                        assertion.confidence,
-                        assertion.review_status,
+            assertion_records.extend(planned_assertions)
+            binding_inputs.extend(planned_bindings)
+
+            if searchable:
+                assert isinstance(raw_value, str)
+                content_hash = sha256_bytes(raw_value.encode("utf-8"))
+                search_document_records.append(
+                    SearchDocumentRecord(
+                        id=stable_uuid(
+                            "search_document", attribute.id, 0, "identity-text-v1"
+                        ),
+                        target_kind="node_attribute",
+                        target_id=attribute.id,
+                        chunk_index=0,
+                        content=raw_value,
+                        content_hash=content_hash,
+                        extraction_version="identity-text-v1",
+                        privacy_class=attribute.privacy_class,
+                        lifecycle="active",
+                        recorded_at=recorded_at,
                     )
                 )
 
-    if not node_records or not attribute_records:
-        raise BatchValidationError("batch must contain at least one node and attribute")
+    if not node_records:
+        raise BatchValidationError("batch must contain at least one node")
+
+    def resolve_node_reference(value: object, field: str) -> NodeRecord:
+        reference = _mapping(value, field)
+        key = (
+            _text(reference.get("namespace"), f"{field}.namespace"),
+            _text(reference.get("type"), f"{field}.type"),
+            _text(reference.get("natural_key"), f"{field}.natural_key"),
+        )
+        try:
+            return nodes_by_key[key]
+        except KeyError as exc:
+            raise BatchValidationError(
+                f"{field} does not reference a batch node"
+            ) from exc
+
+    seen_relations: set[tuple[str, str, str, str]] = set()
+    for relation_index, relation_value in enumerate(
+        _sequence(payload.get("relations", []), "relations")
+    ):
+        prefix = f"relations[{relation_index}]"
+        relation_input = _mapping(relation_value, prefix)
+        source_node = resolve_node_reference(
+            relation_input.get("source"), f"{prefix}.source"
+        )
+        target_node = resolve_node_reference(
+            relation_input.get("target"), f"{prefix}.target"
+        )
+        relation_type = _text(relation_input.get("type"), f"{prefix}.type")
+        logical_key = _text(relation_input.get("logical_key"), f"{prefix}.logical_key")
+        relation_key = (
+            source_node.id,
+            relation_type,
+            target_node.id,
+            logical_key,
+        )
+        if relation_key in seen_relations:
+            raise BatchValidationError(f"duplicate relation key: {relation_key}")
+        seen_relations.add(relation_key)
+        relation = RelationRecord(
+            id=stable_uuid("relation", *relation_key),
+            source_node_id=source_node.id,
+            type=relation_type,
+            target_node_id=target_node.id,
+            logical_key=logical_key,
+            privacy_class=_privacy(
+                relation_input.get("privacy_class", "public"),
+                f"{prefix}.privacy_class",
+            ),
+            recorded_at=recorded_at,
+        )
+        relation_records.append(relation)
+        planned_assertions, planned_bindings = _plan_assertions(
+            relation_input.get("assertions", []),
+            f"{prefix}.assertions",
+            target_kind="relation",
+            target_id=relation.id,
+            source_id=source.id,
+            run_id=run.id,
+            default_valid_from=valid_from,
+            default_valid_to=valid_to,
+            recorded_at=recorded_at,
+            seen_assertions=seen_assertions,
+        )
+        assertion_records.extend(planned_assertions)
+        binding_inputs.extend(planned_bindings)
+
+    seen_metrics: set[tuple[str, str]] = set()
+    for metric_index, metric_value in enumerate(
+        _sequence(payload.get("metrics", []), "metrics")
+    ):
+        prefix = f"metrics[{metric_index}]"
+        metric_input = _mapping(metric_value, prefix)
+        definition_version = _text(
+            metric_input.get("definition_version"), f"{prefix}.definition_version"
+        )
+        dimensions = _mapping(
+            metric_input.get("dimensions", {}), f"{prefix}.dimensions"
+        )
+        dimensions_json = canonical_json(dimensions)
+        dimensions_hash = sha256_bytes(dimensions_json.encode("utf-8"))
+        metric_key = (definition_version, dimensions_hash)
+        if metric_key in seen_metrics:
+            raise BatchValidationError(f"duplicate metric key: {metric_key}")
+        seen_metrics.add(metric_key)
+        try:
+            value_json = canonical_json(metric_input.get("value"))
+            coverage_json = canonical_json(
+                _mapping(metric_input.get("coverage", {}), f"{prefix}.coverage")
+            )
+        except (TypeError, ValueError) as exc:
+            raise BatchValidationError(f"{prefix} contains non-canonical JSON") from exc
+        complete = _boolean(metric_input.get("complete", True), f"{prefix}.complete")
+        invalidated = _boolean(
+            metric_input.get("invalidated", False), f"{prefix}.invalidated"
+        )
+        metric_records.append(
+            MetricRecord(
+                id=stable_uuid("metric", run.id, definition_version, dimensions_hash),
+                run_id=run.id,
+                definition_version=definition_version,
+                value_json=value_json,
+                unit=_optional_text(metric_input.get("unit"), f"{prefix}.unit"),
+                numerator=_optional_number(
+                    metric_input.get("numerator"), f"{prefix}.numerator"
+                ),
+                denominator=_optional_number(
+                    metric_input.get("denominator"), f"{prefix}.denominator"
+                ),
+                dimensions_json=dimensions_json,
+                dimensions_hash=dimensions_hash,
+                method_version=_text(
+                    metric_input.get("method_version"), f"{prefix}.method_version"
+                ),
+                coverage_json=coverage_json,
+                complete=1 if complete else 0,
+                invalidated=1 if invalidated else 0,
+                recorded_at=recorded_at,
+            )
+        )
 
     evidence_input = _mapping(payload.get("evidence"), "evidence")
     evidence_relative_path = Path(_text(evidence_input.get("path"), "evidence.path"))
@@ -339,10 +546,13 @@ def plan_batch(path: Path, schema: SchemaContract) -> BatchPlan:
         privacy_class=evidence_privacy,
         recorded_at=recorded_at,
     )
-    bindings = tuple(
+    assertion_bindings = tuple(
         EvidenceBindingRecord(
             id=stable_uuid("evidence_binding", assertion.id, fragment.id, role),
+            target_kind="assertion",
+            target_id=assertion.id,
             assertion_id=assertion.id,
+            metric_id=None,
             fragment_id=fragment.id,
             role=role,
             confidence=confidence,
@@ -351,6 +561,24 @@ def plan_batch(path: Path, schema: SchemaContract) -> BatchPlan:
         )
         for assertion, role, confidence, review_status in binding_inputs
     )
+    metric_bindings = tuple(
+        EvidenceBindingRecord(
+            id=stable_uuid(
+                "evidence_binding", metric.id, fragment.id, "contextualizes"
+            ),
+            target_kind="metric",
+            target_id=metric.id,
+            assertion_id=None,
+            metric_id=metric.id,
+            fragment_id=fragment.id,
+            role="contextualizes",
+            confidence=1.0,
+            review_status="unreviewed",
+            recorded_at=recorded_at,
+        )
+        for metric in metric_records
+    )
+    bindings = (*assertion_bindings, *metric_bindings)
 
     normalized_input = dict(payload)
     normalized_evidence = dict(evidence_input)
@@ -375,6 +603,9 @@ def plan_batch(path: Path, schema: SchemaContract) -> BatchPlan:
         ),
         nodes=tuple(node_records),
         attributes=tuple(attribute_records),
+        relations=tuple(relation_records),
         assertions=tuple(assertion_records),
+        metrics=tuple(metric_records),
+        search_documents=tuple(search_document_records),
         bindings=bindings,
     )

@@ -84,7 +84,7 @@ async def run_smoke() -> dict[str, Any]:
             raise RuntimeError("MCP explanation did not verify evidence")
         if "NodeAttribute" not in schema["record_types"]:
             raise RuntimeError("schema discovery omitted implemented record types")
-        if capabilities["saved_queries"] != ["current-facts"]:
+        if "current-facts" not in capabilities["saved_queries"]:
             raise RuntimeError("capabilities discovery omitted the saved query")
         return {
             "discovered_resources": len(resources.resources),

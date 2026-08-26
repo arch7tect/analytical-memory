@@ -1,0 +1,17 @@
+{
+  "backend_profile": "sqlite",
+  "migrations": [
+    {
+      "checksum": "328ec2c72de2af17c4aeb0fa072302148497220d8051edb50c666a1d6ef1ef94",
+      "file": "001_initial.sql",
+      "target_fingerprint": "21c6a71444f7d5725703ca31cc6e410c21958009b9bed902ad213a82a65c272f",
+      "version": 1
+    },
+    {
+      "checksum": "c9459aba81bc8d2cb9a2411bc698dc8907f9e3f23c71979e8571a0bfe9ec172c",
+      "file": "002_useful_querying.sql",
+      "target_fingerprint": "5161ccab9612c1c6b4cf99a980e1c29305ccdde2acc721851d1e160d53d0c953",
+      "version": 2
+    }
+  ]
+}

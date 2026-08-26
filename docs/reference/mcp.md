@@ -44,7 +44,13 @@ definitions.
 | `memory_ingest_preview` | No | Typed preview and stable planned IDs |
 | `memory_ingest_apply` | Yes | Typed apply or exact replay result |
 | `memory_query_current_facts` | No | Bounded current-facts result |
+| `memory_query_current_slots` | No | Single- and multi-valued slot states |
+| `memory_query_current_metric` | No | Deterministic current metric selection |
+| `memory_traverse_relations` | No | Bounded relation-only traversal |
+| `memory_search_text` | No | FTS results with fact provenance |
 | `memory_explain` | No | Bounded provenance explanation |
+| `memory_explain_relation` | No | Relation assertion provenance |
+| `memory_explain_metric` | No | Metric run and evidence provenance |
 
 Ingestion tools take a `batch_path` on the server host. Apply performs the same
 schema-fingerprint validation as the CLI. Expected failures are returned as MCP

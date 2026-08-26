@@ -56,3 +56,10 @@ def application_fixture(
         memory_store=memory_store,
         schema=schema,
     )
+
+
+@pytest.fixture
+def querying_batch_path(tmp_path: Path) -> Path:
+    example = tmp_path / "querying"
+    shutil.copytree(REPOSITORY_ROOT / "examples" / "querying", example)
+    return example / "batch.json"

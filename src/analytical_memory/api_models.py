@@ -13,9 +13,12 @@ class IngestionResult(APIModel):
     attribute_ids: list[str]
     batch_id: str
     evidence_digest: str
+    metric_ids: list[str]
     node_ids: list[str]
+    relation_ids: list[str]
     run_id: str
     schema_fingerprint: str
+    search_document_ids: list[str]
 
 
 class PreviewCounts(APIModel):
@@ -23,8 +26,11 @@ class PreviewCounts(APIModel):
     attributes: int
     bindings: int
     evidence_objects: int
+    metrics: int
     nodes: int
+    relations: int
     runs: int
+    search_documents: int
     sources: int
 
 
@@ -74,6 +80,12 @@ class EvidenceReadStatus(APIModel):
     verification: Literal["verified", "corrupt", "unverified"]
 
 
+class EvidenceFragmentSummary(APIModel):
+    digest: str
+    byte_size: int
+    privacy_class: Literal["public", "private", "restricted", "forbidden"]
+
+
 class WholeObjectLocator(APIModel):
     kind: Literal["whole_object"]
 
@@ -81,6 +93,7 @@ class WholeObjectLocator(APIModel):
 class EvidenceBindingSummary(APIModel):
     binding_id: str
     extractor: ExtractorSummary
+    fragment: EvidenceFragmentSummary
     fragment_id: str
     locator: WholeObjectLocator
     locator_kind: Literal["whole_object"]
@@ -89,18 +102,38 @@ class EvidenceBindingSummary(APIModel):
     status: EvidenceReadStatus
 
 
+class SourceSummary(APIModel):
+    id: str
+    kind: str
+    locator: str
+    privacy_class: Literal["public", "private", "restricted", "forbidden"]
+
+
+class RunSummary(APIModel):
+    id: str
+    method: str
+    valid_from: str
+    valid_to: str | None
+    recorded_at: str
+
+
 class AssertionExplanation(APIModel):
     assertion_id: str
     basis: Literal["observed", "computed", "inferred", "declared"]
     confidence: float
     effective: bool
     evidence: list[EvidenceBindingSummary]
+    lifecycle: Literal["active", "superseded", "retracted"]
     method: str
     recorded_at: str
     review_status: str
+    run: RunSummary
     run_id: str
+    source: SourceSummary
     source_id: str
     stance: Literal["supports", "contradicts"]
+    stable_key: str
+    stable_key_version: Literal[1, 2]
     supersedes_assertion_id: str | None
     valid_from: str
     valid_to: str | None
@@ -117,4 +150,139 @@ class ExplanationResponse(APIModel):
     assertions: list[AssertionExplanation]
     fact: Fact
     node: NodeSummary
+    schema_fingerprint: str
+
+
+class SlotResult(APIModel):
+    node_id: str
+    namespace: str
+    node_type: str
+    natural_key: str
+    attribute_name: str
+    cardinality: Literal["single", "multi"]
+    status: Literal["missing", "current", "contested", "conflict", "values"]
+    current_value: Any
+    candidates: list[Fact]
+
+
+class CurrentSlotsResponse(APIModel):
+    query: Literal["current-slots"]
+    results: list[SlotResult]
+    schema_fingerprint: str
+
+
+class MetricResult(APIModel):
+    metric_id: str
+    run_id: str
+    source_id: str
+    definition_version: str
+    value: Any
+    unit: str | None
+    numerator: float | None
+    denominator: float | None
+    dimensions: dict[str, Any]
+    method_version: str
+    run_method: str
+    coverage: dict[str, Any]
+    recorded_at: str
+
+
+class MetricSelectionCoverage(APIModel):
+    complete: bool
+    selected_count: int
+
+
+class CurrentMetricResponse(APIModel):
+    query: Literal["current-metric"]
+    definition_version: str
+    dimensions: dict[str, Any]
+    metric: MetricResult | None
+    coverage: MetricSelectionCoverage
+    schema_fingerprint: str
+
+
+class RelationNode(APIModel):
+    id: str
+    namespace: str
+    type: str
+    natural_key: str
+
+
+class RelationFact(APIModel):
+    relation_id: str
+    type: str
+    logical_key: str
+    source: RelationNode
+    target: RelationNode
+    state: Literal["supported", "contested", "contradicted", "unasserted"]
+    privacy_class: Literal["public", "private", "restricted", "forbidden"]
+
+
+class TraversalNode(RelationNode):
+    depth: int
+
+
+class TraversalEdge(RelationFact):
+    depth: int
+
+
+class TraversalResponse(APIModel):
+    query: Literal["traverse-relations"]
+    start_node_id: str
+    direction: Literal["outbound", "inbound", "both"]
+    max_depth: int
+    states: list[str]
+    nodes: list[TraversalNode]
+    edges: list[TraversalEdge]
+    truncated: bool
+    schema_fingerprint: str
+
+
+class RelationExplanationResponse(APIModel):
+    fact: RelationFact
+    assertions: list[AssertionExplanation]
+    schema_fingerprint: str
+
+
+class MetricExplanationResult(MetricResult):
+    complete: bool
+    invalidated: bool
+
+
+class MetricExplanationResponse(APIModel):
+    metric: MetricExplanationResult
+    evidence: list[EvidenceBindingSummary]
+    source: SourceSummary
+    run: RunSummary
+    schema_fingerprint: str
+
+
+class SearchCoverage(APIModel):
+    eligible_count: int
+    indexed_count: int
+    complete: bool
+
+
+class SearchProvenance(APIModel):
+    assertions: list[AssertionExplanation]
+    node: NodeSummary
+
+
+class SearchMatch(APIModel):
+    document_id: str
+    target_kind: Literal["node_attribute"]
+    target_id: str
+    content: str
+    content_hash: str
+    privacy_class: Literal["public", "private", "restricted", "forbidden"]
+    rank: float
+    fact: Fact
+    provenance: SearchProvenance
+
+
+class SearchResponse(APIModel):
+    query: Literal["search-text"]
+    text: str
+    results: list[SearchMatch]
+    coverage: SearchCoverage
     schema_fingerprint: str

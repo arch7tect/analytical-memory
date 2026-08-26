@@ -21,3 +21,7 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy src tests
+      - run: uv run python scripts/compile_schema.py --check
+      - run: uv run python scripts/smoke.py
+      - run: uv run python scripts/mcp_smoke.py
+      - run: uv run python scripts/querying_smoke.py

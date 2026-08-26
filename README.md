@@ -33,12 +33,17 @@ Run the complete synthetic smoke path without retaining state:
 ```console
 uv run python scripts/smoke.py
 uv run python scripts/mcp_smoke.py
+uv run python scripts/querying_smoke.py
 ```
 
 The MCP smoke path launches the `memory-mcp` stdio server as a subprocess,
 discovers its schema and capabilities, and repeats preview, apply, query, and
 explain through a real MCP client. See the [MCP reference](docs/reference/mcp.md)
 for resources, tools, environment variables, and boundaries.
+
+The [querying reference](docs/reference/querying.md) covers slot semantics,
+relation traversal, immutable metrics, declared full-text documents, and the
+metadata compiler.
 
 ## Development
 

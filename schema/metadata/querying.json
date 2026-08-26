@@ -1,0 +1,48 @@
+{
+  "metric": {
+    "current_selection": ["run_recorded_at_desc", "run_id_desc", "metric_id_desc"],
+    "dimensions": "canonical_json_object"
+  },
+  "saved_queries": {
+    "current-facts": {
+      "ordering": ["namespace", "node_type", "natural_key", "attribute_name", "attribute_id"],
+      "result": [
+        "attribute_id",
+        "namespace",
+        "node_type",
+        "natural_key",
+        "attribute_name",
+        "value",
+        "state",
+        "privacy_class"
+      ]
+    },
+    "current-metric": {
+      "parameters": ["definition_version", "dimensions"],
+      "result": ["metric", "coverage"]
+    },
+    "current-slots": {
+      "ordering": ["namespace", "node_type", "natural_key", "attribute_name", "node_id"],
+      "candidate_ordering": ["namespace", "node_type", "natural_key", "attribute_name", "attribute_id"],
+      "result": ["node_id", "attribute_name", "cardinality", "status", "candidates"]
+    },
+    "search-text": {
+      "parameters": ["query", "limit"],
+      "result": ["results", "coverage"]
+    },
+    "traverse-relations": {
+      "parameters": ["start_node_id", "relation_types", "direction", "max_depth", "limit", "states"],
+      "ordering": ["depth", "source_namespace", "source_natural_key", "relation_type", "target_namespace", "target_natural_key", "logical_key", "relation_id"],
+      "result": ["nodes", "edges", "truncated"]
+    }
+  },
+  "search_document": {
+    "eligibility": {
+      "explicit_batch_flag": "searchable",
+      "target_kinds": ["node_attribute"],
+      "value_types": ["string"]
+    },
+    "coverage": "active_indexed_documents_vs_searchable_attributes",
+    "fts_engine": "sqlite-fts5"
+  }
+}

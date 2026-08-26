@@ -46,6 +46,9 @@ def _all_table_counts(database: Path) -> dict[str, int]:
         "evidence_object",
         "evidence_fragment",
         "evidence_binding",
+        "relation",
+        "metric",
+        "search_document",
     )
     with sqlite3.connect(database) as connection:
         return {
@@ -114,7 +117,42 @@ class FailingMemoryStore(MemoryStore):
     def current_facts(self) -> list[dict[str, Any]]:
         return []
 
+    def current_slots(self) -> list[dict[str, Any]]:
+        return []
+
+    def current_relations(self) -> list[dict[str, Any]]:
+        return []
+
+    def traverse_relations(
+        self,
+        start_node_id: str,
+        *,
+        relation_types: list[str] | None,
+        direction: str,
+        max_depth: int,
+        limit: int,
+        states: list[str],
+    ) -> dict[str, Any]:
+        raise AssertionError("not used")
+
+    def get_node(self, node_id: str) -> dict[str, Any]:
+        raise AssertionError("not used")
+
+    def current_metric(
+        self, definition_version: str, dimensions_json: str
+    ) -> dict[str, Any] | None:
+        return None
+
+    def search_text(self, query: str, limit: int) -> dict[str, Any]:
+        return {"results": [], "coverage": {}}
+
     def explain_attribute(self, attribute_id: str) -> dict[str, Any]:
+        raise AssertionError("not used")
+
+    def explain_relation(self, relation_id: str) -> dict[str, Any]:
+        raise AssertionError("not used")
+
+    def explain_metric(self, metric_id: str) -> dict[str, Any]:
         raise AssertionError("not used")
 
     def integrity(self) -> dict[str, Any]:
@@ -156,10 +194,25 @@ def test_sqlite_failure_rolls_back_every_canonical_row(
     invalid_assertion = replace(plan.assertions[0], stance="invalid")
     invalid_plan = replace(plan, assertions=(invalid_assertion, *plan.assertions[1:]))
 
-    with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"):
+    with pytest.raises(BatchValidationError, match="storage constraints"):
         fixture.memory_store.apply(invalid_plan)
 
     assert set(_all_table_counts(fixture.database).values()) == {0}
     status = fixture.evidence_store.stat(plan.evidence.object.digest)
     assert status.availability == "present"
     assert status.verification == "verified"
+
+
+def test_cross_batch_cardinality_conflict_is_a_domain_error(
+    application_fixture: ApplicationFixture,
+) -> None:
+    fixture = application_fixture
+    fixture.application.initialize()
+    fixture.application.apply(fixture.batch_path)
+    document = json.loads(fixture.batch_path.read_text(encoding="utf-8"))
+    document["idempotency_key"] = "quickstart-cardinality-conflict"
+    document["nodes"][0]["attributes"][0]["cardinality"] = "multi"
+    fixture.batch_path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(BatchValidationError, match="cardinality conflict"):
+        fixture.application.apply(fixture.batch_path)

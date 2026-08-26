@@ -46,6 +46,18 @@ class AttributeRecord:
     cardinality: str
     value_json: str
     value_hash: str
+    searchable: int
+    privacy_class: str
+    recorded_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class RelationRecord:
+    id: str
+    source_node_id: str
+    type: str
+    target_node_id: str
+    logical_key: str
     privacy_class: str
     recorded_at: str
 
@@ -53,7 +65,10 @@ class AttributeRecord:
 @dataclass(frozen=True, slots=True)
 class AssertionRecord:
     id: str
-    attribute_id: str
+    target_kind: str
+    target_id: str
+    attribute_id: str | None
+    relation_id: str | None
     stance: str
     basis: str
     confidence: float
@@ -67,6 +82,39 @@ class AssertionRecord:
     supersedes_assertion_id: str | None
     lifecycle: str
     stable_key: str
+    stable_key_version: int
+
+
+@dataclass(frozen=True, slots=True)
+class MetricRecord:
+    id: str
+    run_id: str
+    definition_version: str
+    value_json: str
+    unit: str | None
+    numerator: float | None
+    denominator: float | None
+    dimensions_json: str
+    dimensions_hash: str
+    method_version: str
+    coverage_json: str
+    complete: int
+    invalidated: int
+    recorded_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class SearchDocumentRecord:
+    id: str
+    target_kind: str
+    target_id: str
+    chunk_index: int
+    content: str
+    content_hash: str
+    extraction_version: str
+    privacy_class: str
+    lifecycle: str
+    recorded_at: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,7 +144,10 @@ class EvidenceFragmentRecord:
 @dataclass(frozen=True, slots=True)
 class EvidenceBindingRecord:
     id: str
-    assertion_id: str
+    target_kind: str
+    target_id: str
+    assertion_id: str | None
+    metric_id: str | None
     fragment_id: str
     role: str
     confidence: float
@@ -123,7 +174,10 @@ class BatchPlan:
     evidence: PreparedEvidence
     nodes: tuple[NodeRecord, ...]
     attributes: tuple[AttributeRecord, ...]
+    relations: tuple[RelationRecord, ...]
     assertions: tuple[AssertionRecord, ...]
+    metrics: tuple[MetricRecord, ...]
+    search_documents: tuple[SearchDocumentRecord, ...]
     bindings: tuple[EvidenceBindingRecord, ...]
 
     def result(self) -> dict[str, Any]:
@@ -131,9 +185,12 @@ class BatchPlan:
             "attribute_ids": [record.id for record in self.attributes],
             "batch_id": self.id,
             "evidence_digest": self.evidence.object.digest,
+            "metric_ids": [record.id for record in self.metrics],
             "node_ids": [record.id for record in self.nodes],
+            "relation_ids": [record.id for record in self.relations],
             "run_id": self.run.id,
             "schema_fingerprint": self.schema_fingerprint,
+            "search_document_ids": [record.id for record in self.search_documents],
         }
 
     def preview(self) -> dict[str, Any]:
@@ -143,8 +200,11 @@ class BatchPlan:
                 "attributes": len(self.attributes),
                 "bindings": len(self.bindings),
                 "evidence_objects": 1,
+                "metrics": len(self.metrics),
                 "nodes": len(self.nodes),
+                "relations": len(self.relations),
                 "runs": 1,
+                "search_documents": len(self.search_documents),
                 "sources": 1,
             },
             "plan": self.result(),

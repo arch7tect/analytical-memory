@@ -27,6 +27,9 @@ def _table_counts(database: Path) -> dict[str, int]:
         "evidence_object",
         "evidence_fragment",
         "evidence_binding",
+        "relation",
+        "metric",
+        "search_document",
     )
     with sqlite3.connect(database) as connection:
         return {
@@ -46,8 +49,11 @@ def test_preview_is_non_writing(application_fixture: ApplicationFixture) -> None
         "attributes": 4,
         "bindings": 4,
         "evidence_objects": 1,
+        "metrics": 0,
         "nodes": 1,
+        "relations": 0,
         "runs": 1,
+        "search_documents": 0,
         "sources": 1,
     }
     assert not application_fixture.database.exists()
@@ -76,6 +82,9 @@ def test_apply_query_explain_and_exact_replay(
         "evidence_object": 1,
         "evidence_fragment": 1,
         "evidence_binding": 4,
+        "relation": 0,
+        "metric": 0,
+        "search_document": 0,
     }
 
     golden = _read_json(REPOSITORY_ROOT / "tests" / "golden" / "current_facts.json")
@@ -99,7 +108,27 @@ def test_apply_query_explain_and_exact_replay(
         "foreign_key_errors": 0,
         "integrity": ["ok"],
         "ok": True,
-        "schema_version": 1,
+        "schema_version": 2,
+        "migrations": [
+            {
+                "version": 1,
+                "checksum": (
+                    "328ec2c72de2af17c4aeb0fa072302148497220d8051edb50c666a1d6ef1ef94"
+                ),
+                "target_fingerprint": (
+                    "21c6a71444f7d5725703ca31cc6e410c21958009b9bed902ad213a82a65c272f"
+                ),
+            },
+            {
+                "version": 2,
+                "checksum": (
+                    "c9459aba81bc8d2cb9a2411bc698dc8907f9e3f23c71979e8571a0bfe9ec172c"
+                ),
+                "target_fingerprint": (
+                    "5161ccab9612c1c6b4cf99a980e1c29305ccdde2acc721851d1e160d53d0c953"
+                ),
+            },
+        ],
     }
 
 

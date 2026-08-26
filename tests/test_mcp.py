@@ -63,7 +63,13 @@ async def test_discovery_and_tools_match_cli_contracts(
         )
         assert isinstance(capabilities_resource.contents[0], TextResourceContents)
         capabilities = json.loads(capabilities_resource.contents[0].text)
-        assert capabilities["saved_queries"] == ["current-facts"]
+        assert capabilities["saved_queries"] == [
+            "current-facts",
+            "current-metric",
+            "current-slots",
+            "search-text",
+            "traverse-relations",
+        ]
         assert capabilities["limits"]["returned_query_items"] == 1_000
         assert capabilities["transports"]["stdio_mcp"]["enabled"] is True
 
@@ -71,9 +77,15 @@ async def test_discovery_and_tools_match_cli_contracts(
         tools_by_name = {tool.name: tool for tool in tools.tools}
         assert set(tools_by_name) == {
             "memory_explain",
+            "memory_explain_metric",
+            "memory_explain_relation",
             "memory_ingest_apply",
             "memory_ingest_preview",
             "memory_query_current_facts",
+            "memory_query_current_metric",
+            "memory_query_current_slots",
+            "memory_search_text",
+            "memory_traverse_relations",
         }
         assert tools_by_name["memory_ingest_preview"].input_schema["required"] == [
             "batch_path"
@@ -173,6 +185,105 @@ async def test_local_stdio_server_is_discoverable(
             "memory_ingest_preview", {"batch_path": str(fixture.batch_path)}
         )
 
-    assert len(tools.tools) == 4
+    assert len(tools.tools) == 10
     assert len(resources.resources) == 3
     assert _tool_json(preview)["writes"] is False
+
+
+@pytest.mark.anyio
+async def test_milestone_two_tools_match_cli_shapes(
+    application_fixture: ApplicationFixture,
+    querying_batch_path: Path,
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    fixture = application_fixture
+    fixture.application.initialize()
+    plan = fixture.application.plan(querying_batch_path)
+    fixture.application.apply(querying_batch_path)
+
+    async with Client(create_mcp_server(fixture.application)) as client:
+        mcp_slots = _tool_json(await client.call_tool("memory_query_current_slots", {}))
+        mcp_metric = _tool_json(
+            await client.call_tool(
+                "memory_query_current_metric",
+                {
+                    "definition_version": "example.count.v1",
+                    "dimensions": {"scope": "all"},
+                },
+            )
+        )
+        mcp_traversal = _tool_json(
+            await client.call_tool(
+                "memory_traverse_relations",
+                {"start_node_id": plan.nodes[0].id, "max_depth": 2},
+            )
+        )
+        mcp_search = _tool_json(
+            await client.call_tool(
+                "memory_search_text", {"query": "connected", "limit": 10}
+            )
+        )
+        mcp_relation_explanation = _tool_json(
+            await client.call_tool(
+                "memory_explain_relation", {"relation_id": plan.relations[0].id}
+            )
+        )
+        mcp_metric_explanation = _tool_json(
+            await client.call_tool(
+                "memory_explain_metric", {"metric_id": plan.metrics[0].id}
+            )
+        )
+
+    cli_shared = [
+        "--database",
+        str(tmp_path / "m2-cli.db"),
+        "--evidence-root",
+        str(tmp_path / "m2-cli-evidence"),
+    ]
+    _cli_json(capsys, [*cli_shared, "init"])
+    _cli_json(
+        capsys,
+        [*cli_shared, "ingest", "apply", str(querying_batch_path)],
+    )
+    cli_slots = _cli_json(capsys, [*cli_shared, "query", "current-slots"])
+    cli_metric = _cli_json(
+        capsys,
+        [
+            *cli_shared,
+            "query",
+            "current-metric",
+            "--definition-version",
+            "example.count.v1",
+            "--dimensions",
+            '{"scope":"all"}',
+        ],
+    )
+    cli_traversal = _cli_json(
+        capsys,
+        [*cli_shared, "traverse", plan.nodes[0].id, "--max-depth", "2"],
+    )
+    cli_search = _cli_json(
+        capsys, [*cli_shared, "search", "connected", "--limit", "10"]
+    )
+    cli_relation_explanation = _cli_json(
+        capsys,
+        [
+            *cli_shared,
+            "explain",
+            plan.relations[0].id,
+            "--kind",
+            "relation",
+        ],
+    )
+    cli_metric_explanation = _cli_json(
+        capsys,
+        [*cli_shared, "explain", plan.metrics[0].id, "--kind", "metric"],
+    )
+
+    assert mcp_slots == cli_slots
+    assert mcp_metric == cli_metric
+    assert mcp_traversal == cli_traversal
+    assert mcp_search == cli_search
+    assert mcp_relation_explanation == cli_relation_explanation
+    assert mcp_metric_explanation == cli_metric_explanation
