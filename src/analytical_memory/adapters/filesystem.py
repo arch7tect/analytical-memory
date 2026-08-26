@@ -10,6 +10,7 @@ from pathlib import Path
 from analytical_memory.canonical import sha256_bytes
 from analytical_memory.domain import (
     EvidenceObjectRecord,
+    EvidencePutResult,
     EvidenceStatus,
     EvidenceStoreStatus,
 )
@@ -33,10 +34,57 @@ class FileEvidenceStore(EvidenceStore):
         return self.root / "objects" / "sha256" / digest[:2] / digest
 
     def put(self, source: Path, expected: EvidenceObjectRecord) -> EvidenceStatus:
+        return self.put_tracked(source, expected).status
+
+    def put_tracked(
+        self, source: Path, expected: EvidenceObjectRecord
+    ) -> EvidencePutResult:
         if source.stat().st_size > MAX_EVIDENCE_INGEST_BYTES:
             raise ValueError("evidence object exceeds the local ingest limit")
-        data = source.read_bytes()
-        return self.put_bytes(data, expected)
+        self.initialize()
+        destination = self.object_path(expected.digest)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists():
+            status = self.stat(expected.digest)
+            if (
+                status.verification != "verified"
+                or status.byte_size != expected.byte_size
+            ):
+                raise ValueError("existing evidence object failed verification")
+            return EvidencePutResult(status=status, created=False)
+
+        file_descriptor, temporary_name = tempfile.mkstemp(dir=self.root / ".tmp")
+        temporary_path = Path(temporary_name)
+        hasher = hashlib.sha256()
+        byte_size = 0
+        created = False
+        try:
+            with (
+                source.open("rb") as input_stream,
+                os.fdopen(file_descriptor, "wb") as output_stream,
+            ):
+                while chunk := input_stream.read(1_048_576):
+                    hasher.update(chunk)
+                    byte_size += len(chunk)
+                    output_stream.write(chunk)
+                output_stream.flush()
+                os.fsync(output_stream.fileno())
+            if hasher.hexdigest() != expected.digest or byte_size != expected.byte_size:
+                raise ValueError("evidence changed after planning")
+            os.chmod(temporary_path, 0o600)
+            try:
+                os.link(temporary_path, destination)
+                created = True
+            except FileExistsError:
+                created = False
+        finally:
+            temporary_path.unlink(missing_ok=True)
+        status = self.stat(expected.digest)
+        if status.verification != "verified" or status.byte_size != expected.byte_size:
+            if created:
+                destination.unlink(missing_ok=True)
+            raise ValueError("installed evidence object failed verification")
+        return EvidencePutResult(status=status, created=created)
 
     def put_bytes(self, data: bytes, expected: EvidenceObjectRecord) -> EvidenceStatus:
         if len(data) > MAX_EVIDENCE_INGEST_BYTES:
@@ -97,6 +145,9 @@ class FileEvidenceStore(EvidenceStore):
         path.unlink()
         return True
 
+    def remove(self, digest: str) -> bool:
+        return self.retire(digest)
+
     def stat(self, digest: str) -> EvidenceStatus:
         path = self.object_path(digest)
         if not path.is_file():
@@ -125,3 +176,26 @@ class FileEvidenceStore(EvidenceStore):
             provider="local-filesystem",
             initialized=(self.root / "objects" / "sha256").is_dir(),
         )
+
+    def list_digests(self, limit: int) -> tuple[list[str], bool]:
+        if limit < 1:
+            raise ValueError("limit must be >= 1")
+        object_root = self.root / "objects" / "sha256"
+        if not object_root.is_dir():
+            return [], False
+        digests: list[str] = []
+        for prefix in sorted(object_root.iterdir()):
+            if not prefix.is_dir() or len(prefix.name) != 2:
+                continue
+            for path in sorted(prefix.iterdir()):
+                digest = path.name
+                if (
+                    path.is_file()
+                    and len(digest) == 64
+                    and digest.startswith(prefix.name)
+                    and all(character in "0123456789abcdef" for character in digest)
+                ):
+                    digests.append(digest)
+                    if len(digests) > limit:
+                        return digests[:limit], True
+        return digests, False

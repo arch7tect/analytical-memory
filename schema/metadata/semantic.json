@@ -8,7 +8,7 @@
       "preprocessing_version": "unicode-nfc-lines-v1",
       "provider": "openai"
     },
-    "privacy_enforcement": "profile-and-provider-ceiling",
+    "privacy_enforcement": "public-only-external-provider",
     "profile_scope": "node_attribute_name"
   }
 }

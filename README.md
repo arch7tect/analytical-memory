@@ -1,12 +1,30 @@
 # Analytical Memory
 
-Analytical Memory is an evidence-backed, local-first memory for durable facts,
-provenance, and reproducible analysis. The first working slice uses SQLite for
-canonical records and a content-addressed local filesystem for raw evidence.
+Analytical Memory is an evidence-backed, local-first memory whose ontology grows
+with the data it receives. Clients can discover the current ontology, import new
+object types incrementally, create explicit graph relations, run relational and
+graph queries through a backend-neutral JSON Query IR, and trace current values
+to their source and raw evidence.
 
-The application core depends on explicit abstract interfaces. Storage adapters
-implement those interfaces through inheritance, keeping the path open for a
-PostgreSQL backend without coupling use cases to SQLite.
+SQLite stores canonical records and a content-addressed local filesystem stores
+raw evidence. The application depends on explicit abstract interfaces so a
+PostgreSQL adapter can replace SQLite without changing the public use cases.
+
+## Current status
+
+Milestones 0 through 5 are implemented. M5 is a clean-break contract with:
+
+- streaming, atomic JSONL patch/upsert;
+- optional entity declarations and a data-derived current ontology;
+- explicit one-step joins between independently loaded datasets;
+- read-only JSON Query IR v1;
+- one current `NodeAttribute` or `Relation` with direct provenance;
+- analytical values written through the same attribute shape;
+- `public` and `private` privacy, with public-only export and external embedding;
+- local evidence, verification, snapshots, and public sanitized export.
+
+There are no Finding or Assertion records in M5. Development databases created
+with the earlier contract are reinitialized by migration 005.
 
 ## Quickstart
 
@@ -15,57 +33,60 @@ Python 3.12 or newer and [uv](https://docs.astral.sh/uv/) are required.
 ```console
 uv sync --all-groups --locked
 uv run memory init
-uv run memory ingest preview examples/quickstart/batch.json
-uv run memory ingest apply examples/quickstart/batch.json
-uv run memory query current-facts
-uv run memory explain 51a612e1-68be-566e-8549-b3ba9f0becfb
-uv run memory status
-uv run memory capabilities
-uv run memory validate
+uv run memory schema show
 ```
 
-The commands write local state under the ignored `.local/` directory. Preview
-does not write, repeated apply is idempotent, current-facts returns all four
-fact states, and explain verifies the referenced evidence object by SHA-256.
+Use the `schema_fingerprint` returned by `schema show` as
+`<contract-fingerprint>` below:
 
-Semantic retrieval uses the OpenAI embeddings API. Copy `.env.template` to the
-gitignored `.env`, set `OPENAI_API_KEY`, ingest searchable attributes, then run:
+```console
+uv run memory jsonl import examples/quickstart/sessions.jsonl \
+  --entity-type example.Session \
+  --key '[{"field":"id","type":"string"}]' \
+  --contract-fingerprint <contract-fingerprint>
+
+uv run memory jsonl import examples/quickstart/messages.jsonl \
+  --entity-type example.SessionMessage \
+  --key '[{"field":"id","type":"string"}]' \
+  --contract-fingerprint <contract-fingerprint>
+
+uv run memory ontology describe
+
+uv run memory join materialize examples/quickstart/join.json \
+  --contract-fingerprint <contract-fingerprint>
+
+uv run memory query execute --document examples/quickstart/query.json
+```
+
+The commands write local state under the ignored `.local/` directory. Import
+keys are lookup expressions, not persistent identity records. Repeating the
+same import is idempotent; a later record patches only the fields it contains.
+
+## MCP
+
+Initialize the selected stores and start the local stdio server:
+
+```console
+uv run memory init
+uv run memory-mcp
+```
+
+An MCP client should first read `memory://schema/current`,
+`memory://schema/ontology/current`, and `memory://schema/query-ir/current`.
+It can then import JSONL files, declare optional constraints, materialize joins,
+write analytical attributes, and execute Query IR without direct database
+access. See the [MCP reference](docs/reference/mcp.md).
+
+## Semantic retrieval
+
+Copy `.env.template` to the ignored `.env` and set `OPENAI_API_KEY`. Only public
+search documents can be sent to the configured external embedding provider.
 
 ```console
 uv run memory embedding create-profile description
 uv run memory embedding rebuild <profile-id>
 uv run memory search "related text" --semantic-profile <profile-id>
 ```
-
-The default provider policy sends `public`, `private`, and `restricted` text.
-Only content explicitly marked `forbidden` is ineligible. Set
-`ANALYTICAL_MEMORY_EMBEDDING_PRIVACY` to a lower ceiling when needed.
-
-Run the complete synthetic smoke path without retaining state:
-
-```console
-uv run python scripts/smoke.py
-uv run python scripts/mcp_smoke.py
-uv run python scripts/querying_smoke.py
-uv run python scripts/portability_smoke.py
-uv run python scripts/semantic_smoke.py
-```
-
-The MCP smoke path launches the `memory-mcp` stdio server as a subprocess,
-discovers its schema and capabilities, and repeats preview, apply, query, and
-explain through a real MCP client. See the [MCP reference](docs/reference/mcp.md)
-for resources, tools, environment variables, and boundaries.
-
-The [querying reference](docs/reference/querying.md) covers slot semantics,
-relation traversal, immutable metrics, declared full-text documents, and the
-metadata compiler.
-
-The [evidence portability reference](docs/reference/evidence-portability.md)
-covers deterministic fragments, bounded reads, verification history, retention
-plans, private snapshots, restore, and separate sanitized exports.
-
-The [semantic retrieval reference](docs/reference/semantic-retrieval.md) covers
-profiles, rebuilds, privacy ceilings, exact ranking, and secret configuration.
 
 ## Development
 
@@ -74,10 +95,12 @@ uv run pytest
 uv run ruff check .
 uv run ruff format --check .
 uv run mypy src tests
+uv run python scripts/compile_schema.py --check
 ```
 
-See the [system design](docs/design.md) and
-[implementation plan](docs/implementation-plan.md).
+See the [system design](docs/design.md),
+[implementation plan](docs/implementation-plan.md), and
+[ADR 0001](docs/decisions/0001-dynamic-ontology-query-ir.md).
 
 ## License
 

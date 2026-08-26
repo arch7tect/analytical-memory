@@ -14,85 +14,52 @@ from analytical_memory.errors import StoreNotInitializedError
 from .conftest import REPOSITORY_ROOT
 
 
-def test_version_one_database_is_upgraded_and_backfilled(tmp_path: Path) -> None:
-    database = tmp_path / "version-one.db"
-    initial = REPOSITORY_ROOT / "migrations" / "sqlite" / "001_initial.sql"
-    with sqlite3.connect(database) as connection:
-        connection.executescript(initial.read_text(encoding="utf-8"))
-        connection.executescript(
-            """
-            INSERT INTO ingestion_batch VALUES (
-                'batch', 'legacy-batch', 'input-hash', 'legacy-schema', '{}',
-                '2000-01-01T00:00:00Z'
-            );
-            INSERT INTO source VALUES (
-                'source', 'legacy-source', 'synthetic', 'example://legacy',
-                'public', '2000-01-01T00:00:00Z'
-            );
-            INSERT INTO analytical_run VALUES (
-                'run', 'legacy-run', 'batch', 'source',
-                '2000-01-01T00:00:00Z', NULL, 'legacy-method',
-                '2000-01-01T00:00:00Z'
-            );
-            INSERT INTO node VALUES (
-                'node', 'example', 'record', 'legacy-node', NULL, 'public',
-                '2000-01-01T00:00:00Z'
-            );
-            INSERT INTO node_attribute VALUES (
-                'attribute', 'node', 'status', 'single', '"value"', 'value-hash',
-                'public', '2000-01-01T00:00:00Z'
-            );
-            INSERT INTO assertion VALUES (
-                'assertion', 'attribute', 'supports', 'observed', 1.0,
-                'reviewed', '2000-01-01T00:00:00Z', NULL,
-                '2000-01-01T00:00:00Z', 'legacy-method', 'source', 'run', NULL,
-                'active', 'assertion-stable-key'
-            );
-            INSERT INTO evidence_object VALUES (
-                'object',
-                '0000000000000000000000000000000000000000000000000000000000000000',
-                0, 'text/plain', 'public', '2000-01-01T00:00:00Z'
-            );
-            INSERT INTO evidence_fragment VALUES (
-                'fragment', 'object', 'whole_object', '{"kind":"whole_object"}',
-                'identity', '1', 0,
-                '0000000000000000000000000000000000000000000000000000000000000000',
-                'public', '2000-01-01T00:00:00Z'
-            );
-            INSERT INTO evidence_binding VALUES (
-                'binding', 'assertion', 'fragment', 'supports', 1.0, 'reviewed',
-                '2000-01-01T00:00:00Z'
-            );
-            """
-        )
+def test_fresh_database_reaches_m5_schema(tmp_path: Path) -> None:
+    database = tmp_path / "memory.db"
     store = SqliteMemoryStore(database)
 
     store.initialize()
-    integrity = store.integrity()
 
-    assert integrity["schema_version"] == 4
-    assert [item["version"] for item in integrity["migrations"]] == [1, 2, 3, 4]
-    assert integrity["migrations"][0]["checksum"] == (
-        "328ec2c72de2af17c4aeb0fa072302148497220d8051edb50c666a1d6ef1ef94"
-    )
-    assert store.current_facts()[0]["state"] == "supported"
+    integrity = store.integrity()
+    assert integrity["schema_version"] == 5
+    assert [item["version"] for item in integrity["migrations"]] == [1, 2, 3, 4, 5]
     with sqlite3.connect(database) as connection:
-        searchable, stable_key_version = connection.execute(
-            """
-            SELECT node_attribute.searchable, assertion.stable_key_version
-            FROM node_attribute
-            JOIN assertion ON assertion.attribute_id = node_attribute.id
-            WHERE node_attribute.id = 'attribute'
-            """
-        ).fetchone()
-    assert searchable == 0
-    assert stable_key_version == 1
-    assert (
-        store.explain_attribute("attribute")["assertions"][0]["evidence"][0][
-            "binding_id"
-        ]
-        == "binding"
-    )
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+    assert {"entity_declaration", "observed_field", "ontology_declaration"} <= tables
+    assert "assertion" not in tables
+    assert "evidence_binding" not in tables
+
+
+def test_m5_clean_break_reinitializes_legacy_current_tables(tmp_path: Path) -> None:
+    database = tmp_path / "legacy.db"
+    migrations = REPOSITORY_ROOT / "migrations" / "sqlite"
+    with sqlite3.connect(database) as connection:
+        for version in range(1, 5):
+            name = next(migrations.glob(f"{version:03d}_*.sql"))
+            connection.executescript(name.read_text(encoding="utf-8"))
+        connection.execute(
+            "INSERT INTO node VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                "legacy",
+                "legacy",
+                "Item",
+                "legacy-key",
+                None,
+                "public",
+                "2000-01-01T00:00:00Z",
+            ),
+        )
+
+    SqliteMemoryStore(database).initialize()
+
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert connection.execute("SELECT COUNT(*) FROM node").fetchone()[0] == 0
 
 
 def test_changed_migration_is_rejected_before_initialization(tmp_path: Path) -> None:
@@ -101,10 +68,9 @@ def test_changed_migration_is_rejected_before_initialization(tmp_path: Path) -> 
     shutil.copytree(source, migrations)
     initial = migrations / "001_initial.sql"
     initial.write_text(initial.read_text(encoding="utf-8") + "\n-- changed\n")
-    store = SqliteMemoryStore(tmp_path / "memory.db", migrations)
 
     with pytest.raises(StoreNotInitializedError, match="checksum mismatch"):
-        store.initialize()
+        SqliteMemoryStore(tmp_path / "memory.db", migrations).initialize()
 
 
 def test_manifest_targets_current_logical_fingerprint() -> None:
@@ -151,44 +117,3 @@ def test_failed_migration_rolls_back_its_partial_schema(tmp_path: Path) -> None:
         ).fetchone()
     assert version == 1
     assert partial is None
-
-
-def test_failed_evidence_migration_preserves_version_two_state(tmp_path: Path) -> None:
-    database = tmp_path / "version-two.db"
-    source = REPOSITORY_ROOT / "migrations" / "sqlite"
-    migrations = tmp_path / "migrations"
-    shutil.copytree(source, migrations)
-    with sqlite3.connect(database) as connection:
-        connection.executescript(
-            (source / "001_initial.sql").read_text(encoding="utf-8")
-        )
-        connection.execute("PRAGMA foreign_keys = OFF")
-        connection.executescript(
-            (source / "002_useful_querying.sql").read_text(encoding="utf-8")
-        )
-    third = migrations / "003_evidence_lifecycle.sql"
-    third.write_text(
-        third.read_text(encoding="utf-8")
-        + "\nCREATE TABLE evidence_partial_marker (id INTEGER);\n"
-        + "SELECT missing_function();\n",
-        encoding="utf-8",
-    )
-    manifest_path = migrations / "manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["migrations"][2]["checksum"] = sha256_bytes(third.read_bytes())
-    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-
-    with pytest.raises(StoreNotInitializedError, match="migration failed"):
-        SqliteMemoryStore(database, migrations).initialize()
-
-    with sqlite3.connect(database) as connection:
-        version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        tables = {
-            row[0]
-            for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-            )
-        }
-    assert version == 2
-    assert "evidence_acquisition" not in tables
-    assert "evidence_partial_marker" not in tables

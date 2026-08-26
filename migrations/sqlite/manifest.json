@@ -24,6 +24,12 @@
       "file": "004_semantic_retrieval.sql",
       "target_fingerprint": "5740c0e445a6b4bf215e6545618ef61dd34382052a1b886e2f7501a451446de0",
       "version": 4
+    },
+    {
+      "checksum": "50d5b2b5b3f4dab97228a97d9cc30246d361f16ce45ac29643f3a2d88b4615d5",
+      "file": "005_dynamic_ontology.sql",
+      "target_fingerprint": "c8d44a0a4ea59e870bd5475f247eb28f1690538c735f0e362a71651289cfd7c3",
+      "version": 5
     }
   ]
 }

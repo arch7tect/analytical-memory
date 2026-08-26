@@ -42,18 +42,80 @@ def _parser() -> argparse.ArgumentParser:
     subcommands.add_parser("validate")
     subcommands.add_parser("capabilities")
 
-    ingest = subcommands.add_parser("ingest")
-    ingest_commands = ingest.add_subparsers(dest="ingest_command", required=True)
-    for name in ("preview", "apply"):
-        command = ingest_commands.add_parser(name)
-        command.add_argument("batch", type=Path)
+    jsonl_command = subcommands.add_parser("jsonl")
+    jsonl_commands = jsonl_command.add_subparsers(dest="jsonl_command", required=True)
+    jsonl_import = jsonl_commands.add_parser("import")
+    jsonl_import.add_argument("source", type=Path)
+    jsonl_import.add_argument("--entity-type", required=True)
+    jsonl_import.add_argument("--key", required=True)
+    jsonl_import.add_argument("--contract-fingerprint", required=True)
+
+    ontology = subcommands.add_parser("ontology")
+    ontology_commands = ontology.add_subparsers(dest="ontology_command", required=True)
+    ontology_describe = ontology_commands.add_parser("describe")
+    ontology_describe.add_argument("--namespace")
+    ontology_declare = ontology_commands.add_parser("declare-entity")
+    ontology_declare.add_argument("entity_type")
+    ontology_declare.add_argument(
+        "--privacy", choices=("public", "private"), default="public"
+    )
+    ontology_declare.add_argument("--fields", default="{}")
+    ontology_declare.add_argument("--contract-fingerprint", required=True)
 
     query = subcommands.add_parser("query")
     query.add_argument(
-        "query_name", choices=("current-facts", "current-slots", "current-metric")
+        "query_name",
+        choices=("current-metric", "execute"),
     )
     query.add_argument("--definition-version")
     query.add_argument("--dimensions", default="{}")
+    query.add_argument("--document", type=Path)
+
+    join = subcommands.add_parser("join")
+    join_commands = join.add_subparsers(dest="join_command", required=True)
+    join_materialize = join_commands.add_parser("materialize")
+    join_materialize.add_argument("definition", type=Path)
+    join_materialize.add_argument("--contract-fingerprint", required=True)
+    join_materialize.add_argument("--idempotency-key")
+
+    relation = subcommands.add_parser("relation")
+    relation_commands = relation.add_subparsers(dest="relation_command", required=True)
+    relation_deactivate = relation_commands.add_parser("deactivate")
+    relation_deactivate.add_argument("relation_id")
+
+    node = subcommands.add_parser("node")
+    node_commands = node.add_subparsers(dest="node_command", required=True)
+    node_delete = node_commands.add_parser("delete")
+    node_delete.add_argument("node_id")
+
+    attribute = subcommands.add_parser("attribute")
+    attribute_commands = attribute.add_subparsers(
+        dest="attribute_command", required=True
+    )
+    attribute_write = attribute_commands.add_parser("write-analysis")
+    attribute_write.add_argument("node_id")
+    attribute_write.add_argument("attribute_name")
+    attribute_write.add_argument("--value", required=True)
+    attribute_write.add_argument("--method", required=True)
+    attribute_write.add_argument("--contract-fingerprint", required=True)
+
+    metric = subcommands.add_parser("metric")
+    metric_commands = metric.add_subparsers(dest="metric_command", required=True)
+    metric_write = metric_commands.add_parser("write-analysis")
+    metric_write.add_argument("definition_version")
+    metric_write.add_argument("--value", required=True)
+    metric_write.add_argument("--dimensions", default="{}")
+    metric_write.add_argument("--method", required=True)
+    metric_write.add_argument("--method-version", required=True)
+    metric_write.add_argument("--coverage", default="{}")
+    metric_write.add_argument("--incomplete", action="store_true")
+    metric_write.add_argument("--unit")
+    metric_write.add_argument("--numerator", type=float)
+    metric_write.add_argument("--denominator", type=float)
+    metric_write.add_argument(
+        "--privacy", choices=("public", "private"), default="public"
+    )
+    metric_write.add_argument("--contract-fingerprint", required=True)
 
     traverse = subcommands.add_parser("traverse")
     traverse.add_argument("start_node_id")
@@ -73,7 +135,7 @@ def _parser() -> argparse.ArgumentParser:
     search.add_argument("--node-type")
     search.add_argument(
         "--privacy-ceiling",
-        choices=("public", "private", "restricted", "forbidden"),
+        choices=("public",),
     )
 
     embedding = subcommands.add_parser("embedding")
@@ -84,7 +146,7 @@ def _parser() -> argparse.ArgumentParser:
     embedding_create.add_argument("attribute_name")
     embedding_create.add_argument(
         "--privacy-ceiling",
-        choices=("public", "private", "restricted", "forbidden"),
+        choices=("public",),
     )
     embedding_status = embedding_commands.add_parser("status")
     embedding_status.add_argument("profile_id")
@@ -148,7 +210,7 @@ def _parser() -> argparse.ArgumentParser:
     sanitized_export.add_argument("destination", type=Path)
     sanitized_export.add_argument(
         "--privacy-ceiling",
-        choices=("public", "private", "restricted", "forbidden"),
+        choices=("public",),
         default="public",
     )
     sanitized_export.add_argument("--created-at")
@@ -174,15 +236,36 @@ def _execute(arguments: argparse.Namespace) -> dict[str, Any]:
         return application.validate()
     if arguments.command == "capabilities":
         return application.capabilities()
-    if arguments.command == "ingest":
-        if arguments.ingest_command == "preview":
-            return api.ingestion_preview(arguments.batch).model_dump(mode="json")
-        return api.ingestion_apply(arguments.batch).model_dump(mode="json")
+    if arguments.command == "jsonl":
+        key = json.loads(arguments.key)
+        if not isinstance(key, list):
+            raise ValueError("--key must be a JSON array")
+        return api.jsonl_import(
+            arguments.source,
+            arguments.entity_type,
+            key,
+            arguments.contract_fingerprint,
+        ).model_dump(mode="json")
+    if arguments.command == "ontology":
+        if arguments.ontology_command == "describe":
+            return api.ontology(arguments.namespace).model_dump(mode="json")
+        fields = json.loads(arguments.fields)
+        if not isinstance(fields, dict):
+            raise ValueError("--fields must be a JSON object")
+        return api.declare_entity(
+            arguments.entity_type,
+            arguments.privacy,
+            fields,
+            arguments.contract_fingerprint,
+        ).model_dump(mode="json")
     if arguments.command == "query":
-        if arguments.query_name == "current-facts":
-            return api.query_current_facts().model_dump(mode="json")
-        if arguments.query_name == "current-slots":
-            return api.query_current_slots().model_dump(mode="json")
+        if arguments.query_name == "execute":
+            if arguments.document is None:
+                raise ValueError("--document is required for query execute")
+            document = json.loads(arguments.document.read_text(encoding="utf-8"))
+            if not isinstance(document, dict):
+                raise ValueError("query document must be a JSON object")
+            return api.execute_query(document).model_dump(mode="json")
         if arguments.definition_version is None:
             raise ValueError("--definition-version is required for current-metric")
         dimensions = json.loads(arguments.dimensions)
@@ -190,6 +273,49 @@ def _execute(arguments: argparse.Namespace) -> dict[str, Any]:
             raise ValueError("--dimensions must be a JSON object")
         return api.query_current_metric(
             arguments.definition_version, dimensions
+        ).model_dump(mode="json")
+    if arguments.command == "join":
+        definition = json.loads(arguments.definition.read_text(encoding="utf-8"))
+        if not isinstance(definition, dict):
+            raise ValueError("join definition must be a JSON object")
+        return api.materialize_join(
+            str(definition["name"]),
+            str(definition["relation"]),
+            definition["from"],
+            definition["to"],
+            arguments.contract_fingerprint,
+            arguments.idempotency_key,
+        ).model_dump(mode="json")
+    if arguments.command == "relation":
+        return api.deactivate_relation(arguments.relation_id).model_dump(mode="json")
+    if arguments.command == "node":
+        return api.delete_node(arguments.node_id).model_dump(mode="json")
+    if arguments.command == "attribute":
+        return api.write_analytical_attribute(
+            arguments.node_id,
+            arguments.attribute_name,
+            json.loads(arguments.value),
+            arguments.method,
+            arguments.contract_fingerprint,
+        ).model_dump(mode="json")
+    if arguments.command == "metric":
+        dimensions = json.loads(arguments.dimensions)
+        coverage = json.loads(arguments.coverage)
+        if not isinstance(dimensions, dict) or not isinstance(coverage, dict):
+            raise ValueError("--dimensions and --coverage must be JSON objects")
+        return api.write_analytical_metric(
+            arguments.definition_version,
+            json.loads(arguments.value),
+            dimensions,
+            arguments.method,
+            arguments.method_version,
+            arguments.contract_fingerprint,
+            coverage,
+            not arguments.incomplete,
+            arguments.unit,
+            arguments.numerator,
+            arguments.denominator,
+            arguments.privacy,
         ).model_dump(mode="json")
     if arguments.command == "traverse":
         return api.traverse_relations(

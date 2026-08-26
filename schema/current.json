@@ -1,42 +1,4 @@
 {
-  "assertion": {
-    "basis": [
-      "observed",
-      "computed",
-      "inferred",
-      "declared"
-    ],
-    "lifecycle": [
-      "active",
-      "superseded",
-      "retracted"
-    ],
-    "stable_key_versions": [
-      1,
-      2
-    ],
-    "stances": [
-      "supports",
-      "contradicts"
-    ],
-    "target_kinds": [
-      "node_attribute",
-      "relation"
-    ]
-  },
-  "attribute_slots": {
-    "multi": {
-      "result": "all_candidates_with_individual_state"
-    },
-    "single": {
-      "states": [
-        "missing",
-        "current",
-        "contested",
-        "conflict"
-      ]
-    }
-  },
   "compatibility": {
     "minimum_reader": "1"
   },
@@ -49,7 +11,7 @@
       "preprocessing_version": "unicode-nfc-lines-v1",
       "provider": "openai"
     },
-    "privacy_enforcement": "profile-and-provider-ceiling",
+    "privacy_enforcement": "public-only-external-provider",
     "profile_scope": "node_attribute_name"
   },
   "evidence": {
@@ -83,37 +45,20 @@
       "corrupt"
     ]
   },
-  "fact_states": [
-    "supported",
-    "contested",
-    "contradicted",
-    "unasserted"
-  ],
   "ingestion_batch": {
-    "evidence_locator_kinds": [
-      "whole_object",
-      "structured",
-      "record_key",
-      "byte_range",
-      "line_range",
-      "time_interval",
-      "sample_interval"
-    ],
-    "format_version": "4",
-    "optional": [
-      "relations",
-      "metrics"
-    ],
-    "required": [
-      "schema_fingerprint",
-      "idempotency_key",
-      "recorded_at",
-      "source",
-      "run",
-      "evidence",
-      "nodes"
-    ]
+    "format": "jsonl",
+    "format_version": "5",
+    "idempotency": "entity_type_key_selector_content_hash",
+    "semantics": "atomic_patch_upsert"
   },
+  "json_types": [
+    "unresolved",
+    "string",
+    "number",
+    "boolean",
+    "object",
+    "array"
+  ],
   "metric": {
     "current_selection": [
       "run_recorded_at_desc",
@@ -122,27 +67,63 @@
     ],
     "dimensions": "canonical_json_object"
   },
-  "ontology_version": "0.4.0",
+  "ontology": {
+    "declarations_optional": true,
+    "field_identity": [
+      "entity_type",
+      "field_name"
+    ],
+    "fingerprint_excludes": [
+      "counts",
+      "coverage",
+      "import_key_selectors"
+    ],
+    "fingerprint_includes": [
+      "entity_types",
+      "field_names",
+      "effective_types",
+      "declared_constraints",
+      "active_relation_declarations"
+    ]
+  },
+  "ontology_version": "1.0.0",
   "privacy_classes": [
     "public",
-    "private",
-    "restricted",
-    "forbidden"
+    "private"
   ],
+  "query_ir": {
+    "mutation_allowed": false,
+    "operators": [
+      "eq",
+      "ne",
+      "lt",
+      "lte",
+      "gt",
+      "gte",
+      "in",
+      "exists"
+    ],
+    "pagination": [
+      "limit",
+      "offset"
+    ],
+    "version": "1"
+  },
   "record_types": [
     "Source",
     "AnalyticalRun",
     "Node",
     "NodeAttribute",
     "Relation",
-    "Assertion",
     "Metric",
+    "EntityDeclaration",
+    "ObservedField",
+    "OntologyDeclaration",
     "EvidenceObject",
     "EvidenceAcquisition",
     "EvidenceDerivation",
     "EvidenceLocation",
     "EvidenceFragment",
-    "EvidenceBinding",
     "EvidenceVerification",
     "EvidenceRetirement",
     "SearchDocument",
@@ -165,25 +146,6 @@
     "restore_compatible": false
   },
   "saved_queries": {
-    "current-facts": {
-      "ordering": [
-        "namespace",
-        "node_type",
-        "natural_key",
-        "attribute_name",
-        "attribute_id"
-      ],
-      "result": [
-        "attribute_id",
-        "namespace",
-        "node_type",
-        "natural_key",
-        "attribute_name",
-        "value",
-        "state",
-        "privacy_class"
-      ]
-    },
     "current-metric": {
       "parameters": [
         "definition_version",
@@ -192,29 +154,6 @@
       "result": [
         "metric",
         "coverage"
-      ]
-    },
-    "current-slots": {
-      "candidate_ordering": [
-        "namespace",
-        "node_type",
-        "natural_key",
-        "attribute_name",
-        "attribute_id"
-      ],
-      "ordering": [
-        "namespace",
-        "node_type",
-        "natural_key",
-        "attribute_name",
-        "node_id"
-      ],
-      "result": [
-        "node_id",
-        "attribute_name",
-        "cardinality",
-        "status",
-        "candidates"
       ]
     },
     "search-semantic": {
@@ -227,7 +166,6 @@
         "query",
         "namespace",
         "node_type",
-        "privacy_ceiling",
         "limit"
       ],
       "result": [
@@ -247,23 +185,12 @@
       ]
     },
     "traverse-relations": {
-      "ordering": [
-        "depth",
-        "source_namespace",
-        "source_natural_key",
-        "relation_type",
-        "target_namespace",
-        "target_natural_key",
-        "logical_key",
-        "relation_id"
-      ],
       "parameters": [
         "start_node_id",
         "relation_types",
         "direction",
         "max_depth",
-        "limit",
-        "states"
+        "limit"
       ],
       "result": [
         "nodes",
@@ -272,20 +199,14 @@
       ]
     }
   },
-  "schema_document_version": "4",
-  "schema_fingerprint": "5740c0e445a6b4bf215e6545618ef61dd34382052a1b886e2f7501a451446de0",
+  "schema_document_version": "5",
+  "schema_fingerprint": "c8d44a0a4ea59e870bd5475f247eb28f1690538c735f0e362a71651289cfd7c3",
   "search_document": {
     "coverage": "active_indexed_documents_vs_searchable_attributes",
-    "eligibility": {
-      "explicit_batch_flag": "searchable",
-      "target_kinds": [
-        "node_attribute"
-      ],
-      "value_types": [
-        "string"
-      ]
-    },
-    "fts_engine": "sqlite-fts5"
+    "fts_engine": "sqlite-fts5",
+    "target_kinds": [
+      "node_attribute"
+    ]
   },
   "snapshot": {
     "artifact_kind": "private-restore-snapshot",

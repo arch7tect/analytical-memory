@@ -1,0 +1,14 @@
+{
+  "ontology": {
+    "declarations_optional": true,
+    "field_identity": ["entity_type", "field_name"],
+    "fingerprint_excludes": ["counts", "coverage", "import_key_selectors"],
+    "fingerprint_includes": [
+      "entity_types",
+      "field_names",
+      "effective_types",
+      "declared_constraints",
+      "active_relation_declarations"
+    ]
+  }
+}

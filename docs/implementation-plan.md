@@ -2,9 +2,15 @@
 
 ## Status
 
-Proposed delivery plan for v1. The plan optimizes for the earliest useful
-working implementation while preserving the invariants in
-[the system design](design.md).
+Milestones 0 through 5 are implemented. Milestones 0 through 4 remain the
+description of the original foundation. Milestone 5, approved by ADR 0001, is a
+clean-break contract with dynamic ontology, JSON Query IR, and a simpler
+current-state model for imported and analytical data.
+
+The M5 migration deliberately supersedes parts of the agent-facing M0-4 data
+semantics without rewriting the historical milestone record. Existing tests
+may be replaced when they assert superseded behavior; development databases are
+reinitialized instead of migrated.
 
 ## Delivery objective
 
@@ -74,13 +80,16 @@ Each milestone includes a quickstart update, focused tests, and one scripted
 smoke path. A milestone is incomplete if its components pass unit tests but the
 documented path does not run from a clean clone.
 
-### Keep preview and apply identical
+### Keep planning and writes consistent
 
-Ingestion has one validation and planning path. Preview derives and returns an
-immutable plan without persisting it in Milestone 0. Apply re-derives the plan
-from the batch through the same planner, then revalidates its schema fingerprint
-before committing it. The two commands must not contain separate normalization
-or decision logic.
+Normalized-batch ingestion has one validation and planning path. Preview derives
+and returns an immutable plan without persisting it in Milestone 0. Apply
+re-derives the plan from the batch through the same planner, then revalidates
+its schema fingerprint before committing it. The two commands must not contain
+separate normalization or decision logic. This rule does not add a preview to
+Milestone 5: JSONL import has no inspector and uses one atomic import operation.
+Join materialization similarly validates, declares, resolves, and writes in one
+transaction. Neither operation produces an apply token or authorization hash.
 
 ## Planned development contract
 
@@ -304,7 +313,209 @@ an API key loaded from a gitignored `.env`. The default provider privacy ceiling
 is `restricted`, so all content except explicitly `forbidden` text is eligible.
 Privacy classes on existing graph and search records are immutable in V1.
 
-## Milestone 5: PostgreSQL conformance and transfer
+## Milestone 5: Dynamic ontology and JSON Query IR
+
+Status: implemented.
+
+### Deliver
+
+- JSONL as the only general v1 import format, consumed from Python streams,
+  CLI files or standard input, and server-local paths supplied through stdio
+  MCP without materializing the full source in memory;
+- optional EntityDeclaration creation before import, with a namespaced entity
+  type, optional field type, required and nullable constraints, and entity- or
+  field-level privacy, but no import identity definition;
+- one current EntityDeclaration per entity type; replacement validates current
+  rows and leaves the prior declaration active on failure;
+- one atomic JSONL import contract that always carries entity type and typed
+  ordered key as a transient current-attribute lookup, applies an active
+  declaration when present, otherwise accepts every field name, and has no
+  separate mapping or import preview;
+- zero key matches create a Node with an application-generated UUID, one match
+  updates it, and multiple matches or duplicate incoming key tuples reject the
+  complete batch, without ExternalIdentity or natural-key storage;
+- a canonical content-derived idempotency key with exact replay, plus
+  disk-backed unique key-hash detection for bounded-memory duplicate rejection;
+- deterministic two-pass ingestion that hashes and validates into temporary
+  evidence, then writes bounded chunks inside one database transaction and
+  returns actual counts, ontology delta, and the resulting fingerprint;
+- one typed atomic JSONL-import method on the existing `MemoryStore` abstract
+  interface; M5 adds no separate transaction interface;
+- one current NodeAttribute row per `(node_id, attribute_name)`, overwritten
+  transactionally for fields present in a later successful import and left
+  unchanged for absent fields, with direct source, batch, evidence-fragment,
+  and update-time provenance;
+- one current Relation row per stable edge identity, with an `active` flag and
+  direct provenance, plus transactional cascade deletion when either endpoint
+  Node is deleted;
+- analytically produced scalar or structured results written as ordinary
+  NodeAttribute rows, graph results written as Relation rows, and aggregate
+  results written as Metrics, all with direct AnalyticalRun provenance and no
+  separate Finding or Assertion record;
+- nullable ingestion-batch provenance on AnalyticalRun so analysis does not
+  require a synthetic import;
+- one ObservedField entry per `(entity_type, field_name)` with one declared or
+  inferred effective JSON type and an `unresolved` state for all-null fields;
+- a two-class privacy contract with `public` as default, optional `private`
+  schema annotations, public-only shareable export and external processing, and
+  pre-commit rejection of credentials and other prohibited stored content;
+- in-place privacy tightening from public to private, rejected loosening, and a
+  fixed public-only ceiling for external embedding providers;
+- rollback compensation that removes temporary and exclusively newly installed
+  evidence and preserves pre-existing deduplicated objects; crash-window orphan
+  cleanup remains an evidence-audit concern;
+- a derived Current Ontology Document with entity, attribute, relation,
+  query-field, statistics, and provenance descriptions;
+- independent contract and ontology fingerprints;
+- a structural-contract version and fingerprint bump for the streaming JSONL
+  import, ontology, Query IR, and join-materialization request schemas;
+- read-only JSON Query IR v1 with fixed-length node and edge patterns, typed
+  conjunctive predicates, provenance-aware projection, deterministic ordering,
+  limit, offset, and count;
+- one Query IR validator and canonical AST shared by Python, CLI, MCP, and both
+  future relational backends;
+- one atomic post-hoc join-materialization request between previously loaded
+  objects, containing the join declaration and using exact typed equality;
+- validation, declaration persistence, endpoint resolution, and Relation writes
+  in one transaction, with no inspection, preview token, second apply call, or
+  resolution hash;
+- missing and null source keys, unmatched targets, existing active Relations,
+  and existing inactive Relations returned as separate counts, while any
+  ambiguous target rolls back the whole operation;
+- persisted provenance-bearing join declarations that are never run
+  automatically;
+- rejection when a join name is reused with a different canonical definition;
+- deterministic relation identity with join name as `logical_key`, a
+  content-addressed declaration Source, and one synthetic ingestion batch and
+  analytical run per materialization invocation;
+- explicit relation deactivation and correction that preserve relation identity
+  and prevent a join rerun from silently restoring an inactive edge;
+- explicit Node deletion with cascading attributes, relations, search
+  documents, and embedding projections while retaining shared provenance;
+- MCP resources for the structural contract, current ontology, namespace
+  ontology, Query IR, and runtime capabilities;
+- MCP and Python API operations for entity declaration, streaming atomic JSONL
+  import, ontology description, Query IR execution, one-step join
+  materialization, relation deactivation, and Node deletion;
+- matching CLI operations while preserving the existing saved-query,
+  traversal, search, and explanation commands as convenience templates.
+
+### Acceptance
+
+- declaring a Session entity with field constraints changes the ontology
+  fingerprint and makes its logical schema discoverable before any Session row
+  exists, without declaring how imports identify a row;
+- importing the same entity type and typed key without a prior declaration is
+  valid, creates observed ontology only after success, accepts every field name,
+  and infers one effective type per field;
+- every selected key field is imported as an ordinary current attribute; the
+  key selector is retained only in IngestionBatch provenance and is never used
+  as persistent Node identity;
+- an import key matching zero current Nodes creates one, matching one updates
+  it, and matching more than one rejects the complete batch as ambiguous;
+- importing a JSONL Session stream against that declaration makes automatically
+  discovered allowed attributes queryable without a physical migration or
+  explicit field mapping;
+- fields absent from an active declaration are accepted, inherit entity-level
+  privacy, and extend observed ontology;
+- when a declaration exists, its required, type, and nullability constraints
+  validate the entire stream before canonical writes;
+- an undeclared entity or field defaults to public; a private entity declaration
+  makes all its fields private, while a public declaration may mark individual
+  fields private;
+- private records never reach shareable export or an external embedding
+  provider, and prohibited credentials fail before evidence or canonical commit;
+- a declaration replacement that conflicts with a current row fails without
+  changing the active declaration or ontology fingerprint;
+- string and numeric key components remain distinct; missing, null, non-scalar,
+  or duplicate composite keys reject the complete import with a line reference;
+- a large synthetic JSONL source is read with bounded memory, written in chunks
+  inside one transaction, and leaves no canonical partial batch on failure;
+- a handled rollback removes evidence created exclusively by the failed import
+  and never removes a pre-existing deduplicated object; a process crash may
+  leave an immutable orphan that evidence audit reports;
+- importing a separate SessionMessage dataset succeeds without declaring any
+  relation and adds its own ontology description;
+- re-importing an entity updates exactly one current row for each present
+  non-key field, records the latest direct provenance, and preserves fields
+  absent from that incoming object;
+- all non-null values for one new field in its first batch must have one exact
+  canonical JSON type; incompatible types reject the complete batch;
+- a later value whose type differs from the field's effective type rejects the
+  complete batch without changing current data or ontology;
+- null does not establish or change field type, and an all-null field remains
+  `unresolved` until a non-null value fixes its type;
+- an AnalyticalRun can write `classification` as the same current
+  NodeAttribute shape used by import, distinguished by run provenance rather
+  than a Finding wrapper;
+- deleting a Node deletes its attributes and every incoming and outgoing
+  Relation but preserves evidence objects, ingestion batches, and analytical
+  run records;
+- no relation is inferred or applied from `session_id` or value overlap;
+- one explicit materialization call can declare a join and connect stored
+  SessionMessage objects to stored Session objects without re-declaring either
+  endpoint;
+- a missing endpoint is never created; null and unmatched keys are skipped and
+  counted, while an ambiguous target rolls back the complete operation;
+- materialization validates the current ontology and commits declaration and
+  Relations in one transaction without a preview token or resolution hash;
+- reusing a join name with a different canonical definition fails;
+- a stored join does not execute during later imports; an explicit rerun adds
+  only pairs never previously materialized by that join, does not restore
+  inactive relations, and reports previously materialized active and inactive
+  pairs as separate counts;
+- the updated ontology exposes the declared relation, materialized edge count,
+  state, and provenance;
+- one JSON Query IR request filters Sessions and follows the declared incoming
+  relation to project SessionMessage attributes;
+- Query IR is read-only, unsupported operators fail validation, and
+  every result reports deterministic ordering, truncation, current-record IDs,
+  direct provenance, and the ontology fingerprint;
+- ontology statistics may change without changing the ontology fingerprint;
+  adding an entity, field, or active relation declaration, or resolving a
+  field's effective type, must change it;
+- ordinary predicates, import keys, and join keys resolve the same current
+  NodeAttribute values; target lookups with zero or multiple matches are
+  unmatched or ambiguous rather than selected;
+- join materialization writes a deterministic `logical_key`, Source, ingestion
+  batch, analytical run, current Relations, and direct evidence references and
+  reruns idempotently for already materialized pairs;
+- after a source join-key value changes, rerunning a join may add a new Relation
+  without removing the old one; removing the obsolete Relation is an explicit
+  V1 correction;
+- a correction can deactivate a current relation without deleting its identity
+  or evidence, and a later rerun of the same join preserves that correction;
+- no supported, contested, contradicted, or unasserted state is derived in M5;
+  competing-claim semantics remain deferred;
+- the complete JSONL-to-ontology-to-query flow runs through a real stdio MCP
+  client using a streamed synthetic fixture rather than a JSON string argument.
+
+### Approval gate
+
+ADR 0001 was accepted on 2026-08-26. M0-4 local databases are development
+baselines and are reinitialized for the new storage contract rather than
+migrated through a competing-candidate policy.
+
+### Explicitly deferred
+
+- CSV and every other non-JSONL import reader and public import contract;
+- full GQL, SQL/PGQ, or openCypher textual parsing and conformance;
+- implicit type coercion, normalization, and fuzzy key matching;
+- automatic relation inference or automatic join execution;
+- JSONL and join inspection operations;
+- ontology rename, entity merge, and materialized ontology revision history;
+- point-in-time reconstruction and automatic replay of prior imported field or
+  relation state from retained evidence;
+- complete per-field and per-edge operational history;
+- competing analytical claims, support and contradiction states, and
+  supersession history;
+- variable-length path expansion, grouping, cursor pagination, and text or
+  semantic ranking inside Query IR;
+- automated deletion of evidence objects orphaned by a process crash;
+- arbitrary expressions, subqueries, unbounded traversal, and general graph
+  mutation.
+
+## Milestone 6: PostgreSQL conformance and transfer
 
 ### Deliver
 
@@ -316,15 +527,16 @@ Privacy classes on existing graph and search records are immutable in V1.
 
 ### Acceptance
 
-- SQLite and PostgreSQL preserve logical IDs, hashes, fact states, metrics, and
-  deterministic ordered query results for the same fixtures;
+- SQLite and PostgreSQL preserve logical IDs, hashes, current imported and
+  analytical values, active relation state, metrics, and deterministic ordered
+  query results for the same fixtures;
 - both migration sets declare the same logical target fingerprint;
 - transfer rebuilds derived indexes rather than copying backend projections;
 - a failed or cancelled import leaves the SQLite source unchanged and the
   PostgreSQL target unselected;
 - switching backend configuration changes capabilities, not API shapes.
 
-## Milestone 6: Operational hardening and release
+## Milestone 7: Operational hardening and release
 
 ### Deliver
 
@@ -360,7 +572,7 @@ Tests are added with the milestone that introduces the behavior:
 - scripted clean-clone quickstart tests using synthetic fixtures only.
 
 Store-facing tests use a backend-parameterized `MemoryStore` fixture from
-Milestone 0. SQLite is the only registered backend until Milestone 5, which
+Milestone 0. SQLite is the only registered backend until Milestone 6, which
 registers PostgreSQL against the existing test bodies rather than creating a
 second suite.
 
@@ -370,7 +582,7 @@ The following work does not enter a milestone unless its acceptance criteria
 require it:
 
 - generalized plugin systems;
-- arbitrary query languages;
+- backend-specific query languages or unbounded Query IR extensions;
 - network APIs;
 - multi-user authorization;
 - remote evidence providers;
@@ -384,6 +596,7 @@ expanding the active slice.
 
 ## Immediate next action
 
-Implement Milestone 0 as one end-to-end delivery. Do not stop at an empty
-package scaffold: the milestone is complete only when the clean-clone
-quickstart reaches a hash-verified explanation.
+Implement M5 as one end-to-end delivery, covering an undeclared flexible import,
+an optionally declared validated import, explicit join materialization, ontology
+discovery, and a JSON Query IR request through a real MCP client. PostgreSQL work
+does not begin until that core loop is complete.

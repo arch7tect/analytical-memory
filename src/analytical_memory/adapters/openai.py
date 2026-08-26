@@ -15,11 +15,11 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         api_key: str | None,
         *,
         base_url: str = "https://api.openai.com/v1",
-        privacy_ceiling: str = "restricted",
+        privacy_ceiling: str = "public",
         client: httpx.Client | None = None,
     ) -> None:
-        if privacy_ceiling not in {"public", "private", "restricted"}:
-            raise ValueError("invalid OpenAI embedding privacy ceiling")
+        if privacy_ceiling != "public":
+            raise ValueError("external embeddings require public privacy")
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
         self._privacy_ceiling = privacy_ceiling

@@ -1,66 +1,72 @@
 # Querying Reference
 
-Milestone 2 adds useful local queries while keeping SQLite details behind the
-explicit `MemoryStore` interface.
+M5 uses a backend-neutral, read-only JSON Query IR for relational and fixed
+graph-pattern queries. SQLite is an implementation detail behind the
+`MemoryStore` abstract interface.
 
-## Schema and migrations
+## Discover before querying
 
-The generated `schema/current.json` is compiled from sorted JSON fragments in
-`schema/metadata/`. Verify that the generated document is current with:
+Read the current ontology through MCP or CLI:
 
 ```console
-uv run memory schema compile --check
+uv run memory ontology describe
+uv run memory ontology describe --namespace example
 ```
 
-SQLite migrations are ordered by `migrations/sqlite/manifest.json`. Each entry
-pins the SQL checksum and logical target fingerprint. Migration 2 creates the
-ledger and backfills the original migration record when upgrading a version 1
-database. Each migration is transactional; a failed migration leaves its prior
-storage version intact.
+The ontology lists entity types, fields, exact effective JSON types, declared
+constraints, search eligibility, explicit join declarations, and statistics.
+Its fingerprint excludes row counts, so clients replan when queryable shape
+changes rather than whenever data volume changes.
 
-## Slot queries
+## Query IR v1
+
+A query contains:
+
+- `query_ir_version: "1"`;
+- fixed node and optional edge patterns;
+- an optional conjunctive `where` list;
+- projections or `count`;
+- optional deterministic ordering, limit, and offset.
+
+Field references use `<alias>.<attribute>`. Supported predicates are `eq`,
+`ne`, `lt`, `lte`, `gt`, `gte`, `in`, and `exists`. Comparisons are type-strict;
+the engine never coerces strings to numbers or numbers to strings.
 
 ```console
-uv run memory query current-slots
+uv run memory query execute --document examples/quickstart/query.json
 ```
 
-A single-valued slot is `missing`, `current`, `contested`, or `conflict`.
-Contested candidates never become trusted current values. A multi-valued slot
-returns every supported or contested candidate with its individual fact state.
+Each projected attribute contains its current record ID and direct source,
+batch, run, evidence-fragment, and update-time provenance. Query results also
+contain deterministic ordering, truncation state, and the ontology fingerprint.
 
-## Relations
+## Relations and traversal
 
-Relations are directed canonical facts with assertions and evidence. Traversal
-follows relation rows only, defaults to `supported` and `contested`, and
-requires bounded depth and result limits:
+Relations are directed current records with an `active` flag and direct
+provenance. Only an explicit join materialization creates them; importing later
+records never runs a stored join automatically.
 
 ```console
-uv run memory traverse <node-id> --relation-type example:links --max-depth 2
+uv run memory join materialize examples/quickstart/join.json \
+  --contract-fingerprint <contract-fingerprint>
+uv run memory traverse <node-id> --relation-type session --max-depth 2
 uv run memory explain <relation-id> --kind relation
 ```
 
-Contradicted or unasserted relations are traversed only when explicitly named
-with `--state`.
+Deactivation is an explicit correction. A later join rerun does not reactivate
+that relation. Deleting either endpoint cascades the relation.
 
-## Metrics
+## Full-text and semantic search
 
-Metrics are immutable results owned by analytical runs. Current selection uses
-an exact definition and canonical dimension set, filters incomplete or
-invalidated results, then orders by run recorded time, run ID, and metric ID.
-
-```console
-uv run memory query current-metric \
-  --definition-version example.count.v1 \
-  --dimensions '{"scope":"all"}'
-uv run memory explain <metric-id> --kind metric
-```
-
-## Full-text search
-
-Only string attributes marked `searchable: true` create `SearchDocument`
-records. Search returns canonical facts, assertion provenance, evidence status,
-and indexed-versus-eligible coverage without returning raw evidence bytes.
+Only declared searchable string attributes produce `SearchDocument` records.
+Full-text search is local. Semantic search uses exact application-level cosine
+ranking, while only public text may be sent to an external embedding provider.
+Both return direct current provenance and never raw evidence bytes.
 
 ```console
-uv run memory search connected --limit 10
+uv run memory search "connected" --limit 10
+uv run memory search "related text" --semantic-profile <profile-id>
 ```
+
+Variable-length paths, grouping, cursor pagination, textual GQL parsing, and
+text or vector ranking inside Query IR are deferred.

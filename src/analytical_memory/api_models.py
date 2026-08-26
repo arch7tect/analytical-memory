@@ -1,82 +1,92 @@
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 
 class APIModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class IngestionResult(APIModel):
-    attribute_ids: list[str]
+class OntologyResponse(APIModel):
+    contract_fingerprint: str
+    document: dict[str, Any]
+    ontology_fingerprint: str
+
+
+class JsonlImportResponse(APIModel):
+    attributes_written: int
     batch_id: str
+    contract_fingerprint: str
+    created_nodes: int
     evidence_digest: str
     fragment_id: str
-    metric_ids: list[str]
-    node_ids: list[str]
-    relation_ids: list[str]
+    idempotency_key: str
+    ontology_delta: dict[str, list[str]]
+    ontology_fingerprint: str
+    records: int
+    replayed: bool
     run_id: str
-    schema_fingerprint: str
-    search_document_ids: list[str]
+    source_id: str
+    updated_nodes: int
 
 
-class PreviewCounts(APIModel):
-    assertions: int
+class AnalyticalAttributeResponse(APIModel):
+    attribute_id: str
+    contract_fingerprint: str
+    evidence_digest: str
+    fragment_id: str
+    idempotency_key: str
+    ontology_fingerprint: str
+    replayed: bool
+    run_id: str
+    source_id: str
+
+
+class AnalyticalMetricResponse(APIModel):
+    contract_fingerprint: str
+    evidence_digest: str
+    fragment_id: str
+    idempotency_key: str
+    metric_id: str
+    replayed: bool
+    run_id: str
+    source_id: str
+
+
+class JoinMaterializationResponse(APIModel):
+    batch_id: str
+    contract_fingerprint: str
+    created_relations: int
+    declaration_created: bool
+    definition_hash: str
+    name: str
+    ontology_fingerprint: str
+    previously_materialized_active: int
+    previously_materialized_inactive: int
+    replayed: bool
+    run_id: str
+    skipped_null_or_missing: int
+    skipped_unmatched: int
+    source_id: str
+
+
+class QueryIRResponse(APIModel):
+    contract_fingerprint: str
+    count: int | None = None
+    ontology_fingerprint: str
+    ordering: list[dict[str, Any]]
+    rows: list[dict[str, Any]]
+    truncated: bool
+
+
+class NodeDeleteResponse(APIModel):
     attributes: int
-    bindings: int
-    derivations: int
-    evidence_acquisitions: int
-    evidence_locations: int
-    evidence_objects: int
-    evidence_verifications: int
-    metrics: int
+    embeddings: int
     nodes: int
     relations: int
-    runs: int
     search_documents: int
-    sources: int
-
-
-class PreviewResponse(APIModel):
-    counts: PreviewCounts
-    plan: IngestionResult
-    writes: bool
-
-
-class ApplyResponse(APIModel):
-    replayed: bool
-    result: IngestionResult
-
-
-class Fact(APIModel):
-    attribute_id: str
-    attribute_name: str
-    namespace: str
-    natural_key: str
-    node_type: str
-    privacy_class: Literal["public", "private", "restricted", "forbidden"]
-    state: Literal["supported", "contested", "contradicted", "unasserted"]
-    value: Any
-
-
-class CurrentFactsResponse(APIModel):
-    query: str
-    results: list[Fact]
-    schema_fingerprint: str
-
-
-class EvidenceObjectSummary(APIModel):
-    byte_size: int
-    digest: str
-    media_type: str
-    privacy_class: Literal["public", "private", "restricted", "forbidden"]
-
-
-class ExtractorSummary(APIModel):
-    id: str
-    version: str
 
 
 class EvidenceReadStatus(APIModel):
@@ -85,161 +95,45 @@ class EvidenceReadStatus(APIModel):
     verification: Literal["verified", "corrupt", "unverified"]
 
 
-class EvidenceFragmentSummary(APIModel):
+class DirectEvidenceSummary(APIModel):
     digest: str
     byte_size: int
-    privacy_class: Literal["public", "private", "restricted", "forbidden"]
-
-
-class WholeObjectLocator(APIModel):
-    kind: Literal["whole_object"]
-
-
-class StructuredLocator(APIModel):
-    input_format: Literal["canonical-json"]
-    kind: Literal["structured"]
-    pointer: str
-
-
-class RecordKeyLocator(APIModel):
-    input_format: Literal["canonical-jsonl"]
-    key_field: str
-    key_value: Any
-    kind: Literal["record_key"]
-
-
-class ByteRangeLocator(APIModel):
-    end: int
-    kind: Literal["byte_range"]
-    start: int
-
-
-class LineRangeLocator(APIModel):
-    end_line: int
-    kind: Literal["line_range"]
-    start_line: int
-
-
-class TimeIntervalLocator(APIModel):
-    end: str
-    input_format: Literal["canonical-jsonl"]
-    kind: Literal["time_interval"]
-    start: str
-    timestamp_field: str
-
-
-class SampleIntervalLocator(APIModel):
-    bit_width: int
-    byte_order: str
-    channels: int
-    end_sample: int
-    interleaved: bool
-    kind: Literal["sample_interval"]
-    sample_format: str
-    sample_rate: int
-    start_sample: int
-
-
-EvidenceLocator = Annotated[
-    WholeObjectLocator
-    | StructuredLocator
-    | RecordKeyLocator
-    | ByteRangeLocator
-    | LineRangeLocator
-    | TimeIntervalLocator
-    | SampleIntervalLocator,
-    Field(discriminator="kind"),
-]
-
-LocatorKind = Literal[
-    "whole_object",
-    "structured",
-    "record_key",
-    "byte_range",
-    "line_range",
-    "time_interval",
-    "sample_interval",
-]
-
-
-class EvidenceBindingSummary(APIModel):
-    binding_id: str
-    extractor: ExtractorSummary
-    fragment: EvidenceFragmentSummary
-    fragment_id: str
-    locator: EvidenceLocator
-    locator_kind: LocatorKind
-    object: EvidenceObjectSummary
-    role: Literal["supports", "contradicts", "contextualizes"]
+    media_type: str
     status: EvidenceReadStatus
 
 
-class SourceSummary(APIModel):
+class AttributeExplanation(APIModel):
+    attribute_id: str
+    attribute_name: str
+    batch_id: str | None
+    fragment_id: str | None
+    json_type: str
+    node_id: str
+    privacy_class: Literal["public", "private"]
+    run_id: str | None
+    searchable: bool
+    source_id: str
+    updated_at: str
+    value: Any
+
+
+class DirectSourceSummary(APIModel):
     id: str
     kind: str
     locator: str
-    privacy_class: Literal["public", "private", "restricted", "forbidden"]
 
 
-class RunSummary(APIModel):
-    id: str
-    method: str
-    valid_from: str
-    valid_to: str | None
-    recorded_at: str
-
-
-class AssertionExplanation(APIModel):
-    assertion_id: str
-    basis: Literal["observed", "computed", "inferred", "declared"]
-    confidence: float
-    effective: bool
-    evidence: list[EvidenceBindingSummary]
-    lifecycle: Literal["active", "superseded", "retracted"]
-    method: str
-    recorded_at: str
-    review_status: str
-    run: RunSummary
-    run_id: str
-    source: SourceSummary
-    source_id: str
-    stance: Literal["supports", "contradicts"]
-    stable_key: str
-    stable_key_version: Literal[1, 2]
-    supersedes_assertion_id: str | None
-    valid_from: str
-    valid_to: str | None
-
-
-class NodeSummary(APIModel):
+class DirectNodeSummary(APIModel):
     id: str
     namespace: str
-    natural_key: str
     type: str
 
 
 class ExplanationResponse(APIModel):
-    assertions: list[AssertionExplanation]
-    fact: Fact
-    node: NodeSummary
-    schema_fingerprint: str
-
-
-class SlotResult(APIModel):
-    node_id: str
-    namespace: str
-    node_type: str
-    natural_key: str
-    attribute_name: str
-    cardinality: Literal["single", "multi"]
-    status: Literal["missing", "current", "contested", "conflict", "values"]
-    current_value: Any
-    candidates: list[Fact]
-
-
-class CurrentSlotsResponse(APIModel):
-    query: Literal["current-slots"]
-    results: list[SlotResult]
+    attribute: AttributeExplanation
+    evidence: DirectEvidenceSummary | None
+    node: DirectNodeSummary
+    source: DirectSourceSummary
     schema_fingerprint: str
 
 
@@ -277,17 +171,17 @@ class RelationNode(APIModel):
     id: str
     namespace: str
     type: str
-    natural_key: str
+    privacy_class: Literal["public", "private"]
 
 
 class RelationFact(APIModel):
     relation_id: str
-    type: str
+    relation_type: str
     logical_key: str
     source: RelationNode
     target: RelationNode
-    state: Literal["supported", "contested", "contradicted", "unasserted"]
-    privacy_class: Literal["public", "private", "restricted", "forbidden"]
+    active: bool
+    privacy_class: Literal["public", "private"]
 
 
 class TraversalNode(RelationNode):
@@ -310,22 +204,58 @@ class TraversalResponse(APIModel):
     schema_fingerprint: str
 
 
+class DirectRelationExplanation(APIModel):
+    active: bool
+    batch_id: str | None
+    fragment_id: str | None
+    logical_key: str
+    privacy_class: Literal["public", "private"]
+    relation_id: str
+    relation_type: str
+    run_id: str | None
+    source_id: str
+    source_node_id: str
+    target_node_id: str
+    updated_at: str
+
+
 class RelationExplanationResponse(APIModel):
-    fact: RelationFact
-    assertions: list[AssertionExplanation]
+    evidence: DirectEvidenceSummary | None
+    relation: DirectRelationExplanation
+    source: DirectSourceSummary
     schema_fingerprint: str
 
 
-class MetricExplanationResult(MetricResult):
+class MetricExplanationResult(APIModel):
+    metric_id: str
+    run_id: str
+    definition_version: str
+    value: Any
+    unit: str | None
+    numerator: float | None
+    denominator: float | None
+    dimensions: dict[str, Any]
+    method_version: str
+    coverage: dict[str, Any]
+    recorded_at: str
+    fragment_id: str | None
     complete: bool
     invalidated: bool
 
 
+class DirectRunSummary(APIModel):
+    id: str
+    batch_id: str | None
+    source_id: str
+    method: str
+    recorded_at: str
+
+
 class MetricExplanationResponse(APIModel):
     metric: MetricExplanationResult
-    evidence: list[EvidenceBindingSummary]
-    source: SourceSummary
-    run: RunSummary
+    evidence: DirectEvidenceSummary | None
+    source: DirectSourceSummary
+    run: DirectRunSummary
     schema_fingerprint: str
 
 
@@ -335,21 +265,21 @@ class SearchCoverage(APIModel):
     complete: bool
 
 
-class SearchProvenance(APIModel):
-    assertions: list[AssertionExplanation]
-    node: NodeSummary
-
-
 class SearchMatch(APIModel):
     document_id: str
     target_kind: Literal["node_attribute"]
     target_id: str
     content: str
     content_hash: str
-    privacy_class: Literal["public", "private", "restricted", "forbidden"]
+    privacy_class: Literal["public", "private"]
     rank: float
-    fact: Fact
-    provenance: SearchProvenance
+    value: Any
+    json_type: str
+    source_id: str
+    batch_id: str | None
+    run_id: str | None
+    fragment_id: str | None
+    updated_at: str
 
 
 class SearchResponse(APIModel):
@@ -368,7 +298,7 @@ class EmbeddingProfile(APIModel):
     dimensions: int
     preprocessing_version: str
     similarity: Literal["cosine"]
-    privacy_ceiling: Literal["public", "private", "restricted", "forbidden"]
+    privacy_ceiling: Literal["public"]
     contract_hash: str
     status: Literal["pending", "building", "ready", "degraded"]
     last_error: str | None
@@ -392,11 +322,16 @@ class SemanticSearchMatch(APIModel):
     content: str
     content_hash: str
     document_id: str
-    fact: Fact
+    value: Any
+    json_type: str
     namespace: str
     node_type: str
-    privacy_class: Literal["public", "private", "restricted", "forbidden"]
-    provenance: SearchProvenance
+    privacy_class: Literal["public"]
+    source_id: str
+    batch_id: str | None
+    run_id: str | None
+    fragment_id: str | None
+    updated_at: str
     score: float
     target_id: str
     target_kind: Literal["node_attribute"]
@@ -416,7 +351,7 @@ class EvidenceStatusResponse(APIModel):
     availability: Literal["present", "missing"]
     byte_size: int | None
     digest: str
-    effective_privacy: Literal["public", "private", "restricted", "forbidden"]
+    effective_privacy: Literal["public", "private"]
     retired: bool
     verification: Literal["verified", "corrupt", "unverified"]
 
@@ -449,5 +384,6 @@ class EvidenceVerifyResponse(APIModel):
 class EvidenceAuditResponse(APIModel):
     checked_at: str
     complete: bool
+    orphans: list[dict[str, Any]]
     results: list[EvidenceVerifyResponse]
     truncated: bool

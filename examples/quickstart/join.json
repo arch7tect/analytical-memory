@@ -1,0 +1,12 @@
+{
+  "name": "message_to_session",
+  "relation": "session",
+  "from": {
+    "type": "example.SessionMessage",
+    "fields": ["session_id"]
+  },
+  "to": {
+    "type": "example.Session",
+    "fields": ["id"]
+  }
+}

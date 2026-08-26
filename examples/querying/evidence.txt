@@ -1,1 +1,0 @@
-Synthetic evidence for relation, metric, slot, and text-search examples.

@@ -5,15 +5,23 @@ from pathlib import Path
 from typing import Any
 
 from analytical_memory.domain import (
-    BatchPlan,
+    AnalyticalAttributeRequest,
+    AnalyticalMetricRequest,
     EmbeddingBatch,
     EmbeddingProfileRecord,
     EmbeddingProviderInfo,
     EmbeddingRecord,
+    EntityDeclaration,
     EvidenceObjectRecord,
+    EvidencePutResult,
     EvidenceStatus,
     EvidenceStoreStatus,
+    ImportEvidence,
+    JoinRequest,
+    JsonlImportRequest,
+    JsonlScan,
     MemoryStoreStatus,
+    QueryPlan,
     StoredBatch,
 )
 
@@ -39,6 +47,12 @@ class EvidenceStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def put_tracked(
+        self, source: Path, expected: EvidenceObjectRecord
+    ) -> EvidencePutResult:
+        raise NotImplementedError
+
+    @abstractmethod
     def put_bytes(self, data: bytes, expected: EvidenceObjectRecord) -> EvidenceStatus:
         raise NotImplementedError
 
@@ -59,7 +73,15 @@ class EvidenceStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def remove(self, digest: str) -> bool:
+        raise NotImplementedError
+
+    @abstractmethod
     def status(self) -> EvidenceStoreStatus:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_digests(self, limit: int) -> tuple[list[str], bool]:
         raise NotImplementedError
 
 
@@ -73,19 +95,55 @@ class MemoryStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def apply(self, plan: BatchPlan) -> dict[str, Any]:
+    def put_entity_declaration(
+        self,
+        declaration: EntityDeclaration,
+        contract_fingerprint: str,
+        evidence: ImportEvidence,
+    ) -> dict[str, Any]:
         raise NotImplementedError
 
     @abstractmethod
-    def current_facts(self) -> list[dict[str, Any]]:
+    def import_jsonl(
+        self,
+        request: JsonlImportRequest,
+        scan: JsonlScan,
+        evidence: ImportEvidence,
+    ) -> dict[str, Any]:
         raise NotImplementedError
 
     @abstractmethod
-    def current_slots(self) -> list[dict[str, Any]]:
+    def write_analytical_attribute(
+        self,
+        request: AnalyticalAttributeRequest,
+        evidence: ImportEvidence,
+    ) -> dict[str, Any]:
         raise NotImplementedError
 
     @abstractmethod
-    def current_relations(self) -> list[dict[str, Any]]:
+    def ontology_snapshot(self, namespace: str | None = None) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def materialize_join(
+        self, request: JoinRequest, evidence: ImportEvidence
+    ) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def execute_query(self, plan: QueryPlan) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def deactivate_relation(self, relation_id: str) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def delete_node(self, node_id: str) -> dict[str, int]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def export_current(self) -> dict[str, list[dict[str, Any]]]:
         raise NotImplementedError
 
     @abstractmethod
@@ -109,6 +167,12 @@ class MemoryStore(ABC):
     def current_metric(
         self, definition_version: str, dimensions_json: str
     ) -> dict[str, Any] | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def write_analytical_metric(
+        self, request: AnalyticalMetricRequest, evidence: ImportEvidence
+    ) -> dict[str, Any]:
         raise NotImplementedError
 
     @abstractmethod

@@ -39,7 +39,7 @@ LOCATOR_KEYS = {
         "interleaved",
     },
 }
-PRIVACY_ORDER = {"public": 0, "private": 1, "restricted": 2, "forbidden": 3}
+PRIVACY_ORDER = {"public": 0, "private": 1}
 
 
 @dataclass(frozen=True, slots=True)

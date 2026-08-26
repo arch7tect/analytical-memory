@@ -1,20 +1,25 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from analytical_memory.api_models import (
-    ApplyResponse,
-    CurrentFactsResponse,
+    AnalyticalAttributeResponse,
+    AnalyticalMetricResponse,
     CurrentMetricResponse,
-    CurrentSlotsResponse,
+    DirectRelationExplanation,
     EmbeddingProfileResponse,
     EvidenceAuditResponse,
     EvidenceReadResponse,
     EvidenceStatusResponse,
     EvidenceVerifyResponse,
     ExplanationResponse,
+    JoinMaterializationResponse,
+    JsonlImportResponse,
     MetricExplanationResponse,
-    PreviewResponse,
+    NodeDeleteResponse,
+    OntologyResponse,
+    QueryIRResponse,
     RelationExplanationResponse,
     SearchResponse,
     SemanticSearchResponse,
@@ -27,19 +32,121 @@ class MemoryAPI:
     def __init__(self, application: MemoryApplication) -> None:
         self.application = application
 
-    def ingestion_preview(self, batch_path: str | Path) -> PreviewResponse:
-        return PreviewResponse.model_validate(
-            self.application.preview(Path(batch_path))
+    def declare_entity(
+        self,
+        entity_type: str,
+        privacy: str,
+        fields: dict[str, dict[str, Any]],
+        contract_fingerprint: str,
+    ) -> OntologyResponse:
+        return OntologyResponse.model_validate(
+            self.application.declare_entity(
+                entity_type,
+                privacy=privacy,
+                fields=fields,
+                contract_fingerprint=contract_fingerprint,
+            )
         )
 
-    def ingestion_apply(self, batch_path: str | Path) -> ApplyResponse:
-        return ApplyResponse.model_validate(self.application.apply(Path(batch_path)))
+    def ontology(self, namespace: str | None = None) -> OntologyResponse:
+        return OntologyResponse.model_validate(self.application.ontology(namespace))
 
-    def query_current_facts(self) -> CurrentFactsResponse:
-        return CurrentFactsResponse.model_validate(self.application.current_facts())
+    def jsonl_import(
+        self,
+        source_path: str | Path,
+        entity_type: str,
+        key: list[dict[str, str]],
+        contract_fingerprint: str,
+    ) -> JsonlImportResponse:
+        return JsonlImportResponse.model_validate(
+            self.application.jsonl_import(
+                source_path,
+                entity_type=entity_type,
+                key=key,
+                contract_fingerprint=contract_fingerprint,
+            )
+        )
 
-    def query_current_slots(self) -> CurrentSlotsResponse:
-        return CurrentSlotsResponse.model_validate(self.application.current_slots())
+    def materialize_join(
+        self,
+        name: str,
+        relation: str,
+        from_: dict[str, Any],
+        to: dict[str, Any],
+        contract_fingerprint: str,
+        idempotency_key: str | None = None,
+    ) -> JoinMaterializationResponse:
+        return JoinMaterializationResponse.model_validate(
+            self.application.materialize_join(
+                name=name,
+                relation=relation,
+                from_=from_,
+                to=to,
+                contract_fingerprint=contract_fingerprint,
+                idempotency_key=idempotency_key,
+            )
+        )
+
+    def write_analytical_attribute(
+        self,
+        node_id: str,
+        attribute_name: str,
+        value: Any,
+        method: str,
+        contract_fingerprint: str,
+    ) -> AnalyticalAttributeResponse:
+        return AnalyticalAttributeResponse.model_validate(
+            self.application.write_analytical_attribute(
+                node_id,
+                attribute_name,
+                value,
+                method=method,
+                contract_fingerprint=contract_fingerprint,
+            )
+        )
+
+    def execute_query(self, document: dict[str, Any]) -> QueryIRResponse:
+        return QueryIRResponse.model_validate(self.application.execute_query(document))
+
+    def write_analytical_metric(
+        self,
+        definition_version: str,
+        value: Any,
+        dimensions: dict[str, Any],
+        method: str,
+        method_version: str,
+        contract_fingerprint: str,
+        coverage: dict[str, Any] | None = None,
+        complete: bool = True,
+        unit: str | None = None,
+        numerator: float | None = None,
+        denominator: float | None = None,
+        privacy: str = "public",
+    ) -> AnalyticalMetricResponse:
+        return AnalyticalMetricResponse.model_validate(
+            self.application.write_analytical_metric(
+                definition_version,
+                value,
+                dimensions,
+                method=method,
+                method_version=method_version,
+                contract_fingerprint=contract_fingerprint,
+                coverage=coverage,
+                complete=complete,
+                unit=unit,
+                numerator=numerator,
+                denominator=denominator,
+                privacy=privacy,
+            )
+        )
+
+    def deactivate_relation(self, relation_id: str) -> DirectRelationExplanation:
+        return DirectRelationExplanation.model_validate(
+            self.application.deactivate_relation(relation_id)
+        )
+
+    def delete_node(self, node_id: str) -> NodeDeleteResponse:
+        return NodeDeleteResponse.model_validate(self.application.delete_node(node_id))
 
     def query_current_metric(
         self, definition_version: str, dimensions: dict[str, object]

@@ -9,7 +9,6 @@ from analytical_memory.adapters.filesystem import FileEvidenceStore
 from analytical_memory.adapters.openai import OpenAIEmbeddingProvider
 from analytical_memory.adapters.sqlite import SqliteMemoryStore
 from analytical_memory.application import MemoryApplication
-from analytical_memory.evidence import PRIVACY_ORDER
 from analytical_memory.schema_contract import load_schema
 
 load_dotenv()
@@ -29,10 +28,7 @@ def environment_schema() -> Path | None:
 
 
 def environment_embedding_privacy() -> str:
-    value = os.environ.get("ANALYTICAL_MEMORY_EMBEDDING_PRIVACY", "restricted")
-    if value not in PRIVACY_ORDER or value == "forbidden":
-        raise ValueError(f"unknown ANALYTICAL_MEMORY_EMBEDDING_PRIVACY: {value}")
-    return value
+    return "public"
 
 
 def build_application(

@@ -38,3 +38,27 @@ class SnapshotError(MemoryErrorBase):
 
 class EmbeddingProviderError(MemoryErrorBase):
     pass
+
+
+class ImportValidationError(MemoryErrorBase):
+    pass
+
+
+class OntologyConflictError(MemoryErrorBase):
+    pass
+
+
+class AmbiguousTargetError(MemoryErrorBase):
+    pass
+
+
+class JoinConflictError(MemoryErrorBase):
+    pass
+
+
+class QueryValidationError(MemoryErrorBase):
+    pass
+
+
+class ProhibitedContentError(MemoryErrorBase):
+    pass

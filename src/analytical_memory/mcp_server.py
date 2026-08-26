@@ -8,18 +8,22 @@ from mcp.types import ToolAnnotations
 
 from analytical_memory.api import MemoryAPI
 from analytical_memory.api_models import (
-    ApplyResponse,
-    CurrentFactsResponse,
+    AnalyticalAttributeResponse,
+    AnalyticalMetricResponse,
     CurrentMetricResponse,
-    CurrentSlotsResponse,
+    DirectRelationExplanation,
     EmbeddingProfileResponse,
     EvidenceAuditResponse,
     EvidenceReadResponse,
     EvidenceStatusResponse,
     EvidenceVerifyResponse,
     ExplanationResponse,
+    JoinMaterializationResponse,
+    JsonlImportResponse,
     MetricExplanationResponse,
-    PreviewResponse,
+    NodeDeleteResponse,
+    OntologyResponse,
+    QueryIRResponse,
     RelationExplanationResponse,
     SearchResponse,
     SemanticSearchResponse,
@@ -76,43 +80,41 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
         )
 
     @server.resource(
+        "memory://schema/ontology/current",
+        name="current-ontology",
+        description="Current data-derived ontology and fingerprint.",
+        mime_type="application/json",
+    )
+    def current_ontology() -> str:
+        return canonical_json(application.ontology())
+
+    @server.resource(
+        "memory://schema/query-ir/current",
+        name="query-ir",
+        description="Canonical read-only JSON Query IR v1 contract.",
+        mime_type="application/json",
+    )
+    def query_ir_contract() -> str:
+        return canonical_json(
+            {
+                "operators": ["eq", "ne", "lt", "lte", "gt", "gte", "in", "exists"],
+                "query_ir_version": "1",
+                "schema_fingerprint": application.schema.fingerprint,
+            }
+        )
+
+    @server.resource(
         "memory://schema/ontology/{namespace}",
         name="ontology-namespace",
         description="Namespace metadata for the currently implemented ontology subset.",
         mime_type="application/json",
     )
     def ontology_namespace(namespace: str) -> str:
-        return canonical_json(
-            {
-                "definitions": {},
-                "namespace": namespace,
-                "schema_fingerprint": application.schema.fingerprint,
-                "status": "not_declared",
-            }
-        )
+        return canonical_json(application.ontology(namespace))
 
     @server.tool(
-        name="memory_ingest_preview",
-        description=(
-            "Validate and preview one normalized ingestion batch without writes."
-        ),
-        annotations=ToolAnnotations(
-            read_only_hint=True,
-            destructive_hint=False,
-            idempotent_hint=True,
-            open_world_hint=False,
-        ),
-        structured_output=True,
-    )
-    def ingestion_preview(batch_path: str) -> PreviewResponse:
-        try:
-            return api.ingestion_preview(batch_path)
-        except (MemoryErrorBase, OSError, ValueError) as exc:
-            raise ToolError(str(exc)) from exc
-
-    @server.tool(
-        name="memory_ingest_apply",
-        description="Validate and atomically apply one normalized ingestion batch.",
+        name="memory_ontology_declare_entity",
+        description="Create or replace optional entity validation metadata.",
         annotations=ToolAnnotations(
             read_only_hint=False,
             destructive_hint=False,
@@ -121,15 +123,149 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
         ),
         structured_output=True,
     )
-    def ingestion_apply(batch_path: str) -> ApplyResponse:
+    def declare_entity(
+        entity_type: str,
+        contract_fingerprint: str,
+        privacy: Literal["public", "private"] = "public",
+        fields: dict[str, dict[str, Any]] | None = None,
+    ) -> OntologyResponse:
         try:
-            return api.ingestion_apply(batch_path)
+            return api.declare_entity(
+                entity_type, privacy, fields or {}, contract_fingerprint
+            )
         except (MemoryErrorBase, OSError, ValueError) as exc:
             raise ToolError(str(exc)) from exc
 
     @server.tool(
-        name="memory_query_current_facts",
-        description="Return the bounded saved current-facts query.",
+        name="memory_jsonl_import",
+        description="Stream, validate, and atomically patch/upsert one JSONL dataset.",
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=False,
+            idempotent_hint=True,
+            open_world_hint=False,
+        ),
+        structured_output=True,
+    )
+    def jsonl_import(
+        source_path: str,
+        entity_type: str,
+        key: list[dict[str, str]],
+        contract_fingerprint: str,
+    ) -> JsonlImportResponse:
+        try:
+            return api.jsonl_import(source_path, entity_type, key, contract_fingerprint)
+        except (MemoryErrorBase, OSError, ValueError) as exc:
+            raise ToolError(str(exc)) from exc
+
+    @server.tool(
+        name="memory_attribute_write_analysis",
+        description=(
+            "Write one analytical value as the current attribute with run provenance."
+        ),
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=False,
+            idempotent_hint=True,
+            open_world_hint=False,
+        ),
+        structured_output=True,
+    )
+    def write_analytical_attribute(
+        node_id: str,
+        attribute_name: str,
+        value: Any,
+        method: str,
+        contract_fingerprint: str,
+    ) -> AnalyticalAttributeResponse:
+        try:
+            return api.write_analytical_attribute(
+                node_id,
+                attribute_name,
+                value,
+                method,
+                contract_fingerprint,
+            )
+        except (MemoryErrorBase, OSError, ValueError) as exc:
+            raise ToolError(str(exc)) from exc
+
+    @server.tool(
+        name="memory_metric_write_analysis",
+        description="Write one immutable analytical metric with run provenance.",
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=False,
+            idempotent_hint=True,
+            open_world_hint=False,
+        ),
+        structured_output=True,
+    )
+    def write_analytical_metric(
+        definition_version: str,
+        value: Any,
+        dimensions: dict[str, Any],
+        method: str,
+        method_version: str,
+        contract_fingerprint: str,
+        coverage: dict[str, Any] | None = None,
+        complete: bool = True,
+        unit: str | None = None,
+        numerator: float | None = None,
+        denominator: float | None = None,
+        privacy: Literal["public", "private"] = "public",
+    ) -> AnalyticalMetricResponse:
+        try:
+            return api.write_analytical_metric(
+                definition_version,
+                value,
+                dimensions,
+                method,
+                method_version,
+                contract_fingerprint,
+                coverage,
+                complete,
+                unit,
+                numerator,
+                denominator,
+                privacy,
+            )
+        except (MemoryErrorBase, OSError, ValueError) as exc:
+            raise ToolError(str(exc)) from exc
+
+    @server.tool(
+        name="memory_join_materialize",
+        description="Declare and materialize one exact typed join in one transaction.",
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=False,
+            idempotent_hint=False,
+            open_world_hint=False,
+        ),
+        structured_output=True,
+    )
+    def materialize_join(
+        name: str,
+        relation: str,
+        from_: dict[str, Any],
+        to: dict[str, Any],
+        contract_fingerprint: str,
+        idempotency_key: str | None = None,
+    ) -> JoinMaterializationResponse:
+        try:
+            return api.materialize_join(
+                name,
+                relation,
+                from_,
+                to,
+                contract_fingerprint,
+                idempotency_key,
+            )
+        except (MemoryErrorBase, OSError, ValueError) as exc:
+            raise ToolError(str(exc)) from exc
+
+    @server.tool(
+        name="memory_query_execute",
+        description="Execute one bounded read-only JSON Query IR v1 request.",
         annotations=ToolAnnotations(
             read_only_hint=True,
             destructive_hint=False,
@@ -138,26 +274,43 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
         ),
         structured_output=True,
     )
-    def query_current_facts() -> CurrentFactsResponse:
+    def execute_query(document: dict[str, Any]) -> QueryIRResponse:
         try:
-            return api.query_current_facts()
+            return api.execute_query(document)
         except (MemoryErrorBase, OSError, ValueError) as exc:
             raise ToolError(str(exc)) from exc
 
     @server.tool(
-        name="memory_query_current_slots",
-        description="Return complete single- and multi-valued slot semantics.",
+        name="memory_relation_deactivate",
+        description="Deactivate one current Relation without deleting provenance.",
         annotations=ToolAnnotations(
-            read_only_hint=True,
+            read_only_hint=False,
             destructive_hint=False,
             idempotent_hint=True,
             open_world_hint=False,
         ),
         structured_output=True,
     )
-    def query_current_slots() -> CurrentSlotsResponse:
+    def deactivate_relation(relation_id: str) -> DirectRelationExplanation:
         try:
-            return api.query_current_slots()
+            return api.deactivate_relation(relation_id)
+        except (MemoryErrorBase, OSError, ValueError) as exc:
+            raise ToolError(str(exc)) from exc
+
+    @server.tool(
+        name="memory_node_delete",
+        description="Delete one Node and cascade its attributes and Relations.",
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=True,
+            idempotent_hint=False,
+            open_world_hint=False,
+        ),
+        structured_output=True,
+    )
+    def delete_node(node_id: str) -> NodeDeleteResponse:
+        try:
+            return api.delete_node(node_id)
         except (MemoryErrorBase, OSError, ValueError) as exc:
             raise ToolError(str(exc)) from exc
 
@@ -266,8 +419,7 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
         query: str,
         namespace: str | None = None,
         node_type: str | None = None,
-        privacy_ceiling: Literal["public", "private", "restricted", "forbidden"]
-        | None = None,
+        privacy_ceiling: Literal["public"] | None = None,
         limit: int = 20,
     ) -> SemanticSearchResponse:
         try:
@@ -284,7 +436,7 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
 
     @server.tool(
         name="memory_explain",
-        description="Explain one node-attribute fact through assertions and evidence.",
+        description="Explain one current attribute through its direct provenance.",
         annotations=ToolAnnotations(
             read_only_hint=True,
             destructive_hint=False,
@@ -301,7 +453,7 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
 
     @server.tool(
         name="memory_explain_relation",
-        description="Explain one relation fact through assertions and evidence.",
+        description="Explain one current relation through its direct provenance.",
         annotations=ToolAnnotations(
             read_only_hint=True,
             destructive_hint=False,

@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from collections.abc import Iterable, Iterator
+import uuid
+from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -12,29 +14,38 @@ from analytical_memory.canonical import (
     canonical_json,
     canonical_text_key,
     sha256_bytes,
+    sha256_json,
     stable_uuid,
 )
 from analytical_memory.domain import (
-    AttributeRecord,
-    BatchPlan,
+    AnalyticalAttributeRequest,
+    AnalyticalMetricRequest,
     EmbeddingProfileRecord,
     EmbeddingRecord,
+    EntityDeclaration,
+    ImportEvidence,
+    JoinRequest,
+    JsonlImportRequest,
+    JsonlScan,
     MemoryStoreStatus,
-    NodeRecord,
-    RelationRecord,
-    SearchDocumentRecord,
-    SourceRecord,
+    QueryPlan,
     StoredBatch,
 )
 from analytical_memory.errors import (
+    AmbiguousTargetError,
     BatchValidationError,
+    ImportValidationError,
+    JoinConflictError,
+    OntologyConflictError,
+    QueryValidationError,
     RecordNotFoundError,
     RetentionBlockedError,
     SnapshotError,
     StoreNotInitializedError,
 )
-from analytical_memory.limits import MAX_EXPLANATION_ASSERTIONS, MAX_QUERY_RESULTS
+from analytical_memory.jsonl import iter_jsonl, json_type, split_entity_type
 from analytical_memory.migrations import default_migrations_directory, migrate_sqlite
+from analytical_memory.ontology import ontology_document
 from analytical_memory.ports import MemoryStore
 
 SNAPSHOT_TABLES = (
@@ -44,13 +55,14 @@ SNAPSHOT_TABLES = (
     "node",
     "node_attribute",
     "relation",
-    "assertion",
     "metric",
+    "entity_declaration",
+    "observed_field",
+    "ontology_declaration",
     "evidence_object",
     "evidence_acquisition",
     "evidence_derivation",
     "evidence_fragment",
-    "evidence_binding",
     "search_document",
     "evidence_location",
     "evidence_verification",
@@ -58,45 +70,14 @@ SNAPSHOT_TABLES = (
 )
 
 
-def _fact_state(supports: int, contradicts: int) -> str:
-    if supports and contradicts:
-        return "contested"
-    if supports:
-        return "supported"
-    if contradicts:
-        return "contradicted"
-    return "unasserted"
+def _now() -> str:
+    return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _canonical_compare(left: str, right: str) -> int:
     left_key = canonical_text_key(left)
     right_key = canonical_text_key(right)
     return (left_key > right_key) - (left_key < right_key)
-
-
-def _binding_summary(row: sqlite3.Row) -> dict[str, Any]:
-    return {
-        "binding_id": str(row["id"]),
-        "role": str(row["role"]),
-        "fragment_id": str(row["fragment_id"]),
-        "fragment": {
-            "digest": str(row["fragment_digest"]),
-            "byte_size": int(row["fragment_byte_size"]),
-            "privacy_class": str(row["fragment_privacy_class"]),
-        },
-        "locator_kind": str(row["locator_kind"]),
-        "locator": json.loads(str(row["locator_json"])),
-        "extractor": {
-            "id": str(row["extractor_id"]),
-            "version": str(row["extractor_version"]),
-        },
-        "object": {
-            "digest": str(row["object_digest"]),
-            "byte_size": int(row["object_byte_size"]),
-            "media_type": str(row["media_type"]),
-            "privacy_class": str(row["object_privacy_class"]),
-        },
-    }
 
 
 class SqliteMemoryStore(MemoryStore):
@@ -150,650 +131,1597 @@ class SqliteMemoryStore(MemoryStore):
         return StoredBatch(input_hash=str(row["input_hash"]), result=result)
 
     @staticmethod
-    def _insert_many(
-        connection: sqlite3.Connection,
-        table: str,
-        columns: tuple[str, ...],
-        records: Iterable[object],
-    ) -> None:
-        placeholders = ", ".join("?" for _ in columns)
-        column_list = ", ".join(columns)
-        sql = (
-            f"INSERT INTO {table} ({column_list}) VALUES ({placeholders}) "
-            "ON CONFLICT(id) DO NOTHING"
-        )
-        connection.executemany(
-            sql,
-            [
-                tuple(getattr(record, column) for column in columns)
-                for record in records
-            ],
-        )
+    def _declaration_fields(raw: str | None) -> dict[str, dict[str, Any]]:
+        if raw is None:
+            return {}
+        value = json.loads(raw)
+        if not isinstance(value, dict):
+            raise ValueError("stored declaration fields must be an object")
+        return value
 
     @staticmethod
-    def _validate_immutable_privacy(
-        connection: sqlite3.Connection,
-        table: str,
-        records: Iterable[
-            SourceRecord
-            | NodeRecord
-            | AttributeRecord
-            | RelationRecord
-            | SearchDocumentRecord
-        ],
-    ) -> None:
-        if table not in {
-            "source",
-            "node",
-            "node_attribute",
-            "relation",
-            "search_document",
-        }:
-            raise ValueError(f"privacy validation is not supported for {table}")
-        for record in records:
-            row = connection.execute(
-                f"SELECT privacy_class FROM {table} WHERE id = ?", (record.id,)
+    def _ontology_snapshot_connection(
+        connection: sqlite3.Connection, namespace: str | None = None
+    ) -> dict[str, Any]:
+        declarations = [
+            dict(row)
+            for row in connection.execute(
+                "SELECT * FROM entity_declaration "
+                "WHERE (? IS NULL OR substr(entity_type, 1, length(?) + 1) = ? || '.') "
+                "ORDER BY entity_type",
+                (namespace, namespace, namespace),
+            ).fetchall()
+        ]
+        fields = [
+            dict(row)
+            for row in connection.execute(
+                "SELECT * FROM observed_field "
+                "WHERE (? IS NULL OR substr(entity_type, 1, length(?) + 1) = ? || '.') "
+                "ORDER BY entity_type, field_name",
+                (namespace, namespace, namespace),
+            ).fetchall()
+        ]
+        joins: list[dict[str, Any]] = []
+        for row in connection.execute(
+            "SELECT * FROM ontology_declaration "
+            "WHERE (? IS NULL "
+            "OR substr(from_entity, 1, length(?) + 1) = ? || '.' "
+            "OR substr(to_entity, 1, length(?) + 1) = ? || '.') "
+            "ORDER BY name",
+            (namespace, namespace, namespace, namespace, namespace),
+        ).fetchall():
+            item = dict(row)
+            item["from_fields"] = json.loads(str(row["from_fields_json"]))
+            item["to_fields"] = json.loads(str(row["to_fields_json"]))
+            counts = connection.execute(
+                "SELECT SUM(CASE WHEN active = 1 THEN 1 ELSE 0 END), "
+                "SUM(CASE WHEN active = 0 THEN 1 ELSE 0 END) FROM relation "
+                "WHERE logical_key = ? AND type = ?",
+                (row["name"], row["relation_type"]),
             ).fetchone()
-            if row is not None and str(row["privacy_class"]) != record.privacy_class:
-                raise BatchValidationError(
-                    f"{table} privacy_class is immutable for id {record.id}"
-                )
+            item["active_edge_count"] = int(counts[0] or 0)
+            item["inactive_edge_count"] = int(counts[1] or 0)
+            joins.append(item)
+        statistics = {
+            "nodes": int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM node WHERE (? IS NULL OR namespace = ?)",
+                    (namespace, namespace),
+                ).fetchone()[0]
+            ),
+            "attributes": int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM node_attribute AS attribute "
+                    "JOIN node ON node.id = attribute.node_id "
+                    "WHERE (? IS NULL OR node.namespace = ?)",
+                    (namespace, namespace),
+                ).fetchone()[0]
+            ),
+            "active_relations": int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM relation "
+                    "JOIN node AS source ON source.id = relation.source_node_id "
+                    "JOIN node AS target ON target.id = relation.target_node_id "
+                    "WHERE relation.active = 1 AND "
+                    "(? IS NULL OR source.namespace = ? OR target.namespace = ?)",
+                    (namespace, namespace, namespace),
+                ).fetchone()[0]
+            ),
+        }
+        return ontology_document(declarations, fields, joins, statistics)
 
-    def apply(self, plan: BatchPlan) -> dict[str, Any]:
-        result = plan.result()
+    def ontology_snapshot(self, namespace: str | None = None) -> dict[str, Any]:
+        with self._connect() as connection:
+            return self._ontology_snapshot_connection(connection, namespace)
+
+    def put_entity_declaration(
+        self,
+        declaration: EntityDeclaration,
+        contract_fingerprint: str,
+        evidence: ImportEvidence,
+    ) -> dict[str, Any]:
+        split_entity_type(declaration.entity_type)
+        if declaration.privacy not in {"public", "private"}:
+            raise ImportValidationError("privacy must be public or private")
+        names = [field.name for field in declaration.fields]
+        if len(names) != len(set(names)):
+            raise ImportValidationError("declared field names must be unique")
+        fields: dict[str, dict[str, Any]] = {}
+        for field in declaration.fields:
+            if not field.name:
+                raise ImportValidationError("declared field name must not be empty")
+            declared_type = field.type
+            if declared_type == "integer":
+                declared_type = "number"
+            if declared_type not in {
+                None,
+                "string",
+                "number",
+                "boolean",
+                "object",
+                "array",
+            }:
+                raise ImportValidationError(
+                    f"unsupported declared type for {field.name}: {field.type}"
+                )
+            privacy = field.privacy or declaration.privacy
+            if privacy not in {"public", "private"}:
+                raise ImportValidationError("privacy must be public or private")
+            fields[field.name] = {
+                "nullable": field.nullable,
+                "privacy": privacy,
+                "required": field.required,
+                "searchable": field.searchable,
+                "type": declared_type,
+            }
+        fields_json = canonical_json(fields)
+        declaration_hash = sha256_json(
+            {
+                "entity_type": declaration.entity_type,
+                "fields": fields,
+                "privacy": declaration.privacy,
+            }
+        )
+        recorded_at = _now()
         with self._write_connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            source_id = stable_uuid(
+                "source", "entity-declaration", evidence.object.digest
+            )
+            run_id = stable_uuid(
+                "analytical_run", "entity-declaration", evidence.object.digest
+            )
+            connection.execute(
+                "INSERT INTO source "
+                "(id, natural_key, kind, locator, privacy_class, recorded_at) "
+                "VALUES (?, ?, 'entity-declaration', ?, ?, ?) "
+                "ON CONFLICT(id) DO NOTHING",
+                (
+                    source_id,
+                    f"entity-declaration:{evidence.object.digest}",
+                    f"evidence:sha256:{evidence.object.digest}",
+                    evidence.object.privacy_class,
+                    recorded_at,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO evidence_object "
+                "(id, digest, byte_size, media_type, privacy_class, recorded_at) "
+                "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
+                (
+                    evidence.object.id,
+                    evidence.object.digest,
+                    evidence.object.byte_size,
+                    evidence.object.media_type,
+                    evidence.object.privacy_class,
+                    evidence.object.recorded_at,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO evidence_fragment "
+                "(id, evidence_object_id, locator_kind, locator_json, extractor_id, "
+                "extractor_version, byte_size, digest, privacy_class, recorded_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
+                (
+                    evidence.fragment.id,
+                    evidence.fragment.evidence_object_id,
+                    evidence.fragment.locator_kind,
+                    evidence.fragment.locator_json,
+                    evidence.fragment.extractor_id,
+                    evidence.fragment.extractor_version,
+                    evidence.fragment.byte_size,
+                    evidence.fragment.digest,
+                    evidence.fragment.privacy_class,
+                    evidence.fragment.recorded_at,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO analytical_run "
+                "(id, idempotency_key, batch_id, source_id, method, recorded_at) "
+                "VALUES (?, ?, NULL, ?, 'entity-declaration-v1', ?) "
+                "ON CONFLICT(id) DO NOTHING",
+                (
+                    run_id,
+                    f"entity-declaration:{evidence.object.digest}",
+                    source_id,
+                    recorded_at,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO evidence_acquisition "
+                "(id, evidence_object_id, source_id, run_id, privacy_class, "
+                "retention_required, retain_until, method, review_status, recorded_at) "
+                "VALUES (?, ?, ?, ?, ?, 1, NULL, 'entity-declaration-v1', "
+                "'unreviewed', ?) ON CONFLICT(id) DO NOTHING",
+                (
+                    stable_uuid("evidence_acquisition", evidence.object.id, run_id),
+                    evidence.object.id,
+                    source_id,
+                    run_id,
+                    evidence.object.privacy_class,
+                    recorded_at,
+                ),
+            )
+            existing = connection.execute(
+                "SELECT * FROM entity_declaration WHERE entity_type = ?",
+                (declaration.entity_type,),
+            ).fetchone()
+            if (
+                existing is not None
+                and str(existing["privacy_class"]) == "private"
+                and declaration.privacy == "public"
+            ):
+                raise OntologyConflictError("entity privacy cannot be loosened")
+            observed_rows = connection.execute(
+                "SELECT * FROM observed_field WHERE entity_type = ?",
+                (declaration.entity_type,),
+            ).fetchall()
+            observed = {str(row["field_name"]): row for row in observed_rows}
+            for name, specification in fields.items():
+                row = observed.get(name)
+                if row is None:
+                    continue
+                known_type = str(row["json_type"])
+                requested_type = specification["type"]
+                if (
+                    requested_type is not None
+                    and known_type != "unresolved"
+                    and requested_type != known_type
+                ):
+                    raise OntologyConflictError(
+                        f"field {name!r} already has type {known_type}"
+                    )
+                if (
+                    str(row["privacy_class"]) == "private"
+                    and specification["privacy"] == "public"
+                ):
+                    raise OntologyConflictError(
+                        f"field {name!r} privacy cannot be loosened"
+                    )
+                if not specification["nullable"]:
+                    null_row = connection.execute(
+                        "SELECT 1 FROM node_attribute AS attribute "
+                        "JOIN node ON node.id = attribute.node_id "
+                        "WHERE node.namespace || '.' || node.type = ? "
+                        "AND attribute.attribute_name = ? "
+                        "AND attribute.value_json = 'null' LIMIT 1",
+                        (declaration.entity_type, name),
+                    ).fetchone()
+                    if null_row is not None:
+                        raise OntologyConflictError(
+                            f"field {name!r} has current null values"
+                        )
+            if existing is not None:
+                connection.execute(
+                    "UPDATE entity_declaration SET privacy_class = ?, fields_json = ?, "
+                    "declaration_hash = ?, source_id = ?, fragment_id = ?, "
+                    "recorded_at = ? WHERE entity_type = ?",
+                    (
+                        declaration.privacy,
+                        fields_json,
+                        declaration_hash,
+                        source_id,
+                        evidence.fragment.id,
+                        recorded_at,
+                        declaration.entity_type,
+                    ),
+                )
+            else:
+                connection.execute(
+                    "INSERT INTO entity_declaration "
+                    "(entity_type, privacy_class, fields_json, declaration_hash, "
+                    "source_id, fragment_id, recorded_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        declaration.entity_type,
+                        declaration.privacy,
+                        fields_json,
+                        declaration_hash,
+                        source_id,
+                        evidence.fragment.id,
+                        recorded_at,
+                    ),
+                )
+            for name, specification in fields.items():
+                requested_type = specification["type"] or "unresolved"
+                connection.execute(
+                    "INSERT INTO observed_field "
+                    "(entity_type, field_name, json_type, privacy_class, required, "
+                    "nullable, searchable, declared, first_batch_id, last_batch_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, 1, NULL, NULL) "
+                    "ON CONFLICT(entity_type, field_name) DO UPDATE SET "
+                    "json_type = CASE WHEN observed_field.json_type = 'unresolved' "
+                    "THEN excluded.json_type ELSE observed_field.json_type END, "
+                    "privacy_class = CASE WHEN "
+                    "observed_field.privacy_class = 'private' "
+                    "THEN 'private' ELSE excluded.privacy_class END, "
+                    "required = excluded.required, nullable = excluded.nullable, "
+                    "searchable = excluded.searchable, declared = 1",
+                    (
+                        declaration.entity_type,
+                        name,
+                        requested_type,
+                        specification["privacy"],
+                        int(specification["required"]),
+                        int(specification["nullable"]),
+                        int(specification["searchable"]),
+                    ),
+                )
+            if declaration.privacy == "private":
+                namespace, node_type = split_entity_type(declaration.entity_type)
+                connection.execute(
+                    "UPDATE node SET privacy_class = 'private', updated_at = ? "
+                    "WHERE namespace = ? AND type = ?",
+                    (recorded_at, namespace, node_type),
+                )
+                connection.execute(
+                    "UPDATE node_attribute SET privacy_class = 'private', "
+                    "updated_at = ? WHERE node_id IN "
+                    "(SELECT id FROM node WHERE namespace = ? AND type = ?)",
+                    (recorded_at, namespace, node_type),
+                )
+            for name, specification in fields.items():
+                if specification["privacy"] == "private":
+                    connection.execute(
+                        "UPDATE node_attribute SET privacy_class = 'private', "
+                        "updated_at = ? "
+                        "WHERE attribute_name = ? AND node_id IN "
+                        "(SELECT id FROM node WHERE namespace || '.' || type = ?)",
+                        (recorded_at, name, declaration.entity_type),
+                    )
+            connection.execute(
+                "UPDATE search_document SET privacy_class = 'private' "
+                "WHERE target_id IN "
+                "(SELECT id FROM node_attribute WHERE privacy_class = 'private')"
+            )
+            connection.execute(
+                "UPDATE evidence_fragment SET privacy_class = 'private' "
+                "WHERE id IN (SELECT fragment_id FROM node_attribute "
+                "WHERE privacy_class = 'private' AND fragment_id IS NOT NULL)"
+            )
+            connection.execute(
+                "UPDATE evidence_object SET privacy_class = 'private' "
+                "WHERE id IN (SELECT evidence_object_id FROM evidence_fragment "
+                "WHERE privacy_class = 'private')"
+            )
+            connection.execute(
+                "UPDATE evidence_acquisition SET privacy_class = 'private' "
+                "WHERE evidence_object_id IN (SELECT id FROM evidence_object "
+                "WHERE privacy_class = 'private')"
+            )
+            connection.execute(
+                "UPDATE source SET privacy_class = 'private' WHERE id IN "
+                "(SELECT source_id FROM node_attribute "
+                "WHERE privacy_class = 'private')"
+            )
+            return self._ontology_snapshot_connection(connection)
+
+    @staticmethod
+    def _insert_import_provenance(
+        connection: sqlite3.Connection,
+        request: JsonlImportRequest,
+        scan: JsonlScan,
+        evidence: ImportEvidence,
+        *,
+        batch_id: str,
+        idempotency_key: str,
+        recorded_at: str,
+    ) -> tuple[str, str]:
+        source_id = stable_uuid("source", "jsonl", scan.content_hash)
+        run_id = stable_uuid("analytical_run", idempotency_key)
+        connection.execute(
+            "INSERT INTO source "
+            "(id, natural_key, kind, locator, privacy_class, recorded_at) "
+            "VALUES (?, ?, 'jsonl', ?, ?, ?) ON CONFLICT(id) DO NOTHING",
+            (
+                source_id,
+                f"jsonl:{scan.content_hash}",
+                f"evidence:sha256:{scan.content_hash}",
+                evidence.object.privacy_class,
+                recorded_at,
+            ),
+        )
+        connection.execute(
+            "INSERT INTO evidence_object "
+            "(id, digest, byte_size, media_type, privacy_class, recorded_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
+            (
+                evidence.object.id,
+                evidence.object.digest,
+                evidence.object.byte_size,
+                evidence.object.media_type,
+                evidence.object.privacy_class,
+                evidence.object.recorded_at,
+            ),
+        )
+        connection.execute(
+            "INSERT INTO evidence_fragment "
+            "(id, evidence_object_id, locator_kind, locator_json, extractor_id, "
+            "extractor_version, byte_size, digest, privacy_class, recorded_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
+            (
+                evidence.fragment.id,
+                evidence.fragment.evidence_object_id,
+                evidence.fragment.locator_kind,
+                evidence.fragment.locator_json,
+                evidence.fragment.extractor_id,
+                evidence.fragment.extractor_version,
+                evidence.fragment.byte_size,
+                evidence.fragment.digest,
+                evidence.fragment.privacy_class,
+                evidence.fragment.recorded_at,
+            ),
+        )
+        connection.execute(
+            "INSERT INTO analytical_run "
+            "(id, idempotency_key, batch_id, source_id, method, recorded_at) "
+            "VALUES (?, ?, ?, ?, 'jsonl-import-v1', ?)",
+            (run_id, idempotency_key, batch_id, source_id, recorded_at),
+        )
+        connection.execute(
+            "INSERT INTO evidence_acquisition "
+            "(id, evidence_object_id, source_id, run_id, privacy_class, "
+            "retention_required, retain_until, method, review_status, recorded_at) "
+            "VALUES (?, ?, ?, ?, ?, 1, NULL, 'jsonl-import-v1', 'unreviewed', ?)",
+            (
+                stable_uuid("evidence_acquisition", evidence.object.id, run_id),
+                evidence.object.id,
+                source_id,
+                run_id,
+                evidence.object.privacy_class,
+                recorded_at,
+            ),
+        )
+        return source_id, run_id
+
+    def import_jsonl(
+        self,
+        request: JsonlImportRequest,
+        scan: JsonlScan,
+        evidence: ImportEvidence,
+    ) -> dict[str, Any]:
+        from analytical_memory.jsonl import import_idempotency_key
+
+        idempotency_key = import_idempotency_key(request, scan.content_hash)
+        batch_id = stable_uuid("ingestion_batch", idempotency_key)
+        namespace, node_type = split_entity_type(request.entity_type)
+        recorded_at = _now()
+        request_document = {
+            "entity_type": request.entity_type,
+            "key": [{"field": item.field, "type": item.type} for item in request.key],
+        }
+        with self._write_connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            replay = connection.execute(
+                "SELECT input_hash, result_json FROM ingestion_batch "
+                "WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+            if replay is not None:
+                if str(replay["input_hash"]) != scan.content_hash:
+                    raise ImportValidationError("idempotency key conflict")
+                result = json.loads(str(replay["result_json"]))
+                if not isinstance(result, dict):
+                    raise ValueError("stored import result must be an object")
+                result["replayed"] = True
+                return result
+
+            declaration_row = connection.execute(
+                "SELECT * FROM entity_declaration WHERE entity_type = ?",
+                (request.entity_type,),
+            ).fetchone()
+            declaration_fields = self._declaration_fields(
+                None if declaration_row is None else str(declaration_row["fields_json"])
+            )
+            entity_privacy = (
+                "public"
+                if declaration_row is None
+                else str(declaration_row["privacy_class"])
+            )
+            for name, specification in declaration_fields.items():
+                if (
+                    specification["required"]
+                    and scan.present_counts.get(name, 0) != scan.record_count
+                ):
+                    raise ImportValidationError(f"required field {name!r} is missing")
+                if not specification["nullable"] and name in scan.null_fields:
+                    raise ImportValidationError(f"field {name!r} is not nullable")
+                expected = specification.get("type")
+                actual = scan.field_types.get(name)
+                if expected is not None and actual is not None and expected != actual:
+                    raise ImportValidationError(
+                        f"field {name!r} has type {actual}, expected {expected}"
+                    )
+            existing_fields = {
+                str(row["field_name"]): row
+                for row in connection.execute(
+                    "SELECT * FROM observed_field WHERE entity_type = ?",
+                    (request.entity_type,),
+                ).fetchall()
+            }
+            for name, actual in scan.field_types.items():
+                row = existing_fields.get(name)
+                if row is not None and str(row["json_type"]) not in {
+                    "unresolved",
+                    actual,
+                }:
+                    raise ImportValidationError(
+                        f"field {name!r} already has type {row['json_type']}"
+                    )
+
             connection.execute(
                 "INSERT INTO ingestion_batch "
-                "(id, idempotency_key, input_hash, schema_fingerprint, "
-                "result_json, recorded_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "(id, idempotency_key, kind, input_hash, schema_fingerprint, "
+                "request_json, result_json, recorded_at) "
+                "VALUES (?, ?, 'jsonl-import', ?, ?, ?, '{}', ?)",
                 (
-                    plan.id,
-                    plan.idempotency_key,
-                    plan.input_hash,
-                    plan.schema_fingerprint,
-                    canonical_json(result),
-                    plan.recorded_at,
+                    batch_id,
+                    idempotency_key,
+                    scan.content_hash,
+                    request.contract_fingerprint,
+                    canonical_json(request_document),
+                    recorded_at,
                 ),
             )
-            self._validate_immutable_privacy(connection, "source", (plan.source,))
-            self._validate_immutable_privacy(connection, "node", plan.nodes)
-            self._validate_immutable_privacy(
-                connection, "node_attribute", plan.attributes
-            )
-            self._validate_immutable_privacy(connection, "relation", plan.relations)
-            self._validate_immutable_privacy(
-                connection, "search_document", plan.search_documents
-            )
-            self._insert_many(
+            source_id, run_id = self._insert_import_provenance(
                 connection,
-                "source",
-                (
-                    "id",
-                    "natural_key",
-                    "kind",
-                    "locator",
-                    "privacy_class",
-                    "recorded_at",
-                ),
-                (plan.source,),
+                request,
+                scan,
+                evidence,
+                batch_id=batch_id,
+                idempotency_key=idempotency_key,
+                recorded_at=recorded_at,
             )
-            self._insert_many(
-                connection,
-                "analytical_run",
-                (
-                    "id",
-                    "idempotency_key",
-                    "batch_id",
-                    "source_id",
-                    "valid_from",
-                    "valid_to",
-                    "method",
-                    "recorded_at",
-                ),
-                (plan.run,),
-            )
-            self._insert_many(
-                connection,
-                "node",
-                (
-                    "id",
-                    "namespace",
-                    "type",
-                    "natural_key",
-                    "display_label",
-                    "privacy_class",
-                    "recorded_at",
-                ),
-                plan.nodes,
-            )
-            self._insert_many(
-                connection,
-                "node_attribute",
-                (
-                    "id",
-                    "node_id",
-                    "name",
-                    "cardinality",
-                    "value_json",
-                    "value_hash",
-                    "searchable",
-                    "privacy_class",
-                    "recorded_at",
-                ),
-                plan.attributes,
-            )
-            self._insert_many(
-                connection,
-                "relation",
-                (
-                    "id",
-                    "source_node_id",
-                    "type",
-                    "target_node_id",
-                    "logical_key",
-                    "privacy_class",
-                    "recorded_at",
-                ),
-                plan.relations,
-            )
-            self._insert_many(
-                connection,
-                "assertion",
-                (
-                    "id",
-                    "target_kind",
-                    "target_id",
-                    "attribute_id",
-                    "relation_id",
-                    "stance",
-                    "basis",
-                    "confidence",
-                    "review_status",
-                    "valid_from",
-                    "valid_to",
-                    "recorded_at",
-                    "method",
-                    "source_id",
-                    "run_id",
-                    "supersedes_assertion_id",
-                    "lifecycle",
-                    "stable_key",
-                    "stable_key_version",
-                ),
-                plan.assertions,
-            )
-            self._insert_many(
-                connection,
-                "metric",
-                (
-                    "id",
-                    "run_id",
-                    "definition_version",
-                    "value_json",
-                    "unit",
-                    "numerator",
-                    "denominator",
-                    "dimensions_json",
-                    "dimensions_hash",
-                    "method_version",
-                    "coverage_json",
-                    "complete",
-                    "invalidated",
-                    "recorded_at",
-                ),
-                plan.metrics,
-            )
-            self._insert_many(
-                connection,
-                "evidence_object",
-                (
-                    "id",
-                    "digest",
-                    "byte_size",
-                    "media_type",
-                    "privacy_class",
-                    "recorded_at",
-                ),
-                (
-                    plan.evidence.object,
-                    *(item[0] for item in plan.evidence.materialized_objects),
-                ),
-            )
-            self._insert_many(
-                connection,
-                "evidence_acquisition",
-                (
-                    "id",
-                    "evidence_object_id",
-                    "source_id",
-                    "run_id",
-                    "privacy_class",
-                    "retention_required",
-                    "retain_until",
-                    "method",
-                    "review_status",
-                    "recorded_at",
-                ),
-                plan.evidence.acquisitions,
-            )
-            self._insert_many(
-                connection,
-                "evidence_derivation",
-                (
-                    "id",
-                    "input_object_id",
-                    "output_object_id",
-                    "method",
-                    "method_version",
-                    "parameters_json",
-                    "recorded_at",
-                ),
-                plan.evidence.derivations,
-            )
-            self._insert_many(
-                connection,
-                "evidence_fragment",
-                (
-                    "id",
-                    "evidence_object_id",
-                    "locator_kind",
-                    "locator_json",
-                    "extractor_id",
-                    "extractor_version",
-                    "byte_size",
-                    "digest",
-                    "privacy_class",
-                    "recorded_at",
-                ),
-                (plan.evidence.fragment,),
-            )
-            self._insert_many(
-                connection,
-                "evidence_location",
-                (
-                    "id",
-                    "evidence_object_id",
-                    "provider",
-                    "root_id",
-                    "object_key",
-                    "availability",
-                    "verified_at",
-                    "recorded_at",
-                ),
-                plan.evidence.locations,
-            )
-            self._insert_many(
-                connection,
-                "evidence_verification",
-                (
-                    "id",
-                    "target_kind",
-                    "target_id",
-                    "digest",
-                    "outcome",
-                    "byte_size",
-                    "method",
-                    "checked_at",
-                ),
-                plan.evidence.verifications,
-            )
-            self._insert_many(
-                connection,
-                "evidence_binding",
-                (
-                    "id",
-                    "target_kind",
-                    "target_id",
-                    "assertion_id",
-                    "metric_id",
-                    "fragment_id",
-                    "role",
-                    "confidence",
-                    "review_status",
-                    "recorded_at",
-                ),
-                plan.bindings,
-            )
-            self._insert_many(
-                connection,
-                "search_document",
-                (
-                    "id",
-                    "target_kind",
-                    "target_id",
-                    "chunk_index",
-                    "content",
-                    "content_hash",
-                    "extraction_version",
-                    "privacy_class",
-                    "lifecycle",
-                    "recorded_at",
-                ),
-                plan.search_documents,
-            )
-            for document in plan.search_documents:
+            created_nodes = 0
+            updated_nodes = 0
+            attributes_written = 0
+            for line_number, record in iter_jsonl(scan.spool_path):
+                conditions = []
+                parameters: list[Any] = [namespace, node_type]
+                for selector in request.key:
+                    conditions.append(
+                        "EXISTS (SELECT 1 FROM node_attribute AS key_attribute "
+                        "WHERE key_attribute.node_id = node.id "
+                        "AND key_attribute.attribute_name = ? "
+                        "AND key_attribute.value_json = ?)"
+                    )
+                    parameters.extend(
+                        [selector.field, canonical_json(record[selector.field])]
+                    )
+                matches = connection.execute(
+                    "SELECT node.id FROM node WHERE node.namespace = ? "
+                    "AND node.type = ? AND " + " AND ".join(conditions) + " LIMIT 2",
+                    parameters,
+                ).fetchall()
+                if len(matches) > 1:
+                    raise ImportValidationError(
+                        f"line {line_number}: ambiguous import key"
+                    )
+                if matches:
+                    node_id = str(matches[0]["id"])
+                    updated_nodes += 1
+                else:
+                    node_id = str(uuid.uuid4())
+                    created_nodes += 1
+                    connection.execute(
+                        "INSERT INTO node "
+                        "(id, namespace, type, display_label, privacy_class, "
+                        "recorded_at, updated_at) VALUES (?, ?, ?, NULL, ?, ?, ?)",
+                        (
+                            node_id,
+                            namespace,
+                            node_type,
+                            entity_privacy,
+                            recorded_at,
+                            recorded_at,
+                        ),
+                    )
+                for name, value in record.items():
+                    specification = declaration_fields.get(name, {})
+                    field_privacy = specification.get("privacy", entity_privacy)
+                    existing = existing_fields.get(name)
+                    effective_type = scan.field_types.get(name)
+                    if effective_type is None and existing is not None:
+                        effective_type = str(existing["json_type"])
+                    if effective_type is None:
+                        effective_type = specification.get("type") or "unresolved"
+                    attribute_id = stable_uuid("node_attribute", node_id, name)
+                    connection.execute(
+                        "INSERT INTO node_attribute "
+                        "(id, node_id, attribute_name, value_json, json_type, "
+                        "privacy_class, searchable, source_id, batch_id, run_id, "
+                        "fragment_id, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                        "ON CONFLICT(node_id, attribute_name) DO UPDATE SET "
+                        "value_json = excluded.value_json, "
+                        "json_type = excluded.json_type, "
+                        "privacy_class = CASE WHEN "
+                        "node_attribute.privacy_class = 'private' "
+                        "THEN 'private' ELSE excluded.privacy_class END, "
+                        "searchable = excluded.searchable, "
+                        "source_id = excluded.source_id, "
+                        "batch_id = excluded.batch_id, run_id = excluded.run_id, "
+                        "fragment_id = excluded.fragment_id, "
+                        "updated_at = excluded.updated_at",
+                        (
+                            attribute_id,
+                            node_id,
+                            name,
+                            canonical_json(value),
+                            effective_type,
+                            field_privacy,
+                            int(specification.get("searchable", False)),
+                            source_id,
+                            batch_id,
+                            run_id,
+                            evidence.fragment.id,
+                            recorded_at,
+                        ),
+                    )
+                    searchable = bool(specification.get("searchable", False))
+                    document_id = stable_uuid(
+                        "search_document", attribute_id, 0, "attribute-text-v1"
+                    )
+                    connection.execute(
+                        "DELETE FROM search_document_fts WHERE document_id = ?",
+                        (document_id,),
+                    )
+                    if searchable and isinstance(value, str):
+                        content_hash = sha256_bytes(value.encode("utf-8"))
+                        connection.execute(
+                            "INSERT INTO search_document "
+                            "(id, target_kind, target_id, chunk_index, content, "
+                            "content_hash, extraction_version, privacy_class, "
+                            "lifecycle, recorded_at) "
+                            "VALUES (?, 'node_attribute', ?, 0, ?, ?, "
+                            "'attribute-text-v1', ?, 'active', ?) "
+                            "ON CONFLICT(target_kind, target_id, chunk_index, "
+                            "extraction_version) DO UPDATE SET "
+                            "content = excluded.content, "
+                            "content_hash = excluded.content_hash, "
+                            "privacy_class = excluded.privacy_class, "
+                            "lifecycle = 'active', recorded_at = excluded.recorded_at",
+                            (
+                                document_id,
+                                attribute_id,
+                                value,
+                                content_hash,
+                                field_privacy,
+                                recorded_at,
+                            ),
+                        )
+                        connection.execute(
+                            "INSERT INTO search_document_fts(document_id, content) "
+                            "VALUES (?, ?)",
+                            (document_id, value),
+                        )
+                    else:
+                        connection.execute(
+                            "UPDATE search_document SET lifecycle = 'stale' "
+                            "WHERE id = ?",
+                            (document_id,),
+                        )
+                    attributes_written += 1
+            all_fields = set(scan.present_counts) | set(declaration_fields)
+            new_fields: list[str] = []
+            resolved_types: list[str] = []
+            for name in sorted(all_fields):
+                specification = declaration_fields.get(name, {})
+                existing = existing_fields.get(name)
+                inferred = scan.field_types.get(name)
+                effective_type = inferred or specification.get("type") or "unresolved"
+                if existing is not None and str(existing["json_type"]) != "unresolved":
+                    effective_type = str(existing["json_type"])
+                if existing is None:
+                    new_fields.append(name)
+                elif (
+                    str(existing["json_type"]) == "unresolved" and inferred is not None
+                ):
+                    resolved_types.append(name)
                 connection.execute(
-                    "DELETE FROM search_document_fts WHERE document_id = ?",
-                    (document.id,),
-                )
-                connection.execute(
-                    "INSERT INTO search_document_fts (document_id, content) "
-                    "VALUES (?, ?)",
-                    (document.id, document.content),
-                )
-            for acquisition in plan.evidence.acquisitions:
-                connection.execute(
-                    """
-                    UPDATE evidence_object
-                    SET privacy_class = CASE
-                        WHEN CASE privacy_class
-                            WHEN 'public' THEN 0 WHEN 'private' THEN 1
-                            WHEN 'restricted' THEN 2 ELSE 3 END
-                           >= CASE ?
-                            WHEN 'public' THEN 0 WHEN 'private' THEN 1
-                            WHEN 'restricted' THEN 2 ELSE 3 END
-                        THEN privacy_class ELSE ? END
-                    WHERE id = ?
-                    """,
+                    "INSERT INTO observed_field "
+                    "(entity_type, field_name, json_type, privacy_class, required, "
+                    "nullable, searchable, declared, first_batch_id, last_batch_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(entity_type, field_name) DO UPDATE SET "
+                    "json_type = CASE WHEN observed_field.json_type = 'unresolved' "
+                    "THEN excluded.json_type ELSE observed_field.json_type END, "
+                    "privacy_class = CASE WHEN "
+                    "observed_field.privacy_class = 'private' "
+                    "THEN 'private' ELSE excluded.privacy_class END, "
+                    "last_batch_id = excluded.last_batch_id",
                     (
-                        acquisition.privacy_class,
-                        acquisition.privacy_class,
-                        acquisition.evidence_object_id,
+                        request.entity_type,
+                        name,
+                        effective_type,
+                        specification.get("privacy", entity_privacy),
+                        int(specification.get("required", False)),
+                        int(specification.get("nullable", True)),
+                        int(specification.get("searchable", False)),
+                        int(name in declaration_fields),
+                        batch_id,
+                        batch_id,
+                    ),
+                )
+            snapshot = self._ontology_snapshot_connection(connection)
+            result = {
+                "attributes_written": attributes_written,
+                "batch_id": batch_id,
+                "created_nodes": created_nodes,
+                "evidence_digest": scan.content_hash,
+                "fragment_id": evidence.fragment.id,
+                "idempotency_key": idempotency_key,
+                "ontology_delta": {
+                    "new_entities": [request.entity_type]
+                    if not existing_fields and declaration_row is None
+                    else [],
+                    "new_fields": new_fields,
+                    "resolved_types": resolved_types,
+                },
+                "ontology_fingerprint": snapshot["ontology_fingerprint"],
+                "records": scan.record_count,
+                "replayed": False,
+                "run_id": run_id,
+                "source_id": source_id,
+                "updated_nodes": updated_nodes,
+            }
+            connection.execute(
+                "UPDATE ingestion_batch SET result_json = ? WHERE id = ?",
+                (canonical_json(result), batch_id),
+            )
+            return result
+
+    def write_analytical_attribute(
+        self,
+        request: AnalyticalAttributeRequest,
+        evidence: ImportEvidence,
+    ) -> dict[str, Any]:
+        actual_type = json_type(request.value)
+        recorded_at = _now()
+        source_id = stable_uuid("source", "analytical-result", evidence.object.digest)
+        run_id = stable_uuid("analytical_run", request.idempotency_key)
+        attribute_id = stable_uuid(
+            "node_attribute", request.node_id, request.attribute_name
+        )
+        with self._write_connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            node = connection.execute(
+                "SELECT namespace, type FROM node WHERE id = ?", (request.node_id,)
+            ).fetchone()
+            if node is None:
+                raise RecordNotFoundError(f"node not found: {request.node_id}")
+            entity_type = f"{node['namespace']}.{node['type']}"
+            field = connection.execute(
+                "SELECT * FROM observed_field WHERE entity_type = ? AND field_name = ?",
+                (entity_type, request.attribute_name),
+            ).fetchone()
+            known_type = None if field is None else str(field["json_type"])
+            if actual_type is not None and known_type not in {
+                None,
+                "unresolved",
+                actual_type,
+            }:
+                raise ImportValidationError(
+                    f"field {request.attribute_name!r} already has type {known_type}"
+                )
+            effective_type = actual_type or known_type or "unresolved"
+            existing_run = connection.execute(
+                "SELECT id FROM analytical_run WHERE idempotency_key = ?",
+                (request.idempotency_key,),
+            ).fetchone()
+            if existing_run is not None:
+                return {
+                    "attribute_id": attribute_id,
+                    "evidence_digest": evidence.object.digest,
+                    "fragment_id": evidence.fragment.id,
+                    "idempotency_key": request.idempotency_key,
+                    "ontology_fingerprint": self._ontology_snapshot_connection(
+                        connection
+                    )["ontology_fingerprint"],
+                    "replayed": True,
+                    "run_id": str(existing_run["id"]),
+                    "source_id": source_id,
+                }
+            connection.execute(
+                "INSERT INTO source "
+                "(id, natural_key, kind, locator, privacy_class, recorded_at) "
+                "VALUES (?, ?, 'analytical-result', ?, ?, ?) "
+                "ON CONFLICT(id) DO NOTHING",
+                (
+                    source_id,
+                    f"analytical-result:{evidence.object.digest}",
+                    f"evidence:sha256:{evidence.object.digest}",
+                    request.privacy,
+                    recorded_at,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO evidence_object "
+                "(id, digest, byte_size, media_type, privacy_class, recorded_at) "
+                "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
+                (
+                    evidence.object.id,
+                    evidence.object.digest,
+                    evidence.object.byte_size,
+                    evidence.object.media_type,
+                    evidence.object.privacy_class,
+                    evidence.object.recorded_at,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO evidence_fragment "
+                "(id, evidence_object_id, locator_kind, locator_json, extractor_id, "
+                "extractor_version, byte_size, digest, privacy_class, recorded_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
+                (
+                    evidence.fragment.id,
+                    evidence.fragment.evidence_object_id,
+                    evidence.fragment.locator_kind,
+                    evidence.fragment.locator_json,
+                    evidence.fragment.extractor_id,
+                    evidence.fragment.extractor_version,
+                    evidence.fragment.byte_size,
+                    evidence.fragment.digest,
+                    evidence.fragment.privacy_class,
+                    evidence.fragment.recorded_at,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO analytical_run "
+                "(id, idempotency_key, batch_id, source_id, method, recorded_at) "
+                "VALUES (?, ?, NULL, ?, ?, ?)",
+                (
+                    run_id,
+                    request.idempotency_key,
+                    source_id,
+                    request.method,
+                    recorded_at,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO evidence_acquisition "
+                "(id, evidence_object_id, source_id, run_id, privacy_class, "
+                "retention_required, retain_until, method, review_status, recorded_at) "
+                "VALUES (?, ?, ?, ?, ?, 1, NULL, ?, 'unreviewed', ?)",
+                (
+                    stable_uuid("evidence_acquisition", evidence.object.id, run_id),
+                    evidence.object.id,
+                    source_id,
+                    run_id,
+                    request.privacy,
+                    request.method,
+                    recorded_at,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO node_attribute "
+                "(id, node_id, attribute_name, value_json, json_type, privacy_class, "
+                "searchable, source_id, batch_id, run_id, fragment_id, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?) "
+                "ON CONFLICT(node_id, attribute_name) DO UPDATE SET "
+                "value_json = excluded.value_json, json_type = excluded.json_type, "
+                "privacy_class = CASE WHEN node_attribute.privacy_class = 'private' "
+                "THEN 'private' ELSE excluded.privacy_class END, "
+                "searchable = excluded.searchable, source_id = excluded.source_id, "
+                "batch_id = NULL, run_id = excluded.run_id, "
+                "fragment_id = excluded.fragment_id, updated_at = excluded.updated_at",
+                (
+                    attribute_id,
+                    request.node_id,
+                    request.attribute_name,
+                    canonical_json(request.value),
+                    effective_type,
+                    request.privacy,
+                    int(request.searchable),
+                    source_id,
+                    run_id,
+                    evidence.fragment.id,
+                    recorded_at,
+                ),
+            )
+            document_id = stable_uuid(
+                "search_document", attribute_id, 0, "attribute-text-v1"
+            )
+            connection.execute(
+                "DELETE FROM search_document_fts WHERE document_id = ?", (document_id,)
+            )
+            if request.searchable and isinstance(request.value, str):
+                content_hash = sha256_bytes(request.value.encode("utf-8"))
+                connection.execute(
+                    "INSERT INTO search_document "
+                    "(id, target_kind, target_id, chunk_index, content, content_hash, "
+                    "extraction_version, privacy_class, lifecycle, recorded_at) "
+                    "VALUES (?, 'node_attribute', ?, 0, ?, ?, "
+                    "'attribute-text-v1', ?, 'active', ?) "
+                    "ON CONFLICT(target_kind, target_id, chunk_index, "
+                    "extraction_version) DO UPDATE SET content = excluded.content, "
+                    "content_hash = excluded.content_hash, "
+                    "privacy_class = excluded.privacy_class, lifecycle = 'active', "
+                    "recorded_at = excluded.recorded_at",
+                    (
+                        document_id,
+                        attribute_id,
+                        request.value,
+                        content_hash,
+                        request.privacy,
+                        recorded_at,
                     ),
                 )
                 connection.execute(
-                    """
-                    UPDATE evidence_fragment
-                    SET privacy_class = (
-                        SELECT privacy_class FROM evidence_object
-                        WHERE evidence_object.id = evidence_fragment.evidence_object_id
-                    )
-                    WHERE evidence_object_id = ?
-                    """,
-                    (acquisition.evidence_object_id,),
+                    "INSERT INTO search_document_fts(document_id, content) "
+                    "VALUES (?, ?)",
+                    (document_id, request.value),
                 )
-        return result
-
-    def _current_facts(self, attribute_id: str | None = None) -> list[dict[str, Any]]:
-        sql = """
-            WITH effective_assertion AS (
-                SELECT assertion.*
-                FROM assertion
-                WHERE assertion.lifecycle = 'active'
-                  AND NOT EXISTS (
-                      SELECT 1
-                      FROM assertion AS successor
-                      WHERE successor.supersedes_assertion_id = assertion.id
-                        AND successor.lifecycle = 'active'
-                  )
-            )
-            SELECT
-                node_attribute.id AS attribute_id,
-                node.namespace,
-                node.type AS node_type,
-                node.natural_key,
-                node_attribute.name AS attribute_name,
-                node_attribute.value_json,
-                node_attribute.privacy_class,
-                SUM(CASE WHEN effective_assertion.stance = 'supports' THEN 1 ELSE 0 END)
-                    AS supports,
-                SUM(
-                    CASE WHEN effective_assertion.stance = 'contradicts'
-                    THEN 1 ELSE 0 END
-                )
-                    AS contradicts
-            FROM node_attribute
-            JOIN node ON node.id = node_attribute.node_id
-            LEFT JOIN effective_assertion
-                ON effective_assertion.attribute_id = node_attribute.id
-            WHERE (? IS NULL OR node_attribute.id = ?)
-            GROUP BY
-                node_attribute.id,
-                node.namespace,
-                node.type,
-                node.natural_key,
-                node_attribute.name,
-                node_attribute.value_json,
-                node_attribute.privacy_class
-        """
-        with self._connect() as connection:
-            rows = connection.execute(sql, (attribute_id, attribute_id)).fetchall()
-        facts = [
-            {
-                "attribute_id": str(row["attribute_id"]),
-                "namespace": str(row["namespace"]),
-                "node_type": str(row["node_type"]),
-                "natural_key": str(row["natural_key"]),
-                "attribute_name": str(row["attribute_name"]),
-                "value": json.loads(str(row["value_json"])),
-                "state": _fact_state(int(row["supports"]), int(row["contradicts"])),
-                "privacy_class": str(row["privacy_class"]),
-            }
-            for row in rows
-        ]
-        facts.sort(
-            key=lambda item: (
-                canonical_text_key(str(item["namespace"])),
-                canonical_text_key(str(item["node_type"])),
-                canonical_text_key(str(item["natural_key"])),
-                canonical_text_key(str(item["attribute_name"])),
-                str(item["attribute_id"]),
-            )
-        )
-        return facts
-
-    def current_facts(self) -> list[dict[str, Any]]:
-        return self._current_facts()[:MAX_QUERY_RESULTS]
-
-    def current_slots(self) -> list[dict[str, Any]]:
-        facts = self._current_facts()
-        with self._connect() as connection:
-            rows = connection.execute(
-                "SELECT id, node_id, cardinality FROM node_attribute"
-            ).fetchall()
-        metadata = {
-            str(row["id"]): (str(row["node_id"]), str(row["cardinality"]))
-            for row in rows
-        }
-        grouped: dict[tuple[str, str, str, str, str, str], list[dict[str, Any]]] = {}
-        for fact in facts:
-            node_id, cardinality = metadata[str(fact["attribute_id"])]
-            key = (
-                node_id,
-                str(fact["namespace"]),
-                str(fact["node_type"]),
-                str(fact["natural_key"]),
-                str(fact["attribute_name"]),
-                cardinality,
-            )
-            grouped.setdefault(key, []).append(fact)
-
-        slots: list[dict[str, Any]] = []
-        for key, slot_facts in grouped.items():
-            node_id, namespace, node_type, natural_key, name, cardinality = key
-            candidates = [
-                fact
-                for fact in slot_facts
-                if fact["state"] in {"supported", "contested"}
-            ]
-            current_value: Any = None
-            if cardinality == "multi":
-                status = "values" if candidates else "missing"
-            elif not candidates:
-                status = "missing"
-            elif len(candidates) > 1:
-                status = "conflict"
-            elif candidates[0]["state"] == "contested":
-                status = "contested"
             else:
-                status = "current"
-                current_value = candidates[0]["value"]
-            slots.append(
-                {
-                    "node_id": node_id,
-                    "namespace": namespace,
-                    "node_type": node_type,
-                    "natural_key": natural_key,
-                    "attribute_name": name,
-                    "cardinality": cardinality,
-                    "status": status,
-                    "current_value": current_value,
-                    "candidates": candidates,
-                }
-            )
-        slots.sort(
-            key=lambda item: (
-                canonical_text_key(str(item["namespace"])),
-                canonical_text_key(str(item["node_type"])),
-                canonical_text_key(str(item["natural_key"])),
-                canonical_text_key(str(item["attribute_name"])),
-                str(item["node_id"]),
-            )
-        )
-        return slots[:MAX_QUERY_RESULTS]
-
-    def _query_current_relations(
-        self,
-        *,
-        frontier: list[str] | None = None,
-        relation_types: list[str] | None = None,
-        direction: str = "both",
-        states: list[str] | None = None,
-        exclude_relation_ids: list[str] | None = None,
-        relation_id: str | None = None,
-        limit: int = MAX_QUERY_RESULTS,
-    ) -> tuple[list[dict[str, Any]], bool]:
-        sql = """
-            WITH effective_assertion AS (
-                SELECT assertion.*
-                FROM assertion
-                WHERE assertion.lifecycle = 'active'
-                  AND assertion.target_kind = 'relation'
-                  AND NOT EXISTS (
-                      SELECT 1 FROM assertion AS successor
-                      WHERE successor.supersedes_assertion_id = assertion.id
-                        AND successor.lifecycle = 'active'
-                  )
-            ),
-            relation_counts AS (
-                SELECT relation.*,
-                       source.namespace AS source_namespace,
-                       source.type AS source_type,
-                       source.natural_key AS source_natural_key,
-                       target.namespace AS target_namespace,
-                       target.type AS target_type,
-                       target.natural_key AS target_natural_key,
-                       SUM(
-                           CASE WHEN effective_assertion.stance = 'supports'
-                           THEN 1 ELSE 0 END
-                       ) AS supports,
-                       SUM(
-                           CASE WHEN effective_assertion.stance = 'contradicts'
-                           THEN 1 ELSE 0 END
-                       ) AS contradicts
-                FROM relation
-                JOIN node AS source ON source.id = relation.source_node_id
-                JOIN node AS target ON target.id = relation.target_node_id
-                LEFT JOIN effective_assertion
-                    ON effective_assertion.relation_id = relation.id
-                GROUP BY relation.id
-            ),
-            current_relation AS (
-                SELECT relation_counts.*,
-                       CASE
-                           WHEN supports > 0 AND contradicts > 0 THEN 'contested'
-                           WHEN supports > 0 THEN 'supported'
-                           WHEN contradicts > 0 THEN 'contradicted'
-                           ELSE 'unasserted'
-                       END AS state
-                FROM relation_counts
-            )
-            SELECT * FROM current_relation
-            WHERE (? IS NULL OR id = ?)
-              AND (
-                  ? IS NULL
-                  OR (
-                      (? IN ('outbound', 'both') AND source_node_id IN (
-                          SELECT value FROM json_each(?)
-                      ))
-                      OR
-                      (? IN ('inbound', 'both') AND target_node_id IN (
-                          SELECT value FROM json_each(?)
-                      ))
-                  )
-              )
-              AND (
-                  ? = 0
-                  OR type IN (SELECT value FROM json_each(?))
-              )
-              AND (
-                  json_array_length(?) = 0
-                  OR state IN (SELECT value FROM json_each(?))
-              )
-              AND id NOT IN (SELECT value FROM json_each(?))
-            ORDER BY
-                source_namespace COLLATE canonical_text,
-                source_natural_key COLLATE canonical_text,
-                type COLLATE canonical_text,
-                target_namespace COLLATE canonical_text,
-                target_natural_key COLLATE canonical_text,
-                logical_key COLLATE canonical_text,
-                id
-            LIMIT ?
-        """
-        frontier_json = None if frontier is None else canonical_json(frontier)
-        types_json = canonical_json(relation_types or [])
-        types_filter_enabled = int(relation_types is not None)
-        states_json = canonical_json(states or [])
-        excluded_json = canonical_json(exclude_relation_ids or [])
-        with self._connect() as connection:
-            rows = connection.execute(
-                sql,
+                connection.execute(
+                    "UPDATE search_document SET lifecycle = 'stale' WHERE id = ?",
+                    (document_id,),
+                )
+            connection.execute(
+                "INSERT INTO observed_field "
+                "(entity_type, field_name, json_type, privacy_class, required, "
+                "nullable, searchable, declared, first_batch_id, last_batch_id) "
+                "VALUES (?, ?, ?, ?, 0, 1, ?, 0, NULL, NULL) "
+                "ON CONFLICT(entity_type, field_name) DO UPDATE SET "
+                "json_type = CASE WHEN observed_field.json_type = 'unresolved' "
+                "THEN excluded.json_type ELSE observed_field.json_type END, "
+                "privacy_class = CASE WHEN observed_field.privacy_class = 'private' "
+                "THEN 'private' ELSE excluded.privacy_class END",
                 (
-                    relation_id,
-                    relation_id,
-                    frontier_json,
-                    direction,
-                    frontier_json,
-                    direction,
-                    frontier_json,
-                    types_filter_enabled,
-                    types_json,
-                    states_json,
-                    states_json,
-                    excluded_json,
-                    limit + 1,
+                    entity_type,
+                    request.attribute_name,
+                    effective_type,
+                    request.privacy,
+                    int(request.searchable),
                 ),
-            ).fetchall()
-        relations: list[dict[str, Any]] = [
-            {
-                "relation_id": str(row["id"]),
-                "type": str(row["type"]),
-                "logical_key": str(row["logical_key"]),
-                "source": {
-                    "id": str(row["source_node_id"]),
-                    "namespace": str(row["source_namespace"]),
-                    "type": str(row["source_type"]),
-                    "natural_key": str(row["source_natural_key"]),
-                },
-                "target": {
-                    "id": str(row["target_node_id"]),
-                    "namespace": str(row["target_namespace"]),
-                    "type": str(row["target_type"]),
-                    "natural_key": str(row["target_natural_key"]),
-                },
-                "state": str(row["state"]),
-                "privacy_class": str(row["privacy_class"]),
+            )
+            snapshot = self._ontology_snapshot_connection(connection)
+            return {
+                "attribute_id": attribute_id,
+                "evidence_digest": evidence.object.digest,
+                "fragment_id": evidence.fragment.id,
+                "idempotency_key": request.idempotency_key,
+                "ontology_fingerprint": snapshot["ontology_fingerprint"],
+                "replayed": False,
+                "run_id": run_id,
+                "source_id": source_id,
             }
-            for row in rows
-        ]
-        return relations[:limit], len(relations) > limit
 
-    def current_relations(self) -> list[dict[str, Any]]:
-        relations, _ = self._query_current_relations()
-        return relations
+    def materialize_join(
+        self, request: JoinRequest, evidence: ImportEvidence
+    ) -> dict[str, Any]:
+        if not request.name or not request.relation:
+            raise JoinConflictError("join name and relation must not be empty")
+        if not request.from_.fields or len(request.from_.fields) != len(
+            request.to.fields
+        ):
+            raise JoinConflictError("join endpoints require equally sized fields")
+        split_entity_type(request.from_.type)
+        split_entity_type(request.to.type)
+        definition = {
+            "from": {"fields": list(request.from_.fields), "type": request.from_.type},
+            "name": request.name,
+            "relation": request.relation,
+            "to": {"fields": list(request.to.fields), "type": request.to.type},
+        }
+        definition_hash = sha256_json(definition)
+        idempotency_key = request.idempotency_key or str(uuid.uuid4())
+        batch_id = stable_uuid("ingestion_batch", "join", idempotency_key)
+        source_id = stable_uuid("source", "join-declaration", definition_hash)
+        run_id = stable_uuid("analytical_run", "join", idempotency_key)
+        recorded_at = _now()
+        from_namespace, from_type = split_entity_type(request.from_.type)
+        to_namespace, to_type = split_entity_type(request.to.type)
+        with self._write_connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            replay = connection.execute(
+                "SELECT input_hash, result_json FROM ingestion_batch "
+                "WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+            if replay is not None:
+                if str(replay["input_hash"]) != definition_hash:
+                    raise JoinConflictError("join idempotency key conflict")
+                result = json.loads(str(replay["result_json"]))
+                if not isinstance(result, dict):
+                    raise ValueError("stored join result must be an object")
+                result["replayed"] = True
+                return result
+            existing_declaration = connection.execute(
+                "SELECT * FROM ontology_declaration WHERE name = ?",
+                (request.name,),
+            ).fetchone()
+            if (
+                existing_declaration is not None
+                and str(existing_declaration["definition_hash"]) != definition_hash
+            ):
+                raise JoinConflictError(
+                    f"join name {request.name!r} already has another definition"
+                )
+            type_pairs = zip(request.from_.fields, request.to.fields, strict=True)
+            for from_field, to_field in type_pairs:
+                from_row = connection.execute(
+                    "SELECT json_type FROM observed_field "
+                    "WHERE entity_type = ? AND field_name = ?",
+                    (request.from_.type, from_field),
+                ).fetchone()
+                to_row = connection.execute(
+                    "SELECT json_type FROM observed_field "
+                    "WHERE entity_type = ? AND field_name = ?",
+                    (request.to.type, to_field),
+                ).fetchone()
+                if from_row is None or to_row is None:
+                    raise JoinConflictError("join references an unknown field")
+                if str(from_row["json_type"]) == "unresolved" or str(
+                    from_row["json_type"]
+                ) != str(to_row["json_type"]):
+                    raise JoinConflictError("join fields have incompatible types")
+            connection.execute(
+                "INSERT INTO ingestion_batch "
+                "(id, idempotency_key, kind, input_hash, schema_fingerprint, "
+                "request_json, result_json, recorded_at) "
+                "VALUES (?, ?, 'join-materialization', ?, ?, ?, '{}', ?)",
+                (
+                    batch_id,
+                    idempotency_key,
+                    definition_hash,
+                    request.contract_fingerprint,
+                    canonical_json(definition),
+                    recorded_at,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO source "
+                "(id, natural_key, kind, locator, privacy_class, recorded_at) "
+                "VALUES (?, ?, 'join-declaration', ?, 'public', ?) "
+                "ON CONFLICT(id) DO NOTHING",
+                (
+                    source_id,
+                    f"join-declaration:{definition_hash}",
+                    f"evidence:sha256:{evidence.object.digest}",
+                    recorded_at,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO evidence_object "
+                "(id, digest, byte_size, media_type, privacy_class, recorded_at) "
+                "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
+                (
+                    evidence.object.id,
+                    evidence.object.digest,
+                    evidence.object.byte_size,
+                    evidence.object.media_type,
+                    evidence.object.privacy_class,
+                    evidence.object.recorded_at,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO evidence_fragment "
+                "(id, evidence_object_id, locator_kind, locator_json, extractor_id, "
+                "extractor_version, byte_size, digest, privacy_class, recorded_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
+                (
+                    evidence.fragment.id,
+                    evidence.fragment.evidence_object_id,
+                    evidence.fragment.locator_kind,
+                    evidence.fragment.locator_json,
+                    evidence.fragment.extractor_id,
+                    evidence.fragment.extractor_version,
+                    evidence.fragment.byte_size,
+                    evidence.fragment.digest,
+                    evidence.fragment.privacy_class,
+                    evidence.fragment.recorded_at,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO analytical_run "
+                "(id, idempotency_key, batch_id, source_id, method, recorded_at) "
+                "VALUES (?, ?, ?, ?, 'join-materialization-v1', ?)",
+                (run_id, f"join:{idempotency_key}", batch_id, source_id, recorded_at),
+            )
+            connection.execute(
+                "INSERT INTO evidence_acquisition "
+                "(id, evidence_object_id, source_id, run_id, privacy_class, "
+                "retention_required, retain_until, method, review_status, recorded_at) "
+                "VALUES (?, ?, ?, ?, 'public', 1, NULL, "
+                "'join-materialization-v1', 'unreviewed', ?)",
+                (
+                    stable_uuid("evidence_acquisition", evidence.object.id, run_id),
+                    evidence.object.id,
+                    source_id,
+                    run_id,
+                    recorded_at,
+                ),
+            )
+            if existing_declaration is None:
+                connection.execute(
+                    "INSERT INTO ontology_declaration "
+                    "(name, kind, relation_type, from_entity, from_fields_json, "
+                    "to_entity, to_fields_json, definition_hash, enabled, source_id, "
+                    "fragment_id, recorded_at) "
+                    "VALUES (?, 'join', ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
+                    (
+                        request.name,
+                        request.relation,
+                        request.from_.type,
+                        canonical_json(list(request.from_.fields)),
+                        request.to.type,
+                        canonical_json(list(request.to.fields)),
+                        definition_hash,
+                        source_id,
+                        evidence.fragment.id,
+                        recorded_at,
+                    ),
+                )
+            source_nodes = connection.execute(
+                "SELECT id FROM node WHERE namespace = ? AND type = ? ORDER BY id",
+                (from_namespace, from_type),
+            ).fetchall()
+            created = 0
+            skipped_null_or_missing = 0
+            skipped_unmatched = 0
+            previous_active = 0
+            previous_inactive = 0
+            for source_node in source_nodes:
+                source_node_id = str(source_node["id"])
+                key_values: list[tuple[str, str]] = []
+                missing = False
+                for field in request.from_.fields:
+                    row = connection.execute(
+                        "SELECT value_json, json_type FROM node_attribute "
+                        "WHERE node_id = ? AND attribute_name = ?",
+                        (source_node_id, field),
+                    ).fetchone()
+                    if row is None or str(row["value_json"]) == "null":
+                        missing = True
+                        break
+                    key_values.append((str(row["value_json"]), str(row["json_type"])))
+                if missing:
+                    skipped_null_or_missing += 1
+                    continue
+                target_conditions = []
+                target_parameters: list[Any] = [to_namespace, to_type]
+                for field, (value_json, effective_type) in zip(
+                    request.to.fields, key_values, strict=True
+                ):
+                    target_conditions.append(
+                        "EXISTS (SELECT 1 FROM node_attribute AS target_attribute "
+                        "WHERE target_attribute.node_id = node.id "
+                        "AND target_attribute.attribute_name = ? "
+                        "AND target_attribute.json_type = ? "
+                        "AND target_attribute.value_json = ?)"
+                    )
+                    target_parameters.extend([field, effective_type, value_json])
+                targets = connection.execute(
+                    "SELECT node.id, node.privacy_class FROM node "
+                    "WHERE node.namespace = ? AND node.type = ? AND "
+                    + " AND ".join(target_conditions)
+                    + " LIMIT 2",
+                    target_parameters,
+                ).fetchall()
+                if len(targets) > 1:
+                    raise AmbiguousTargetError(
+                        f"ambiguous_target for source node {source_node_id}"
+                    )
+                if not targets:
+                    skipped_unmatched += 1
+                    continue
+                target_node_id = str(targets[0]["id"])
+                existing_relation = connection.execute(
+                    "SELECT id, active FROM relation WHERE source_node_id = ? "
+                    "AND type = ? AND target_node_id = ? AND logical_key = ?",
+                    (
+                        source_node_id,
+                        request.relation,
+                        target_node_id,
+                        request.name,
+                    ),
+                ).fetchone()
+                if existing_relation is not None:
+                    if bool(existing_relation["active"]):
+                        previous_active += 1
+                    else:
+                        previous_inactive += 1
+                    continue
+                source_privacy = connection.execute(
+                    "SELECT privacy_class FROM node WHERE id = ?", (source_node_id,)
+                ).fetchone()[0]
+                privacy = (
+                    "private"
+                    if "private"
+                    in {str(source_privacy), str(targets[0]["privacy_class"])}
+                    else "public"
+                )
+                relation_id = stable_uuid(
+                    "relation",
+                    source_node_id,
+                    request.relation,
+                    target_node_id,
+                    request.name,
+                )
+                connection.execute(
+                    "INSERT INTO relation "
+                    "(id, source_node_id, type, target_node_id, logical_key, active, "
+                    "privacy_class, source_id, batch_id, run_id, fragment_id, "
+                    "updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)",
+                    (
+                        relation_id,
+                        source_node_id,
+                        request.relation,
+                        target_node_id,
+                        request.name,
+                        privacy,
+                        source_id,
+                        batch_id,
+                        run_id,
+                        evidence.fragment.id,
+                        recorded_at,
+                    ),
+                )
+                created += 1
+            snapshot = self._ontology_snapshot_connection(connection)
+            result = {
+                "batch_id": batch_id,
+                "created_relations": created,
+                "declaration_created": existing_declaration is None,
+                "definition_hash": definition_hash,
+                "name": request.name,
+                "ontology_fingerprint": snapshot["ontology_fingerprint"],
+                "previously_materialized_active": previous_active,
+                "previously_materialized_inactive": previous_inactive,
+                "replayed": False,
+                "run_id": run_id,
+                "skipped_null_or_missing": skipped_null_or_missing,
+                "skipped_unmatched": skipped_unmatched,
+                "source_id": source_id,
+            }
+            connection.execute(
+                "UPDATE ingestion_batch SET result_json = ? WHERE id = ?",
+                (canonical_json(result), batch_id),
+            )
+            return result
+
+    @staticmethod
+    def _field_type(
+        connection: sqlite3.Connection, entity_type: str, field_name: str
+    ) -> str:
+        row = connection.execute(
+            "SELECT json_type FROM observed_field "
+            "WHERE entity_type = ? AND field_name = ?",
+            (entity_type, field_name),
+        ).fetchone()
+        if row is None:
+            raise QueryValidationError(f"unknown field {entity_type}.{field_name}")
+        return str(row["json_type"])
+
+    def execute_query(self, plan: QueryPlan) -> dict[str, Any]:
+        alias_entities = dict(plan.node_aliases)
+        field_references: set[str] = set()
+        for predicate in plan.predicates:
+            field_references.add(str(predicate["field"]))
+        for projection in plan.projections:
+            if "field" in projection:
+                field_references.add(str(projection["field"]))
+        for ordering in plan.order_by:
+            field_references.add(str(ordering["field"]))
+        ordered_fields = sorted(field_references)
+        field_aliases = {
+            reference: f"a{index}" for index, reference in enumerate(ordered_fields)
+        }
+        node_sql_aliases = {
+            alias: f"n{index}" for index, (alias, _) in enumerate(plan.node_aliases)
+        }
+        with self._connect() as connection:
+            effective_types: dict[str, str] = {}
+            for reference in ordered_fields:
+                alias, _, field_name = reference.partition(".")
+                effective_types[reference] = self._field_type(
+                    connection, alias_entities[alias], field_name
+                )
+            first_alias = plan.node_aliases[0][0]
+            sql = f"FROM node AS {node_sql_aliases[first_alias]} "
+            sql_parameters: list[Any] = []
+            for alias, _ in plan.node_aliases[1:]:
+                sql += f"CROSS JOIN node AS {node_sql_aliases[alias]} "
+            for index, edge in enumerate(plan.edges):
+                relation_alias = f"r{index}"
+                source_alias = node_sql_aliases[edge["from"]]
+                target_alias = node_sql_aliases[edge["to"]]
+                sql += (
+                    f"JOIN relation AS {relation_alias} ON "
+                    f"{relation_alias}.source_node_id = {source_alias}.id "
+                    f"AND {relation_alias}.target_node_id = {target_alias}.id "
+                    f"AND {relation_alias}.type = ? AND {relation_alias}.active = 1 "
+                )
+                sql_parameters.append(edge["type"])
+                if "logical_key" in edge:
+                    sql += f"AND {relation_alias}.logical_key = ? "
+                    sql_parameters.append(edge["logical_key"])
+            for reference in ordered_fields:
+                alias, _, field_name = reference.partition(".")
+                attribute_alias = field_aliases[reference]
+                sql += (
+                    f"LEFT JOIN node_attribute AS {attribute_alias} ON "
+                    f"{attribute_alias}.node_id = {node_sql_aliases[alias]}.id "
+                    f"AND {attribute_alias}.attribute_name = ? "
+                )
+                sql_parameters.append(field_name)
+            conditions: list[str] = []
+            for alias, entity_type in plan.node_aliases:
+                namespace, node_type = split_entity_type(entity_type)
+                node_alias = node_sql_aliases[alias]
+                conditions.extend(
+                    [f"{node_alias}.namespace = ?", f"{node_alias}.type = ?"]
+                )
+                sql_parameters.extend([namespace, node_type])
+            always_empty = False
+            for predicate in plan.predicates:
+                reference = str(predicate["field"])
+                attribute_alias = field_aliases[reference]
+                operator = str(predicate["op"])
+                effective_type = effective_types[reference]
+                if operator == "exists":
+                    conditions.append(f"{attribute_alias}.id IS NOT NULL")
+                    continue
+                if effective_type == "unresolved":
+                    always_empty = True
+                    continue
+                values = predicate.get("values", [predicate.get("value")])
+                for value in values:
+                    actual_type = json_type(value)
+                    if actual_type is not None and actual_type != effective_type:
+                        raise QueryValidationError(
+                            f"literal type {actual_type} conflicts with "
+                            f"{effective_type} "
+                            f"for {reference}"
+                        )
+                conditions.append(f"{attribute_alias}.json_type = ?")
+                sql_parameters.append(effective_type)
+                if operator in {"eq", "ne"}:
+                    symbol = "=" if operator == "eq" else "<>"
+                    conditions.append(f"{attribute_alias}.value_json {symbol} ?")
+                    sql_parameters.append(canonical_json(predicate["value"]))
+                elif operator == "in":
+                    placeholders = ", ".join("?" for _ in values)
+                    conditions.append(
+                        f"{attribute_alias}.value_json IN ({placeholders})"
+                    )
+                    sql_parameters.extend(canonical_json(value) for value in values)
+                else:
+                    if effective_type not in {"number", "string"}:
+                        raise QueryValidationError(
+                            f"{operator} is not supported for {effective_type}"
+                        )
+                    symbols = {"lt": "<", "lte": "<=", "gt": ">", "gte": ">="}
+                    collation = (
+                        " COLLATE canonical_text" if effective_type == "string" else ""
+                    )
+                    conditions.append(
+                        f"json_extract({attribute_alias}.value_json, '$')"
+                        f"{collation} {symbols[operator]} ?"
+                    )
+                    sql_parameters.append(predicate["value"])
+            if always_empty:
+                conditions.append("0 = 1")
+            where_sql = " WHERE " + " AND ".join(conditions)
+            if plan.count:
+                total = int(
+                    connection.execute(
+                        "SELECT COUNT(*) " + sql + where_sql, sql_parameters
+                    ).fetchone()[0]
+                )
+                snapshot = self._ontology_snapshot_connection(connection)
+                return {
+                    "count": total,
+                    "ontology_fingerprint": snapshot["ontology_fingerprint"],
+                    "ordering": [],
+                    "rows": [],
+                    "truncated": False,
+                }
+            select_columns: list[str] = []
+            for index, projection in enumerate(plan.projections):
+                reference = str(projection["field"])
+                attribute_alias = field_aliases[reference]
+                for column in (
+                    "id",
+                    "value_json",
+                    "json_type",
+                    "source_id",
+                    "batch_id",
+                    "run_id",
+                    "fragment_id",
+                    "updated_at",
+                ):
+                    select_columns.append(
+                        f"{attribute_alias}.{column} AS p{index}_{column}"
+                    )
+            ordering_sql: list[str] = []
+            for item in plan.order_by:
+                attribute_alias = field_aliases[item["field"]]
+                collation = (
+                    " COLLATE canonical_text"
+                    if effective_types[item["field"]] == "string"
+                    else ""
+                )
+                ordering_sql.append(
+                    f"({attribute_alias}.id IS NULL) ASC, "
+                    f"json_extract({attribute_alias}.value_json, '$')"
+                    f"{collation} "
+                    f"{item['direction'].upper()}"
+                )
+            ordering_sql.extend(
+                f"{node_sql_aliases[alias]}.id ASC" for alias, _ in plan.node_aliases
+            )
+            query = (
+                "SELECT "
+                + ", ".join(select_columns)
+                + " "
+                + sql
+                + where_sql
+                + " ORDER BY "
+                + ", ".join(ordering_sql)
+                + " LIMIT ? OFFSET ?"
+            )
+            rows = connection.execute(
+                query, [*sql_parameters, plan.limit + 1, plan.offset]
+            ).fetchall()
+            selected = rows[: plan.limit]
+            results: list[dict[str, Any]] = []
+            for row in selected:
+                projections: list[dict[str, Any]] = []
+                for index, projection in enumerate(plan.projections):
+                    record_id = row[f"p{index}_id"]
+                    projections.append(
+                        {
+                            "batch_id": row[f"p{index}_batch_id"],
+                            "field": projection["field"],
+                            "fragment_id": row[f"p{index}_fragment_id"],
+                            "json_type": effective_types[str(projection["field"])],
+                            "record_id": record_id,
+                            "run_id": row[f"p{index}_run_id"],
+                            "source_id": row[f"p{index}_source_id"],
+                            "updated_at": row[f"p{index}_updated_at"],
+                            "value": None
+                            if record_id is None
+                            else json.loads(str(row[f"p{index}_value_json"])),
+                        }
+                    )
+                results.append({"projections": projections})
+            snapshot = self._ontology_snapshot_connection(connection)
+            effective_ordering: list[dict[str, str]] = [
+                dict(item) for item in plan.order_by
+            ]
+            effective_ordering.extend(
+                {"direction": "asc", "tie_breaker": f"{alias}.node_id"}
+                for alias, _ in plan.node_aliases
+            )
+            return {
+                "ontology_fingerprint": snapshot["ontology_fingerprint"],
+                "ordering": effective_ordering,
+                "rows": results,
+                "truncated": len(rows) > plan.limit,
+            }
+
+    def deactivate_relation(self, relation_id: str) -> dict[str, Any]:
+        with self._write_connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT * FROM relation WHERE id = ?", (relation_id,)
+            ).fetchone()
+            if row is None:
+                raise RecordNotFoundError(f"relation not found: {relation_id}")
+            updated_at = str(row["updated_at"])
+            if bool(row["active"]):
+                updated_at = _now()
+                connection.execute(
+                    "UPDATE relation SET active = 0, updated_at = ? WHERE id = ?",
+                    (updated_at, relation_id),
+                )
+            return {
+                "active": False,
+                "batch_id": None if row["batch_id"] is None else str(row["batch_id"]),
+                "fragment_id": (
+                    None if row["fragment_id"] is None else str(row["fragment_id"])
+                ),
+                "logical_key": str(row["logical_key"]),
+                "privacy_class": str(row["privacy_class"]),
+                "relation_id": str(row["id"]),
+                "relation_type": str(row["type"]),
+                "run_id": None if row["run_id"] is None else str(row["run_id"]),
+                "source_id": str(row["source_id"]),
+                "source_node_id": str(row["source_node_id"]),
+                "target_node_id": str(row["target_node_id"]),
+                "updated_at": updated_at,
+            }
+
+    def delete_node(self, node_id: str) -> dict[str, int]:
+        with self._write_connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if (
+                connection.execute(
+                    "SELECT 1 FROM node WHERE id = ?", (node_id,)
+                ).fetchone()
+                is None
+            ):
+                raise RecordNotFoundError(f"node not found: {node_id}")
+            attributes = int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM node_attribute WHERE node_id = ?", (node_id,)
+                ).fetchone()[0]
+            )
+            relations = int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM relation "
+                    "WHERE source_node_id = ? OR target_node_id = ?",
+                    (node_id, node_id),
+                ).fetchone()[0]
+            )
+            search_documents = int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM search_document WHERE target_id IN "
+                    "(SELECT id FROM node_attribute WHERE node_id = ?)",
+                    (node_id,),
+                ).fetchone()[0]
+            )
+            embeddings = int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM embedding_record WHERE search_document_id IN "
+                    "(SELECT id FROM search_document WHERE target_id IN "
+                    "(SELECT id FROM node_attribute WHERE node_id = ?))",
+                    (node_id,),
+                ).fetchone()[0]
+            )
+            connection.execute(
+                "DELETE FROM search_document_fts WHERE document_id IN "
+                "(SELECT id FROM search_document WHERE target_id IN "
+                "(SELECT id FROM node_attribute WHERE node_id = ?))",
+                (node_id,),
+            )
+            connection.execute("DELETE FROM node WHERE id = ?", (node_id,))
+            return {
+                "attributes": attributes,
+                "embeddings": embeddings,
+                "nodes": 1,
+                "relations": relations,
+                "search_documents": search_documents,
+            }
+
+    def export_current(self) -> dict[str, list[dict[str, Any]]]:
+        with self._connect() as connection:
+            node_rows = connection.execute(
+                "SELECT id, namespace, type, display_label, privacy_class, "
+                "recorded_at, updated_at FROM node "
+                "WHERE privacy_class = 'public' ORDER BY id"
+            ).fetchall()
+            attribute_rows = connection.execute(
+                "SELECT attribute.id, attribute.node_id, attribute.attribute_name, "
+                "attribute.value_json, attribute.json_type, "
+                "attribute.privacy_class, attribute.source_id, attribute.batch_id, "
+                "attribute.run_id, attribute.fragment_id, attribute.updated_at "
+                "FROM node_attribute AS attribute "
+                "JOIN node ON node.id = attribute.node_id "
+                "WHERE attribute.privacy_class = 'public' "
+                "AND node.privacy_class = 'public' ORDER BY attribute.id"
+            ).fetchall()
+            relation_rows = connection.execute(
+                "SELECT relation.* FROM relation "
+                "JOIN node AS source ON source.id = relation.source_node_id "
+                "JOIN node AS target ON target.id = relation.target_node_id "
+                "WHERE relation.privacy_class = 'public' "
+                "AND source.privacy_class = 'public' "
+                "AND target.privacy_class = 'public' ORDER BY relation.id"
+            ).fetchall()
+        attributes = []
+        for row in attribute_rows:
+            item = dict(row)
+            item["value"] = json.loads(str(item.pop("value_json")))
+            attributes.append(item)
+        return {
+            "attributes": attributes,
+            "nodes": [dict(row) for row in node_rows],
+            "relations": [dict(row) for row in relation_rows],
+        }
 
     def traverse_relations(
         self,
@@ -805,65 +1733,102 @@ class SqliteMemoryStore(MemoryStore):
         limit: int,
         states: list[str],
     ) -> dict[str, Any]:
-        stored_start = self.get_node(start_node_id)
-        start = {
-            key: stored_start[key] for key in ("id", "namespace", "type", "natural_key")
-        }
+        del states
+        start = self.get_node(start_node_id)
         nodes: list[dict[str, Any]] = [{**start, "depth": 0}]
         edges: list[dict[str, Any]] = []
         visited_nodes = {start_node_id}
         visited_edges: set[str] = set()
         frontier = [start_node_id]
         truncated = False
-        for depth in range(1, max_depth + 1):
-            remaining_edges = limit - len(edges)
-            if remaining_edges == 0:
-                truncated = True
-                break
-            relations, query_truncated = self._query_current_relations(
-                frontier=frontier,
-                relation_types=relation_types,
-                direction=direction,
-                states=states,
-                exclude_relation_ids=sorted(visited_edges),
-                limit=remaining_edges,
-            )
-            next_frontier: list[str] = []
-            for relation in relations:
-                source_id = str(relation["source"]["id"])
-                neighbor = (
-                    relation["target"] if source_id in frontier else relation["source"]
-                )
-                neighbor_id = str(neighbor["id"])
-                if neighbor_id not in visited_nodes and len(nodes) >= limit:
-                    truncated = True
+        with self._connect() as connection:
+            for depth in range(1, max_depth + 1):
+                if not frontier or len(edges) >= limit:
+                    truncated = bool(frontier)
                     break
-                edges.append({**relation, "depth": depth})
-                visited_edges.add(str(relation["relation_id"]))
-                if neighbor_id not in visited_nodes:
-                    nodes.append({**neighbor, "depth": depth})
-                    visited_nodes.add(neighbor_id)
-                    next_frontier.append(neighbor_id)
-            if query_truncated:
-                truncated = True
-            frontier = next_frontier
-            if truncated or not frontier:
-                break
+                placeholders = ", ".join("?" for _ in frontier)
+                clauses: list[str] = []
+                parameters: list[Any] = []
+                if direction in {"outbound", "both"}:
+                    clauses.append(f"relation.source_node_id IN ({placeholders})")
+                    parameters.extend(frontier)
+                if direction in {"inbound", "both"}:
+                    clauses.append(f"relation.target_node_id IN ({placeholders})")
+                    parameters.extend(frontier)
+                type_clause = ""
+                if relation_types:
+                    type_placeholders = ", ".join("?" for _ in relation_types)
+                    type_clause = f" AND relation.type IN ({type_placeholders})"
+                    parameters.extend(relation_types)
+                rows = connection.execute(
+                    "SELECT relation.*, source.namespace AS source_namespace, "
+                    "source.type AS source_type, "
+                    "source.privacy_class AS source_privacy, "
+                    "target.namespace AS target_namespace, target.type AS target_type, "
+                    "target.privacy_class AS target_privacy FROM relation "
+                    "JOIN node AS source ON source.id = relation.source_node_id "
+                    "JOIN node AS target ON target.id = relation.target_node_id "
+                    f"WHERE relation.active = 1 AND ({' OR '.join(clauses)})"
+                    + type_clause
+                    + " ORDER BY relation.id LIMIT ?",
+                    [*parameters, limit - len(edges) + 1],
+                ).fetchall()
+                if len(rows) > limit - len(edges):
+                    truncated = True
+                    rows = rows[: limit - len(edges)]
+                next_frontier: list[str] = []
+                for row in rows:
+                    relation_id = str(row["id"])
+                    if relation_id in visited_edges:
+                        continue
+                    visited_edges.add(relation_id)
+                    source = {
+                        "id": str(row["source_node_id"]),
+                        "namespace": str(row["source_namespace"]),
+                        "type": str(row["source_type"]),
+                        "privacy_class": str(row["source_privacy"]),
+                    }
+                    target = {
+                        "id": str(row["target_node_id"]),
+                        "namespace": str(row["target_namespace"]),
+                        "type": str(row["target_type"]),
+                        "privacy_class": str(row["target_privacy"]),
+                    }
+                    edges.append(
+                        {
+                            "active": True,
+                            "depth": depth,
+                            "logical_key": str(row["logical_key"]),
+                            "privacy_class": str(row["privacy_class"]),
+                            "relation_id": relation_id,
+                            "relation_type": str(row["type"]),
+                            "source": source,
+                            "target": target,
+                        }
+                    )
+                    for node in (source, target):
+                        if node["id"] not in visited_nodes:
+                            visited_nodes.add(str(node["id"]))
+                            next_frontier.append(str(node["id"]))
+                            nodes.append({**node, "depth": depth})
+                frontier = next_frontier
+                if truncated:
+                    break
         return {
+            "direction": direction,
+            "edges": edges,
+            "max_depth": max_depth,
+            "nodes": nodes,
             "query": "traverse-relations",
             "start_node_id": start_node_id,
-            "direction": direction,
-            "max_depth": max_depth,
-            "states": states,
-            "nodes": nodes,
-            "edges": edges,
+            "states": ["active"],
             "truncated": truncated,
         }
 
     def get_node(self, node_id: str) -> dict[str, Any]:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT id, namespace, type, natural_key, display_label, "
+                "SELECT id, namespace, type, display_label, "
                 "privacy_class FROM node WHERE id = ?",
                 (node_id,),
             ).fetchone()
@@ -873,7 +1838,6 @@ class SqliteMemoryStore(MemoryStore):
             "id": str(row["id"]),
             "namespace": str(row["namespace"]),
             "type": str(row["type"]),
-            "natural_key": str(row["natural_key"]),
             "display_label": (
                 None if row["display_label"] is None else str(row["display_label"])
             ),
@@ -925,6 +1889,137 @@ class SqliteMemoryStore(MemoryStore):
             "recorded_at": str(row["recorded_at"]),
         }
 
+    def write_analytical_metric(
+        self, request: AnalyticalMetricRequest, evidence: ImportEvidence
+    ) -> dict[str, Any]:
+        recorded_at = _now()
+        dimensions_json = canonical_json(request.dimensions)
+        dimensions_hash = sha256_bytes(dimensions_json.encode("utf-8"))
+        source_id = stable_uuid("source", "analytical-result", evidence.object.digest)
+        run_id = stable_uuid("analytical_run", request.idempotency_key)
+        metric_id = stable_uuid(
+            "metric", run_id, request.definition_version, dimensions_hash
+        )
+        with self._write_connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing_run = connection.execute(
+                "SELECT id FROM analytical_run WHERE idempotency_key = ?",
+                (request.idempotency_key,),
+            ).fetchone()
+            if existing_run is not None:
+                return {
+                    "evidence_digest": evidence.object.digest,
+                    "fragment_id": evidence.fragment.id,
+                    "idempotency_key": request.idempotency_key,
+                    "metric_id": metric_id,
+                    "replayed": True,
+                    "run_id": str(existing_run["id"]),
+                    "source_id": source_id,
+                }
+            connection.execute(
+                "INSERT INTO source "
+                "(id, natural_key, kind, locator, privacy_class, recorded_at) "
+                "VALUES (?, ?, 'analytical-result', ?, ?, ?) "
+                "ON CONFLICT(id) DO NOTHING",
+                (
+                    source_id,
+                    f"analytical-result:{evidence.object.digest}",
+                    f"evidence:sha256:{evidence.object.digest}",
+                    request.privacy,
+                    recorded_at,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO evidence_object "
+                "(id, digest, byte_size, media_type, privacy_class, recorded_at) "
+                "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
+                (
+                    evidence.object.id,
+                    evidence.object.digest,
+                    evidence.object.byte_size,
+                    evidence.object.media_type,
+                    evidence.object.privacy_class,
+                    evidence.object.recorded_at,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO evidence_fragment "
+                "(id, evidence_object_id, locator_kind, locator_json, extractor_id, "
+                "extractor_version, byte_size, digest, privacy_class, recorded_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
+                (
+                    evidence.fragment.id,
+                    evidence.fragment.evidence_object_id,
+                    evidence.fragment.locator_kind,
+                    evidence.fragment.locator_json,
+                    evidence.fragment.extractor_id,
+                    evidence.fragment.extractor_version,
+                    evidence.fragment.byte_size,
+                    evidence.fragment.digest,
+                    evidence.fragment.privacy_class,
+                    evidence.fragment.recorded_at,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO analytical_run "
+                "(id, idempotency_key, batch_id, source_id, method, recorded_at) "
+                "VALUES (?, ?, NULL, ?, ?, ?)",
+                (
+                    run_id,
+                    request.idempotency_key,
+                    source_id,
+                    request.method,
+                    recorded_at,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO evidence_acquisition "
+                "(id, evidence_object_id, source_id, run_id, privacy_class, "
+                "retention_required, retain_until, method, review_status, recorded_at) "
+                "VALUES (?, ?, ?, ?, ?, 1, NULL, ?, 'unreviewed', ?)",
+                (
+                    stable_uuid("evidence_acquisition", evidence.object.id, run_id),
+                    evidence.object.id,
+                    source_id,
+                    run_id,
+                    request.privacy,
+                    request.method,
+                    recorded_at,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO metric "
+                "(id, run_id, definition_version, value_json, unit, numerator, "
+                "denominator, dimensions_json, dimensions_hash, method_version, "
+                "coverage_json, complete, invalidated, fragment_id, recorded_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+                (
+                    metric_id,
+                    run_id,
+                    request.definition_version,
+                    canonical_json(request.value),
+                    request.unit,
+                    request.numerator,
+                    request.denominator,
+                    dimensions_json,
+                    dimensions_hash,
+                    request.method_version,
+                    canonical_json(request.coverage),
+                    int(request.complete),
+                    evidence.fragment.id,
+                    recorded_at,
+                ),
+            )
+            return {
+                "evidence_digest": evidence.object.digest,
+                "fragment_id": evidence.fragment.id,
+                "idempotency_key": request.idempotency_key,
+                "metric_id": metric_id,
+                "replayed": False,
+                "run_id": run_id,
+                "source_id": source_id,
+            }
+
     def search_text(self, query: str, limit: int) -> dict[str, Any]:
         terms = re.findall(r"\w+", query.casefold(), flags=re.UNICODE)
         if not terms:
@@ -933,7 +2028,11 @@ class SqliteMemoryStore(MemoryStore):
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT search_document.*, bm25(search_document_fts) AS rank
+                SELECT search_document.*, bm25(search_document_fts) AS rank,
+                       node_attribute.value_json, node_attribute.json_type,
+                       node_attribute.source_id, node_attribute.batch_id,
+                       node_attribute.run_id, node_attribute.fragment_id,
+                       node_attribute.updated_at
                 FROM search_document_fts
                 JOIN search_document
                     ON search_document.id = search_document_fts.document_id
@@ -976,6 +2075,17 @@ class SqliteMemoryStore(MemoryStore):
                     "content_hash": str(row["content_hash"]),
                     "privacy_class": str(row["privacy_class"]),
                     "rank": float(row["rank"]),
+                    "value": json.loads(str(row["value_json"])),
+                    "json_type": str(row["json_type"]),
+                    "source_id": str(row["source_id"]),
+                    "batch_id": None
+                    if row["batch_id"] is None
+                    else str(row["batch_id"]),
+                    "run_id": None if row["run_id"] is None else str(row["run_id"]),
+                    "fragment_id": None
+                    if row["fragment_id"] is None
+                    else str(row["fragment_id"]),
+                    "updated_at": str(row["updated_at"]),
                 }
                 for row in rows
             ],
@@ -983,353 +2093,6 @@ class SqliteMemoryStore(MemoryStore):
                 "eligible_count": eligible_count,
                 "indexed_count": indexed_count,
                 "complete": indexed_count == eligible_count,
-            },
-        }
-
-    def explain_attribute(self, attribute_id: str) -> dict[str, Any]:
-        with self._connect() as connection:
-            attribute = connection.execute(
-                """
-                SELECT node_attribute.*, node.namespace, node.type AS node_type,
-                       node.natural_key
-                FROM node_attribute
-                JOIN node ON node.id = node_attribute.node_id
-                WHERE node_attribute.id = ?
-                """,
-                (attribute_id,),
-            ).fetchone()
-            if attribute is None:
-                raise RecordNotFoundError(f"attribute not found: {attribute_id}")
-            assertion_rows = connection.execute(
-                """
-                SELECT assertion.*,
-                       source.kind AS source_kind,
-                       source.locator AS source_locator,
-                       source.privacy_class AS source_privacy_class,
-                       analytical_run.method AS run_method,
-                       analytical_run.valid_from AS run_valid_from,
-                       analytical_run.valid_to AS run_valid_to,
-                       analytical_run.recorded_at AS run_recorded_at,
-                       NOT EXISTS (
-                           SELECT 1 FROM assertion AS successor
-                           WHERE successor.supersedes_assertion_id = assertion.id
-                             AND successor.lifecycle = 'active'
-                       ) AND assertion.lifecycle = 'active' AS effective
-                FROM assertion
-                JOIN source ON source.id = assertion.source_id
-                JOIN analytical_run ON analytical_run.id = assertion.run_id
-                WHERE assertion.attribute_id = ?
-                ORDER BY assertion.recorded_at, assertion.id
-                LIMIT ?
-                """,
-                (attribute_id, MAX_EXPLANATION_ASSERTIONS),
-            ).fetchall()
-            assertion_ids = [str(row["id"]) for row in assertion_rows]
-            if assertion_ids:
-                placeholders = ", ".join("?" for _ in assertion_ids)
-                binding_rows = connection.execute(
-                    f"""
-                SELECT evidence_binding.*, evidence_fragment.locator_kind,
-                       evidence_fragment.locator_json,
-                       evidence_fragment.extractor_id,
-                       evidence_fragment.extractor_version,
-                       evidence_fragment.digest AS fragment_digest,
-                       evidence_fragment.byte_size AS fragment_byte_size,
-                       evidence_fragment.privacy_class AS fragment_privacy_class,
-                       evidence_object.digest AS object_digest,
-                       evidence_object.byte_size AS object_byte_size,
-                       evidence_object.media_type,
-                       evidence_object.privacy_class AS object_privacy_class
-                FROM evidence_binding
-                JOIN evidence_fragment
-                    ON evidence_fragment.id = evidence_binding.fragment_id
-                JOIN evidence_object
-                    ON evidence_object.id = evidence_fragment.evidence_object_id
-                WHERE evidence_binding.assertion_id IN ({placeholders})
-                ORDER BY evidence_binding.assertion_id, evidence_binding.id
-                """,
-                    assertion_ids,
-                ).fetchall()
-            else:
-                binding_rows = []
-
-        bindings_by_assertion: dict[str, list[dict[str, Any]]] = {}
-        for row in binding_rows:
-            assertion_id = str(row["assertion_id"])
-            bindings_by_assertion.setdefault(assertion_id, []).append(
-                _binding_summary(row)
-            )
-        assertions = [
-            {
-                "assertion_id": str(row["id"]),
-                "stance": str(row["stance"]),
-                "basis": str(row["basis"]),
-                "confidence": float(row["confidence"]),
-                "review_status": str(row["review_status"]),
-                "valid_from": str(row["valid_from"]),
-                "valid_to": None if row["valid_to"] is None else str(row["valid_to"]),
-                "recorded_at": str(row["recorded_at"]),
-                "method": str(row["method"]),
-                "source_id": str(row["source_id"]),
-                "run_id": str(row["run_id"]),
-                "source": {
-                    "id": str(row["source_id"]),
-                    "kind": str(row["source_kind"]),
-                    "locator": str(row["source_locator"]),
-                    "privacy_class": str(row["source_privacy_class"]),
-                },
-                "run": {
-                    "id": str(row["run_id"]),
-                    "method": str(row["run_method"]),
-                    "valid_from": str(row["run_valid_from"]),
-                    "valid_to": (
-                        None
-                        if row["run_valid_to"] is None
-                        else str(row["run_valid_to"])
-                    ),
-                    "recorded_at": str(row["run_recorded_at"]),
-                },
-                "supersedes_assertion_id": (
-                    None
-                    if row["supersedes_assertion_id"] is None
-                    else str(row["supersedes_assertion_id"])
-                ),
-                "effective": bool(row["effective"]),
-                "lifecycle": str(row["lifecycle"]),
-                "stable_key": str(row["stable_key"]),
-                "stable_key_version": int(row["stable_key_version"]),
-                "evidence": bindings_by_assertion.get(str(row["id"]), []),
-            }
-            for row in assertion_rows
-        ]
-        fact = next(
-            item
-            for item in self._current_facts(attribute_id)
-            if item["attribute_id"] == attribute_id
-        )
-        return {
-            "fact": fact,
-            "node": {
-                "id": str(attribute["node_id"]),
-                "namespace": str(attribute["namespace"]),
-                "type": str(attribute["node_type"]),
-                "natural_key": str(attribute["natural_key"]),
-            },
-            "assertions": assertions,
-        }
-
-    def explain_relation(self, relation_id: str) -> dict[str, Any]:
-        with self._connect() as connection:
-            relation = connection.execute(
-                """
-                SELECT relation.*,
-                       source.namespace AS source_namespace,
-                       source.type AS source_type,
-                       source.natural_key AS source_natural_key,
-                       target.namespace AS target_namespace,
-                       target.type AS target_type,
-                       target.natural_key AS target_natural_key
-                FROM relation
-                JOIN node AS source ON source.id = relation.source_node_id
-                JOIN node AS target ON target.id = relation.target_node_id
-                WHERE relation.id = ?
-                """,
-                (relation_id,),
-            ).fetchone()
-            if relation is None:
-                raise RecordNotFoundError(f"relation not found: {relation_id}")
-            assertion_rows = connection.execute(
-                """
-                SELECT assertion.*,
-                       source.kind AS source_kind,
-                       source.locator AS source_locator,
-                       source.privacy_class AS source_privacy_class,
-                       analytical_run.method AS run_method,
-                       analytical_run.valid_from AS run_valid_from,
-                       analytical_run.valid_to AS run_valid_to,
-                       analytical_run.recorded_at AS run_recorded_at,
-                       NOT EXISTS (
-                           SELECT 1 FROM assertion AS successor
-                           WHERE successor.supersedes_assertion_id = assertion.id
-                             AND successor.lifecycle = 'active'
-                       ) AND assertion.lifecycle = 'active' AS effective
-                FROM assertion
-                JOIN source ON source.id = assertion.source_id
-                JOIN analytical_run ON analytical_run.id = assertion.run_id
-                WHERE assertion.target_kind = 'relation'
-                  AND assertion.target_id = ?
-                ORDER BY assertion.recorded_at, assertion.id
-                LIMIT ?
-                """,
-                (relation_id, MAX_EXPLANATION_ASSERTIONS),
-            ).fetchall()
-            assertion_ids = [str(row["id"]) for row in assertion_rows]
-            binding_rows: list[sqlite3.Row] = []
-            if assertion_ids:
-                placeholders = ", ".join("?" for _ in assertion_ids)
-                binding_rows = connection.execute(
-                    f"""
-                    SELECT evidence_binding.*, evidence_fragment.locator_kind,
-                           evidence_fragment.locator_json,
-                           evidence_fragment.extractor_id,
-                           evidence_fragment.extractor_version,
-                           evidence_fragment.digest AS fragment_digest,
-                           evidence_fragment.byte_size AS fragment_byte_size,
-                           evidence_fragment.privacy_class AS fragment_privacy_class,
-                           evidence_object.digest AS object_digest,
-                           evidence_object.byte_size AS object_byte_size,
-                           evidence_object.media_type,
-                           evidence_object.privacy_class AS object_privacy_class
-                    FROM evidence_binding
-                    JOIN evidence_fragment
-                        ON evidence_fragment.id = evidence_binding.fragment_id
-                    JOIN evidence_object
-                        ON evidence_object.id = evidence_fragment.evidence_object_id
-                    WHERE evidence_binding.assertion_id IN ({placeholders})
-                    ORDER BY evidence_binding.assertion_id, evidence_binding.id
-                    """,
-                    assertion_ids,
-                ).fetchall()
-
-        bindings_by_assertion: dict[str, list[dict[str, Any]]] = {}
-        for row in binding_rows:
-            assertion_id = str(row["assertion_id"])
-            bindings_by_assertion.setdefault(assertion_id, []).append(
-                _binding_summary(row)
-            )
-        assertions = [
-            {
-                "assertion_id": str(row["id"]),
-                "stance": str(row["stance"]),
-                "basis": str(row["basis"]),
-                "confidence": float(row["confidence"]),
-                "review_status": str(row["review_status"]),
-                "valid_from": str(row["valid_from"]),
-                "valid_to": (None if row["valid_to"] is None else str(row["valid_to"])),
-                "recorded_at": str(row["recorded_at"]),
-                "method": str(row["method"]),
-                "source_id": str(row["source_id"]),
-                "run_id": str(row["run_id"]),
-                "source": {
-                    "id": str(row["source_id"]),
-                    "kind": str(row["source_kind"]),
-                    "locator": str(row["source_locator"]),
-                    "privacy_class": str(row["source_privacy_class"]),
-                },
-                "run": {
-                    "id": str(row["run_id"]),
-                    "method": str(row["run_method"]),
-                    "valid_from": str(row["run_valid_from"]),
-                    "valid_to": (
-                        None
-                        if row["run_valid_to"] is None
-                        else str(row["run_valid_to"])
-                    ),
-                    "recorded_at": str(row["run_recorded_at"]),
-                },
-                "supersedes_assertion_id": (
-                    None
-                    if row["supersedes_assertion_id"] is None
-                    else str(row["supersedes_assertion_id"])
-                ),
-                "effective": bool(row["effective"]),
-                "lifecycle": str(row["lifecycle"]),
-                "stable_key": str(row["stable_key"]),
-                "stable_key_version": int(row["stable_key_version"]),
-                "evidence": bindings_by_assertion.get(str(row["id"]), []),
-            }
-            for row in assertion_rows
-        ]
-        fact = next(
-            item
-            for item in self._query_current_relations(relation_id=relation_id, limit=1)[
-                0
-            ]
-            if item["relation_id"] == relation_id
-        )
-        return {"fact": fact, "assertions": assertions}
-
-    def explain_metric(self, metric_id: str) -> dict[str, Any]:
-        with self._connect() as connection:
-            row = connection.execute(
-                """
-                SELECT metric.*, analytical_run.source_id,
-                       analytical_run.method AS run_method,
-                       analytical_run.valid_from AS run_valid_from,
-                       analytical_run.valid_to AS run_valid_to,
-                       analytical_run.recorded_at AS run_recorded_at,
-                       source.kind AS source_kind,
-                       source.locator AS source_locator,
-                       source.privacy_class AS source_privacy_class
-                FROM metric
-                JOIN analytical_run ON analytical_run.id = metric.run_id
-                JOIN source ON source.id = analytical_run.source_id
-                WHERE metric.id = ?
-                """,
-                (metric_id,),
-            ).fetchone()
-            if row is None:
-                raise RecordNotFoundError(f"metric not found: {metric_id}")
-            binding_rows = connection.execute(
-                """
-                SELECT evidence_binding.*, evidence_fragment.locator_kind,
-                       evidence_fragment.locator_json,
-                       evidence_fragment.extractor_id,
-                       evidence_fragment.extractor_version,
-                       evidence_fragment.digest AS fragment_digest,
-                       evidence_fragment.byte_size AS fragment_byte_size,
-                       evidence_fragment.privacy_class AS fragment_privacy_class,
-                       evidence_object.digest AS object_digest,
-                       evidence_object.byte_size AS object_byte_size,
-                       evidence_object.media_type,
-                       evidence_object.privacy_class AS object_privacy_class
-                FROM evidence_binding
-                JOIN evidence_fragment
-                    ON evidence_fragment.id = evidence_binding.fragment_id
-                JOIN evidence_object
-                    ON evidence_object.id = evidence_fragment.evidence_object_id
-                WHERE evidence_binding.metric_id = ?
-                ORDER BY evidence_binding.id
-                """,
-                (metric_id,),
-            ).fetchall()
-        return {
-            "metric": {
-                "metric_id": str(row["id"]),
-                "run_id": str(row["run_id"]),
-                "source_id": str(row["source_id"]),
-                "definition_version": str(row["definition_version"]),
-                "value": json.loads(str(row["value_json"])),
-                "unit": None if row["unit"] is None else str(row["unit"]),
-                "numerator": (
-                    None if row["numerator"] is None else float(row["numerator"])
-                ),
-                "denominator": (
-                    None if row["denominator"] is None else float(row["denominator"])
-                ),
-                "dimensions": json.loads(str(row["dimensions_json"])),
-                "method_version": str(row["method_version"]),
-                "run_method": str(row["run_method"]),
-                "coverage": json.loads(str(row["coverage_json"])),
-                "complete": bool(row["complete"]),
-                "invalidated": bool(row["invalidated"]),
-                "recorded_at": str(row["recorded_at"]),
-            },
-            "evidence": [_binding_summary(binding) for binding in binding_rows],
-            "source": {
-                "id": str(row["source_id"]),
-                "kind": str(row["source_kind"]),
-                "locator": str(row["source_locator"]),
-                "privacy_class": str(row["source_privacy_class"]),
-            },
-            "run": {
-                "id": str(row["run_id"]),
-                "method": str(row["run_method"]),
-                "valid_from": str(row["run_valid_from"]),
-                "valid_to": (
-                    None if row["run_valid_to"] is None else str(row["run_valid_to"])
-                ),
-                "recorded_at": str(row["run_recorded_at"]),
             },
         }
 
@@ -1746,7 +2509,7 @@ class SqliteMemoryStore(MemoryStore):
             version = int(connection.execute("PRAGMA user_version").fetchone()[0])
         return MemoryStoreStatus(
             backend="sqlite",
-            initialized=version == 4,
+            initialized=version == 5,
             schema_version=version,
         )
 
@@ -1811,20 +2574,16 @@ class SqliteMemoryStore(MemoryStore):
             rows = connection.execute(
                 """
                 SELECT search_document.*, node.namespace, node.type AS node_type,
-                       node_attribute.name AS attribute_name
+                       node_attribute.attribute_name
                 FROM search_document
                 JOIN node_attribute ON node_attribute.id = search_document.target_id
                 JOIN node ON node.id = node_attribute.node_id
                 WHERE search_document.lifecycle = 'active'
                   AND search_document.target_kind = 'node_attribute'
                   AND node_attribute.searchable = 1
-                  AND node_attribute.name = ?
-                  AND CASE search_document.privacy_class
-                        WHEN 'public' THEN 0 WHEN 'private' THEN 1
-                        WHEN 'restricted' THEN 2 ELSE 3 END
-                      <= CASE ?
-                        WHEN 'public' THEN 0 WHEN 'private' THEN 1
-                        WHEN 'restricted' THEN 2 ELSE 3 END
+                  AND node_attribute.attribute_name = ?
+                  AND search_document.privacy_class = 'public'
+                  AND ? = 'public'
                   AND NOT EXISTS (
                       SELECT 1 FROM embedding_record
                       WHERE embedding_record.profile_id = ?
@@ -1889,7 +2648,12 @@ class SqliteMemoryStore(MemoryStore):
                        search_document.target_id, search_document.content,
                        search_document.content_hash,
                        search_document.privacy_class, node.namespace,
-                       node.type AS node_type, node_attribute.name AS attribute_name
+                       node.type AS node_type,
+                       node_attribute.attribute_name,
+                       node_attribute.value_json, node_attribute.json_type,
+                       node_attribute.source_id, node_attribute.batch_id,
+                       node_attribute.run_id, node_attribute.fragment_id,
+                       node_attribute.updated_at
                 FROM embedding_record
                 JOIN search_document
                   ON search_document.id = embedding_record.search_document_id
@@ -1903,15 +2667,11 @@ class SqliteMemoryStore(MemoryStore):
                   AND search_document.lifecycle = 'active'
                   AND search_document.target_kind = 'node_attribute'
                   AND node_attribute.searchable = 1
-                  AND node_attribute.name = ?
+                  AND node_attribute.attribute_name = ?
                   AND (? IS NULL OR node.namespace = ?)
                   AND (? IS NULL OR node.type = ?)
-                  AND CASE search_document.privacy_class
-                        WHEN 'public' THEN 0 WHEN 'private' THEN 1
-                        WHEN 'restricted' THEN 2 ELSE 3 END
-                      <= CASE ?
-                        WHEN 'public' THEN 0 WHEN 'private' THEN 1
-                        WHEN 'restricted' THEN 2 ELSE 3 END
+                  AND search_document.privacy_class = 'public'
+                  AND ? = 'public'
                 ORDER BY search_document.id
                 """,
                 (
@@ -1942,13 +2702,9 @@ class SqliteMemoryStore(MemoryStore):
                     WHERE search_document.lifecycle = 'active'
                       AND search_document.target_kind = 'node_attribute'
                       AND node_attribute.searchable = 1
-                      AND node_attribute.name = ?
-                      AND CASE search_document.privacy_class
-                            WHEN 'public' THEN 0 WHEN 'private' THEN 1
-                            WHEN 'restricted' THEN 2 ELSE 3 END
-                          <= CASE ?
-                            WHEN 'public' THEN 0 WHEN 'private' THEN 1
-                            WHEN 'restricted' THEN 2 ELSE 3 END
+                      AND node_attribute.attribute_name = ?
+                      AND search_document.privacy_class = 'public'
+                      AND ? = 'public'
                     """,
                     parameters,
                 ).fetchone()[0]
@@ -1970,13 +2726,9 @@ class SqliteMemoryStore(MemoryStore):
                       AND search_document.lifecycle = 'active'
                       AND search_document.target_kind = 'node_attribute'
                       AND node_attribute.searchable = 1
-                      AND node_attribute.name = ?
-                      AND CASE search_document.privacy_class
-                            WHEN 'public' THEN 0 WHEN 'private' THEN 1
-                            WHEN 'restricted' THEN 2 ELSE 3 END
-                          <= CASE ?
-                            WHEN 'public' THEN 0 WHEN 'private' THEN 1
-                            WHEN 'restricted' THEN 2 ELSE 3 END
+                      AND node_attribute.attribute_name = ?
+                      AND search_document.privacy_class = 'public'
+                      AND ? = 'public'
                     """,
                     (
                         profile_id,
@@ -1988,3 +2740,192 @@ class SqliteMemoryStore(MemoryStore):
                 ).fetchone()[0]
             )
         return {"eligible_count": eligible, "indexed_count": indexed}
+
+    def explain_attribute(self, attribute_id: str) -> dict[str, Any]:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT node_attribute.*, node.namespace,
+                       node.type AS node_type,
+                       source.kind AS source_kind,
+                       source.locator AS source_locator,
+                       evidence_object.digest AS evidence_digest,
+                       evidence_object.byte_size AS evidence_byte_size,
+                       evidence_object.media_type AS evidence_media_type
+                FROM node_attribute
+                JOIN node ON node.id = node_attribute.node_id
+                JOIN source ON source.id = node_attribute.source_id
+                LEFT JOIN evidence_fragment
+                  ON evidence_fragment.id = node_attribute.fragment_id
+                LEFT JOIN evidence_object
+                  ON evidence_object.id = evidence_fragment.evidence_object_id
+                WHERE node_attribute.id = ?
+                """,
+                (attribute_id,),
+            ).fetchone()
+        if row is None:
+            raise RecordNotFoundError(f"attribute not found: {attribute_id}")
+        return {
+            "attribute": {
+                "attribute_id": str(row["id"]),
+                "attribute_name": str(row["attribute_name"]),
+                "batch_id": (None if row["batch_id"] is None else str(row["batch_id"])),
+                "fragment_id": (
+                    None if row["fragment_id"] is None else str(row["fragment_id"])
+                ),
+                "json_type": str(row["json_type"]),
+                "node_id": str(row["node_id"]),
+                "privacy_class": str(row["privacy_class"]),
+                "run_id": None if row["run_id"] is None else str(row["run_id"]),
+                "searchable": bool(row["searchable"]),
+                "source_id": str(row["source_id"]),
+                "updated_at": str(row["updated_at"]),
+                "value": json.loads(str(row["value_json"])),
+            },
+            "evidence": (
+                None
+                if row["evidence_digest"] is None
+                else {
+                    "byte_size": int(row["evidence_byte_size"]),
+                    "digest": str(row["evidence_digest"]),
+                    "media_type": str(row["evidence_media_type"]),
+                }
+            ),
+            "node": {
+                "id": str(row["node_id"]),
+                "namespace": str(row["namespace"]),
+                "type": str(row["node_type"]),
+            },
+            "source": {
+                "id": str(row["source_id"]),
+                "kind": str(row["source_kind"]),
+                "locator": str(row["source_locator"]),
+            },
+        }
+
+    def explain_relation(self, relation_id: str) -> dict[str, Any]:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT relation.*,
+                       source.kind AS source_kind,
+                       source.locator AS source_locator,
+                       evidence_object.digest AS evidence_digest,
+                       evidence_object.byte_size AS evidence_byte_size,
+                       evidence_object.media_type AS evidence_media_type
+                FROM relation
+                JOIN source ON source.id = relation.source_id
+                LEFT JOIN evidence_fragment
+                  ON evidence_fragment.id = relation.fragment_id
+                LEFT JOIN evidence_object
+                  ON evidence_object.id = evidence_fragment.evidence_object_id
+                WHERE relation.id = ?
+                """,
+                (relation_id,),
+            ).fetchone()
+        if row is None:
+            raise RecordNotFoundError(f"relation not found: {relation_id}")
+        return {
+            "relation": {
+                "active": bool(row["active"]),
+                "batch_id": (None if row["batch_id"] is None else str(row["batch_id"])),
+                "fragment_id": (
+                    None if row["fragment_id"] is None else str(row["fragment_id"])
+                ),
+                "logical_key": str(row["logical_key"]),
+                "privacy_class": str(row["privacy_class"]),
+                "relation_id": str(row["id"]),
+                "relation_type": str(row["type"]),
+                "run_id": None if row["run_id"] is None else str(row["run_id"]),
+                "source_id": str(row["source_id"]),
+                "source_node_id": str(row["source_node_id"]),
+                "target_node_id": str(row["target_node_id"]),
+                "updated_at": str(row["updated_at"]),
+            },
+            "evidence": (
+                None
+                if row["evidence_digest"] is None
+                else {
+                    "byte_size": int(row["evidence_byte_size"]),
+                    "digest": str(row["evidence_digest"]),
+                    "media_type": str(row["evidence_media_type"]),
+                }
+            ),
+            "source": {
+                "id": str(row["source_id"]),
+                "kind": str(row["source_kind"]),
+                "locator": str(row["source_locator"]),
+            },
+        }
+
+    def explain_metric(self, metric_id: str) -> dict[str, Any]:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT metric.*, analytical_run.batch_id,
+                       analytical_run.source_id,
+                       analytical_run.method AS run_method,
+                       analytical_run.recorded_at AS run_recorded_at,
+                       source.kind AS source_kind,
+                       source.locator AS source_locator,
+                       evidence_object.digest AS evidence_digest,
+                       evidence_object.byte_size AS evidence_byte_size,
+                       evidence_object.media_type AS evidence_media_type
+                FROM metric
+                JOIN analytical_run ON analytical_run.id = metric.run_id
+                JOIN source ON source.id = analytical_run.source_id
+                LEFT JOIN evidence_fragment
+                  ON evidence_fragment.id = metric.fragment_id
+                LEFT JOIN evidence_object
+                  ON evidence_object.id = evidence_fragment.evidence_object_id
+                WHERE metric.id = ?
+                """,
+                (metric_id,),
+            ).fetchone()
+        if row is None:
+            raise RecordNotFoundError(f"metric not found: {metric_id}")
+        return {
+            "evidence": (
+                None
+                if row["evidence_digest"] is None
+                else {
+                    "byte_size": int(row["evidence_byte_size"]),
+                    "digest": str(row["evidence_digest"]),
+                    "media_type": str(row["evidence_media_type"]),
+                }
+            ),
+            "metric": {
+                "complete": bool(row["complete"]),
+                "coverage": json.loads(str(row["coverage_json"])),
+                "definition_version": str(row["definition_version"]),
+                "denominator": (
+                    None if row["denominator"] is None else float(row["denominator"])
+                ),
+                "dimensions": json.loads(str(row["dimensions_json"])),
+                "fragment_id": (
+                    None if row["fragment_id"] is None else str(row["fragment_id"])
+                ),
+                "invalidated": bool(row["invalidated"]),
+                "method_version": str(row["method_version"]),
+                "metric_id": str(row["id"]),
+                "numerator": (
+                    None if row["numerator"] is None else float(row["numerator"])
+                ),
+                "recorded_at": str(row["recorded_at"]),
+                "run_id": str(row["run_id"]),
+                "unit": None if row["unit"] is None else str(row["unit"]),
+                "value": json.loads(str(row["value_json"])),
+            },
+            "run": {
+                "batch_id": None if row["batch_id"] is None else str(row["batch_id"]),
+                "id": str(row["run_id"]),
+                "method": str(row["run_method"]),
+                "recorded_at": str(row["run_recorded_at"]),
+                "source_id": str(row["source_id"]),
+            },
+            "source": {
+                "id": str(row["source_id"]),
+                "kind": str(row["source_kind"]),
+                "locator": str(row["source_locator"]),
+            },
+        }

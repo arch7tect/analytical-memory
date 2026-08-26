@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-BATCH = REPOSITORY_ROOT / "examples" / "quickstart" / "batch.json"
+EXAMPLES = REPOSITORY_ROOT / "examples" / "quickstart"
 
 
 def run(*arguments: str) -> dict[str, Any]:
@@ -34,34 +34,47 @@ def main() -> None:
             "--evidence-root",
             str(root / "evidence"),
         )
-        initialized = run(*shared, "init")
-        preview = run(*shared, "ingest", "preview", str(BATCH))
-        applied = run(*shared, "ingest", "apply", str(BATCH))
-        replayed = run(*shared, "ingest", "apply", str(BATCH))
-        current = run(*shared, "query", "current-facts")
-        attribute_id = str(applied["result"]["attribute_ids"][0])
-        explanation = run(*shared, "explain", attribute_id)
-
-        states = {str(item["state"]) for item in current["results"]}
-        evidence_status = explanation["assertions"][0]["evidence"][0]["status"]
-        if not initialized["initialized"]:
-            raise RuntimeError("initialization failed")
-        if preview["writes"] is not False:
-            raise RuntimeError("preview unexpectedly wrote state")
-        if replayed != {"replayed": True, "result": applied["result"]}:
-            raise RuntimeError("idempotent replay changed the result")
-        if states != {"supported", "contested", "contradicted", "unasserted"}:
-            raise RuntimeError("current-facts did not return all fact states")
-        if evidence_status["verification"] != "verified":
-            raise RuntimeError("evidence verification failed")
-
+        run(*shared, "init")
+        fingerprint = str(run(*shared, "schema", "show")["schema_fingerprint"])
+        for filename, entity_type in (
+            ("sessions.jsonl", "example.Session"),
+            ("messages.jsonl", "example.SessionMessage"),
+        ):
+            run(
+                *shared,
+                "jsonl",
+                "import",
+                str(EXAMPLES / filename),
+                "--entity-type",
+                entity_type,
+                "--key",
+                '[{"field":"id","type":"string"}]',
+                "--contract-fingerprint",
+                fingerprint,
+            )
+        joined = run(
+            *shared,
+            "join",
+            "materialize",
+            str(EXAMPLES / "join.json"),
+            "--contract-fingerprint",
+            fingerprint,
+        )
+        queried = run(
+            *shared,
+            "query",
+            "execute",
+            "--document",
+            str(EXAMPLES / "query.json"),
+        )
+        if joined["created_relations"] != 2 or len(queried["rows"]) != 1:
+            raise RuntimeError("M5 smoke result is unexpected")
         print(
             json.dumps(
                 {
-                    "batch_id": applied["result"]["batch_id"],
-                    "evidence_verification": evidence_status["verification"],
-                    "fact_states": sorted(states),
+                    "created_relations": joined["created_relations"],
                     "ok": True,
+                    "query_rows": len(queried["rows"]),
                 },
                 indent=2,
                 sort_keys=True,

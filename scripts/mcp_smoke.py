@@ -2,18 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
 from typing import Any
 
 from mcp import Client, StdioServerParameters
-from mcp.types import TextResourceContents
 
 from analytical_memory.configuration import build_application
+from analytical_memory.schema_contract import load_schema
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-BATCH = REPOSITORY_ROOT / "examples" / "quickstart" / "batch.json"
+EXAMPLES = REPOSITORY_ROOT / "examples" / "quickstart"
 SCHEMA = REPOSITORY_ROOT / "schema" / "current.json"
 
 
@@ -33,80 +34,55 @@ async def run_smoke() -> dict[str, Any]:
             evidence_root=evidence_root,
             schema_path=SCHEMA,
         ).initialize()
+        fingerprint = load_schema(SCHEMA).fingerprint
         parameters = StdioServerParameters(
             command=sys.executable,
             args=["-m", "analytical_memory.mcp_server"],
             cwd=REPOSITORY_ROOT,
             env={
+                **os.environ,
                 "ANALYTICAL_MEMORY_DB": str(database),
                 "ANALYTICAL_MEMORY_EVIDENCE_ROOT": str(evidence_root),
                 "ANALYTICAL_MEMORY_SCHEMA": str(SCHEMA),
             },
         )
         async with Client(parameters) as client:
-            resources = await client.list_resources()
-            tools = await client.list_tools()
-            schema_result = await client.read_resource("memory://schema/current")
-            capabilities_result = await client.read_resource(
-                "memory://capabilities/current"
-            )
-            preview = structured(
+            for filename, entity_type in (
+                ("sessions.jsonl", "example.Session"),
+                ("messages.jsonl", "example.SessionMessage"),
+            ):
+                structured(
+                    await client.call_tool(
+                        "memory_jsonl_import",
+                        {
+                            "source_path": str(EXAMPLES / filename),
+                            "entity_type": entity_type,
+                            "key": [{"field": "id", "type": "string"}],
+                            "contract_fingerprint": fingerprint,
+                        },
+                    )
+                )
+            definition = json.loads((EXAMPLES / "join.json").read_text())
+            joined = structured(
                 await client.call_tool(
-                    "memory_ingest_preview", {"batch_path": str(BATCH)}
+                    "memory_join_materialize",
+                    {
+                        "name": definition["name"],
+                        "relation": definition["relation"],
+                        "from_": definition["from"],
+                        "to": definition["to"],
+                        "contract_fingerprint": fingerprint,
+                    },
                 )
             )
-            applied = structured(
-                await client.call_tool(
-                    "memory_ingest_apply", {"batch_path": str(BATCH)}
-                )
+            query = json.loads((EXAMPLES / "query.json").read_text())
+            queried = structured(
+                await client.call_tool("memory_query_execute", {"document": query})
             )
-            digest = str(applied["result"]["evidence_digest"])
-            evidence_status = structured(
-                await client.call_tool("memory_evidence_status", {"digest": digest})
-            )
-            evidence_read = structured(
-                await client.call_tool(
-                    "memory_evidence_read",
-                    {"digest": digest, "offset": 0, "limit": 8},
-                )
-            )
-            current = structured(
-                await client.call_tool("memory_query_current_facts", {})
-            )
-            attribute_id = str(applied["result"]["attribute_ids"][0])
-            explanation = structured(
-                await client.call_tool("memory_explain", {"attribute_id": attribute_id})
-            )
-
-        if not isinstance(schema_result.contents[0], TextResourceContents):
-            raise RuntimeError("schema resource is not text")
-        if not isinstance(capabilities_result.contents[0], TextResourceContents):
-            raise RuntimeError("capabilities resource is not text")
-        schema = json.loads(schema_result.contents[0].text)
-        capabilities = json.loads(capabilities_result.contents[0].text)
-        states = sorted(str(item["state"]) for item in current["results"])
-        verification = explanation["assertions"][0]["evidence"][0]["status"][
-            "verification"
-        ]
-        if preview["writes"] is not False:
-            raise RuntimeError("MCP preview unexpectedly wrote state")
-        if verification != "verified":
-            raise RuntimeError("MCP explanation did not verify evidence")
-        if evidence_status["verification"] != "verified":
-            raise RuntimeError("MCP evidence status did not verify the object")
-        if evidence_read["byte_count"] != 8:
-            raise RuntimeError("MCP bounded evidence read returned the wrong size")
-        if "NodeAttribute" not in schema["record_types"]:
-            raise RuntimeError("schema discovery omitted implemented record types")
-        if "current-facts" not in capabilities["saved_queries"]:
-            raise RuntimeError("capabilities discovery omitted the saved query")
         return {
-            "discovered_resources": len(resources.resources),
-            "discovered_tools": len(tools.tools),
-            "evidence_verification": verification,
-            "fact_states": states,
+            "created_relations": joined["created_relations"],
             "ok": True,
-            "saved_queries": capabilities["saved_queries"],
+            "query_rows": len(queried["rows"]),
         }
 
 

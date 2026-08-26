@@ -15,23 +15,36 @@ from analytical_memory.canonical import (
     stable_uuid,
 )
 from analytical_memory.domain import (
-    BatchPlan,
+    AnalyticalAttributeRequest,
+    AnalyticalMetricRequest,
     EmbeddingProfileRecord,
     EmbeddingRecord,
+    EntityDeclaration,
+    EvidenceFragmentRecord,
+    EvidenceObjectRecord,
+    FieldDeclaration,
+    ImportEvidence,
+    JoinEndpoint,
+    JoinRequest,
+    JsonlImportRequest,
+    KeyField,
 )
 from analytical_memory.errors import (
     EmbeddingProviderError,
     IdempotencyConflictError,
     RecordNotFoundError,
     RetentionBlockedError,
+    SchemaChangedError,
 )
 from analytical_memory.evidence import PRIVACY_ORDER, select_fragment
+from analytical_memory.jsonl import import_idempotency_key, scan_jsonl
 from analytical_memory.limits import (
-    MAX_BATCH_BYTES,
     MAX_EVIDENCE_AUDIT_OBJECTS,
+    MAX_EVIDENCE_INGEST_BYTES,
     MAX_EVIDENCE_READ_BYTES,
     MAX_EVIDENCE_VERIFY_BYTES,
-    MAX_EXPLANATION_ASSERTIONS,
+    MAX_IMPORT_CHUNK_RECORDS,
+    MAX_JSONL_LINE_BYTES,
     MAX_QUERY_RESULTS,
     MAX_SEARCH_RESULTS,
     MAX_SNAPSHOT_BYTES,
@@ -39,8 +52,8 @@ from analytical_memory.limits import (
     MAX_TRAVERSAL_RESULTS,
     MAX_VALIDATION_EVIDENCE_OBJECTS,
 )
-from analytical_memory.planner import plan_batch
 from analytical_memory.ports import EmbeddingProvider, EvidenceStore, MemoryStore
+from analytical_memory.query_ir import parse_query_ir
 from analytical_memory.schema_contract import SchemaContract
 from analytical_memory.snapshot import create_snapshot, import_snapshot, load_snapshot
 from analytical_memory.vectors import (
@@ -76,41 +89,356 @@ class MemoryApplication:
             "schema_fingerprint": self.schema.fingerprint,
         }
 
-    def plan(self, batch_path: Path) -> BatchPlan:
-        return plan_batch(batch_path, self.schema)
+    def _check_contract(self, supplied: str) -> None:
+        if supplied != self.schema.fingerprint:
+            raise SchemaChangedError(supplied, self.schema.fingerprint)
 
-    def preview(self, batch_path: Path) -> dict[str, Any]:
-        return self.plan(batch_path).preview()
+    @staticmethod
+    def _whole_object_evidence(
+        digest: str,
+        byte_size: int,
+        privacy: str,
+        recorded_at: str,
+        media_type: str = "application/x-ndjson",
+    ) -> tuple[EvidenceObjectRecord, EvidenceFragmentRecord]:
+        object_id = stable_uuid("evidence_object", digest)
+        fragment_id = stable_uuid(
+            "evidence_fragment", object_id, "whole_object", "identity", "1"
+        )
+        evidence_object = EvidenceObjectRecord(
+            id=object_id,
+            digest=digest,
+            byte_size=byte_size,
+            media_type=media_type,
+            privacy_class=privacy,
+            recorded_at=recorded_at,
+        )
+        fragment = EvidenceFragmentRecord(
+            id=fragment_id,
+            evidence_object_id=object_id,
+            locator_kind="whole_object",
+            locator_json=canonical_json({"kind": "whole_object"}),
+            extractor_id="identity",
+            extractor_version="1",
+            byte_size=byte_size,
+            digest=digest,
+            privacy_class=privacy,
+            recorded_at=recorded_at,
+        )
+        return evidence_object, fragment
 
-    def apply(self, batch_path: Path) -> dict[str, Any]:
-        plan = self.plan(batch_path)
-        existing = self.memory_store.get_batch(plan.idempotency_key)
-        if existing is not None:
-            if existing.input_hash != plan.input_hash:
-                raise IdempotencyConflictError(
-                    "idempotency key already exists with different input"
+    def declare_entity(
+        self,
+        entity_type: str,
+        *,
+        privacy: str = "public",
+        fields: dict[str, dict[str, Any]] | None = None,
+        contract_fingerprint: str,
+    ) -> dict[str, Any]:
+        self._check_contract(contract_fingerprint)
+        declaration = EntityDeclaration(
+            entity_type=entity_type,
+            privacy=privacy,
+            fields=tuple(
+                FieldDeclaration(
+                    name=name,
+                    type=specification.get("type"),
+                    required=bool(specification.get("required", False)),
+                    nullable=bool(specification.get("nullable", True)),
+                    privacy=specification.get("privacy"),
+                    searchable=bool(specification.get("searchable", False)),
                 )
-            return {"replayed": True, "result": existing.result}
-
-        self.evidence_store.put(plan.evidence.source_path, plan.evidence.object)
-        for evidence_object, data in plan.evidence.materialized_objects:
-            self.evidence_store.put_bytes(data, evidence_object)
-        result = self.memory_store.apply(plan)
-        return {"replayed": False, "result": result}
-
-    def current_facts(self) -> dict[str, Any]:
+                for name, specification in sorted((fields or {}).items())
+            ),
+        )
+        payload = canonical_json(
+            {
+                "entity_type": declaration.entity_type,
+                "fields": [
+                    {
+                        "name": field.name,
+                        "nullable": field.nullable,
+                        "privacy": field.privacy,
+                        "required": field.required,
+                        "searchable": field.searchable,
+                        "type": field.type,
+                    }
+                    for field in declaration.fields
+                ],
+                "privacy": declaration.privacy,
+            }
+        ).encode("utf-8")
+        digest = sha256_bytes(payload)
+        recorded_at = _now()
+        evidence_object, fragment = self._whole_object_evidence(
+            digest,
+            len(payload),
+            declaration.privacy,
+            recorded_at,
+            media_type="application/json",
+        )
+        with tempfile.NamedTemporaryFile() as temporary:
+            temporary.write(payload)
+            temporary.flush()
+            put_result = self.evidence_store.put_tracked(
+                Path(temporary.name), evidence_object
+            )
+            try:
+                document = self.memory_store.put_entity_declaration(
+                    declaration,
+                    contract_fingerprint,
+                    ImportEvidence(evidence_object, fragment, put_result.created),
+                )
+            except Exception:
+                if put_result.created:
+                    self.evidence_store.remove(digest)
+                raise
+            self.memory_store.record_evidence_check(
+                digest,
+                availability=put_result.status.availability,
+                verification=put_result.status.verification,
+                byte_size=put_result.status.byte_size,
+                checked_at=recorded_at,
+                method="entity-declaration-v1",
+            )
         return {
-            "query": "current-facts",
-            "results": self.memory_store.current_facts(),
-            "schema_fingerprint": self.schema.fingerprint,
+            "contract_fingerprint": self.schema.fingerprint,
+            "document": document,
+            "ontology_fingerprint": document["ontology_fingerprint"],
         }
 
-    def current_slots(self) -> dict[str, Any]:
+    def ontology(self, namespace: str | None = None) -> dict[str, Any]:
+        document = self.memory_store.ontology_snapshot(namespace)
         return {
-            "query": "current-slots",
-            "results": self.memory_store.current_slots(),
-            "schema_fingerprint": self.schema.fingerprint,
+            "contract_fingerprint": self.schema.fingerprint,
+            "document": document,
+            "ontology_fingerprint": document["ontology_fingerprint"],
         }
+
+    def jsonl_import(
+        self,
+        source_path: str | Path,
+        *,
+        entity_type: str,
+        key: list[dict[str, str]],
+        contract_fingerprint: str,
+    ) -> dict[str, Any]:
+        self._check_contract(contract_fingerprint)
+        request = JsonlImportRequest(
+            entity_type=entity_type,
+            key=tuple(KeyField(field=item["field"], type=item["type"]) for item in key),
+            source_path=Path(source_path),
+            contract_fingerprint=contract_fingerprint,
+        )
+        scan = scan_jsonl(request)
+        try:
+            idempotency_key = import_idempotency_key(request, scan.content_hash)
+            existing = self.memory_store.get_batch(idempotency_key)
+            if existing is not None:
+                if existing.input_hash != scan.content_hash:
+                    raise IdempotencyConflictError(
+                        "idempotency key already exists with different input"
+                    )
+                return {**existing.result, "replayed": True}
+            ontology = self.memory_store.ontology_snapshot()
+            entity = next(
+                (item for item in ontology["entities"] if item["type"] == entity_type),
+                None,
+            )
+            privacy = "public" if entity is None else str(entity["privacy"])
+            if entity is not None and any(
+                name in scan.present_counts
+                and str(specification["privacy"]) == "private"
+                for name, specification in entity["fields"].items()
+            ):
+                privacy = "private"
+            recorded_at = _now()
+            evidence_object, fragment = self._whole_object_evidence(
+                scan.content_hash, scan.byte_size, privacy, recorded_at
+            )
+            put_result = self.evidence_store.put_tracked(
+                scan.spool_path, evidence_object
+            )
+            evidence = ImportEvidence(
+                object=evidence_object,
+                fragment=fragment,
+                created=put_result.created,
+            )
+            try:
+                result = self.memory_store.import_jsonl(request, scan, evidence)
+            except Exception:
+                if put_result.created:
+                    self.evidence_store.remove(scan.content_hash)
+                raise
+            self.memory_store.record_evidence_check(
+                scan.content_hash,
+                availability=put_result.status.availability,
+                verification=put_result.status.verification,
+                byte_size=put_result.status.byte_size,
+                checked_at=recorded_at,
+                method="jsonl-import-v1",
+            )
+            result["contract_fingerprint"] = self.schema.fingerprint
+            return result
+        finally:
+            scan.spool_path.unlink(missing_ok=True)
+
+    def materialize_join(
+        self,
+        *,
+        name: str,
+        relation: str,
+        from_: dict[str, Any],
+        to: dict[str, Any],
+        contract_fingerprint: str,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        self._check_contract(contract_fingerprint)
+        request = JoinRequest(
+            name=name,
+            relation=relation,
+            from_=JoinEndpoint(type=str(from_["type"]), fields=tuple(from_["fields"])),
+            to=JoinEndpoint(type=str(to["type"]), fields=tuple(to["fields"])),
+            contract_fingerprint=contract_fingerprint,
+            idempotency_key=idempotency_key,
+        )
+        definition_bytes = canonical_json(
+            {
+                "from": {
+                    "fields": list(request.from_.fields),
+                    "type": request.from_.type,
+                },
+                "name": request.name,
+                "relation": request.relation,
+                "to": {"fields": list(request.to.fields), "type": request.to.type},
+            }
+        ).encode("utf-8")
+        digest = sha256_bytes(definition_bytes)
+        recorded_at = _now()
+        evidence_object, fragment = self._whole_object_evidence(
+            digest,
+            len(definition_bytes),
+            "public",
+            recorded_at,
+            media_type="application/json",
+        )
+        with tempfile.NamedTemporaryFile() as temporary:
+            temporary.write(definition_bytes)
+            temporary.flush()
+            put_result = self.evidence_store.put_tracked(
+                Path(temporary.name), evidence_object
+            )
+            evidence = ImportEvidence(
+                object=evidence_object,
+                fragment=fragment,
+                created=put_result.created,
+            )
+            try:
+                result = self.memory_store.materialize_join(request, evidence)
+            except Exception:
+                if put_result.created:
+                    self.evidence_store.remove(digest)
+                raise
+            self.memory_store.record_evidence_check(
+                digest,
+                availability=put_result.status.availability,
+                verification=put_result.status.verification,
+                byte_size=put_result.status.byte_size,
+                checked_at=recorded_at,
+                method="join-materialization-v1",
+            )
+        result["contract_fingerprint"] = self.schema.fingerprint
+        return result
+
+    def execute_query(self, document: dict[str, Any]) -> dict[str, Any]:
+        result = self.memory_store.execute_query(parse_query_ir(document))
+        result["contract_fingerprint"] = self.schema.fingerprint
+        return result
+
+    def write_analytical_attribute(
+        self,
+        node_id: str,
+        attribute_name: str,
+        value: Any,
+        *,
+        method: str,
+        contract_fingerprint: str,
+    ) -> dict[str, Any]:
+        self._check_contract(contract_fingerprint)
+        attribute_name = attribute_name.strip()
+        method = method.strip()
+        if not attribute_name or not method:
+            raise ValueError("attribute_name and method must not be empty")
+        node = self.memory_store.get_node(node_id)
+        entity_type = f"{node['namespace']}.{node['type']}"
+        ontology = self.memory_store.ontology_snapshot()
+        entity = next(
+            item for item in ontology["entities"] if item["type"] == entity_type
+        )
+        field = entity["fields"].get(attribute_name)
+        privacy = str(node["privacy_class"])
+        searchable = False
+        if field is not None:
+            privacy = "private" if field["privacy"] == "private" else privacy
+            searchable = bool(field["searchable"])
+        document = {
+            "attribute_name": attribute_name,
+            "method": method,
+            "node_id": node_id,
+            "value": value,
+        }
+        payload = canonical_json(document).encode("utf-8")
+        digest = sha256_bytes(payload)
+        idempotency_key = sha256_json(document)
+        recorded_at = _now()
+        evidence_object, fragment = self._whole_object_evidence(
+            digest,
+            len(payload),
+            privacy,
+            recorded_at,
+            media_type="application/json",
+        )
+        with tempfile.NamedTemporaryFile() as temporary:
+            temporary.write(payload)
+            temporary.flush()
+            put_result = self.evidence_store.put_tracked(
+                Path(temporary.name), evidence_object
+            )
+            request = AnalyticalAttributeRequest(
+                node_id=node_id,
+                attribute_name=attribute_name,
+                value=value,
+                method=method,
+                privacy=privacy,
+                searchable=searchable,
+                contract_fingerprint=contract_fingerprint,
+                idempotency_key=idempotency_key,
+            )
+            try:
+                result = self.memory_store.write_analytical_attribute(
+                    request,
+                    ImportEvidence(evidence_object, fragment, put_result.created),
+                )
+            except Exception:
+                if put_result.created:
+                    self.evidence_store.remove(digest)
+                raise
+            self.memory_store.record_evidence_check(
+                digest,
+                availability=put_result.status.availability,
+                verification=put_result.status.verification,
+                byte_size=put_result.status.byte_size,
+                checked_at=recorded_at,
+                method=method,
+            )
+        result["contract_fingerprint"] = self.schema.fingerprint
+        return result
+
+    def deactivate_relation(self, relation_id: str) -> dict[str, Any]:
+        return self.memory_store.deactivate_relation(relation_id)
+
+    def delete_node(self, node_id: str) -> dict[str, int]:
+        return self.memory_store.delete_node(node_id)
 
     def current_metric(
         self, definition_version: str, dimensions: dict[str, Any]
@@ -129,6 +457,97 @@ class MemoryApplication:
             "schema_fingerprint": self.schema.fingerprint,
         }
 
+    def write_analytical_metric(
+        self,
+        definition_version: str,
+        value: Any,
+        dimensions: dict[str, Any],
+        *,
+        method: str,
+        method_version: str,
+        contract_fingerprint: str,
+        coverage: dict[str, Any] | None = None,
+        complete: bool = True,
+        unit: str | None = None,
+        numerator: float | None = None,
+        denominator: float | None = None,
+        privacy: str = "public",
+    ) -> dict[str, Any]:
+        self._check_contract(contract_fingerprint)
+        definition_version = definition_version.strip()
+        method = method.strip()
+        method_version = method_version.strip()
+        if not definition_version or not method or not method_version:
+            raise ValueError(
+                "definition_version, method, and method_version must not be empty"
+            )
+        if privacy not in {"public", "private"}:
+            raise ValueError("privacy must be public or private")
+        document = {
+            "complete": complete,
+            "coverage": coverage or {},
+            "definition_version": definition_version,
+            "denominator": denominator,
+            "dimensions": dimensions,
+            "method": method,
+            "method_version": method_version,
+            "numerator": numerator,
+            "privacy": privacy,
+            "unit": unit,
+            "value": value,
+        }
+        payload = canonical_json(document).encode("utf-8")
+        digest = sha256_bytes(payload)
+        idempotency_key = sha256_json(document)
+        recorded_at = _now()
+        evidence_object, fragment = self._whole_object_evidence(
+            digest,
+            len(payload),
+            privacy,
+            recorded_at,
+            media_type="application/json",
+        )
+        request = AnalyticalMetricRequest(
+            definition_version=definition_version,
+            value=value,
+            dimensions=dimensions,
+            method=method,
+            method_version=method_version,
+            coverage=coverage or {},
+            complete=complete,
+            unit=unit,
+            numerator=numerator,
+            denominator=denominator,
+            privacy=privacy,
+            contract_fingerprint=contract_fingerprint,
+            idempotency_key=idempotency_key,
+        )
+        with tempfile.NamedTemporaryFile() as temporary:
+            temporary.write(payload)
+            temporary.flush()
+            put_result = self.evidence_store.put_tracked(
+                Path(temporary.name), evidence_object
+            )
+            try:
+                result = self.memory_store.write_analytical_metric(
+                    request,
+                    ImportEvidence(evidence_object, fragment, put_result.created),
+                )
+            except Exception:
+                if put_result.created:
+                    self.evidence_store.remove(digest)
+                raise
+            self.memory_store.record_evidence_check(
+                digest,
+                availability=put_result.status.availability,
+                verification=put_result.status.verification,
+                byte_size=put_result.status.byte_size,
+                checked_at=recorded_at,
+                method=method,
+            )
+        result["contract_fingerprint"] = self.schema.fingerprint
+        return result
+
     def traverse_relations(
         self,
         start_node_id: str,
@@ -145,13 +564,8 @@ class MemoryApplication:
             raise ValueError(f"max_depth must be between 1 and {MAX_TRAVERSAL_DEPTH}")
         if not 1 <= limit <= MAX_TRAVERSAL_RESULTS:
             raise ValueError(f"limit must be between 1 and {MAX_TRAVERSAL_RESULTS}")
-        allowed_states = set(states or ["supported", "contested"])
-        unknown_states = allowed_states - {
-            "supported",
-            "contested",
-            "contradicted",
-            "unasserted",
-        }
+        allowed_states = set(states or ["active"])
+        unknown_states = allowed_states - {"active"}
         if unknown_states:
             raise ValueError(f"unknown relation states: {sorted(unknown_states)}")
         result = self.memory_store.traverse_relations(
@@ -169,23 +583,10 @@ class MemoryApplication:
         if not 1 <= limit <= MAX_SEARCH_RESULTS:
             raise ValueError(f"limit must be between 1 and {MAX_SEARCH_RESULTS}")
         result = self.memory_store.search_text(query, limit)
-        enriched: list[dict[str, Any]] = []
-        for match in result["results"]:
-            explanation = self.explain(str(match["target_id"]))
-            enriched.append(
-                {
-                    **match,
-                    "fact": explanation["fact"],
-                    "provenance": {
-                        "assertions": explanation["assertions"],
-                        "node": explanation["node"],
-                    },
-                }
-            )
         return {
             "query": "search-text",
             "text": query,
-            "results": enriched,
+            "results": result["results"],
             "coverage": result["coverage"],
             "schema_fingerprint": self.schema.fingerprint,
         }
@@ -199,9 +600,11 @@ class MemoryApplication:
     ) -> dict[str, Any]:
         provider = self._require_embedding_provider()
         info = provider.info
-        ceiling = privacy_ceiling or info.privacy_ceiling
+        ceiling = privacy_ceiling or "public"
         if ceiling not in PRIVACY_ORDER:
             raise ValueError("unknown privacy ceiling")
+        if ceiling != "public":
+            raise ValueError("external embedding profiles are public-only")
         if PRIVACY_ORDER[ceiling] > PRIVACY_ORDER[info.privacy_ceiling]:
             raise ValueError("profile privacy ceiling exceeds provider policy")
         attribute_name = attribute_name.strip()
@@ -402,21 +805,34 @@ class MemoryApplication:
         ranked.sort(key=lambda item: (-item[0], item[1]))
         results = []
         for score, _, candidate in ranked[:limit]:
-            explanation = self.explain(str(candidate["target_id"]))
             results.append(
                 {
                     "attribute_name": str(candidate["attribute_name"]),
                     "content": str(candidate["content"]),
                     "content_hash": str(candidate["content_hash"]),
                     "document_id": str(candidate["search_document_id"]),
-                    "fact": explanation["fact"],
+                    "value": json.loads(str(candidate["value_json"])),
+                    "json_type": str(candidate["json_type"]),
                     "namespace": str(candidate["namespace"]),
                     "node_type": str(candidate["node_type"]),
                     "privacy_class": str(candidate["privacy_class"]),
-                    "provenance": {
-                        "assertions": explanation["assertions"],
-                        "node": explanation["node"],
-                    },
+                    "source_id": str(candidate["source_id"]),
+                    "batch_id": (
+                        None
+                        if candidate["batch_id"] is None
+                        else str(candidate["batch_id"])
+                    ),
+                    "run_id": (
+                        None
+                        if candidate["run_id"] is None
+                        else str(candidate["run_id"])
+                    ),
+                    "fragment_id": (
+                        None
+                        if candidate["fragment_id"] is None
+                        else str(candidate["fragment_id"])
+                    ),
+                    "updated_at": str(candidate["updated_at"]),
                     "score": score,
                     "target_id": str(candidate["target_id"]),
                     "target_kind": str(candidate["target_kind"]),
@@ -457,28 +873,40 @@ class MemoryApplication:
 
     def explain(self, attribute_id: str) -> dict[str, Any]:
         explanation = self.memory_store.explain_attribute(attribute_id)
-        for assertion in explanation["assertions"]:
-            for binding in assertion["evidence"]:
-                digest = str(binding["object"]["digest"])
-                status = self.evidence_store.stat(digest)
-                binding["status"] = {
-                    "availability": status.availability,
-                    "verification": status.verification,
-                    "byte_size": status.byte_size,
-                }
+        evidence = explanation["evidence"]
+        if evidence is not None:
+            status = self.evidence_store.stat(str(evidence["digest"]))
+            evidence["status"] = {
+                "availability": status.availability,
+                "byte_size": status.byte_size,
+                "verification": status.verification,
+            }
         explanation["schema_fingerprint"] = self.schema.fingerprint
         return explanation
 
     def explain_relation(self, relation_id: str) -> dict[str, Any]:
         explanation = self.memory_store.explain_relation(relation_id)
-        for assertion in explanation["assertions"]:
-            self._add_evidence_status(assertion["evidence"])
+        evidence = explanation["evidence"]
+        if evidence is not None:
+            status = self.evidence_store.stat(str(evidence["digest"]))
+            evidence["status"] = {
+                "availability": status.availability,
+                "byte_size": status.byte_size,
+                "verification": status.verification,
+            }
         explanation["schema_fingerprint"] = self.schema.fingerprint
         return explanation
 
     def explain_metric(self, metric_id: str) -> dict[str, Any]:
         explanation = self.memory_store.explain_metric(metric_id)
-        self._add_evidence_status(explanation["evidence"])
+        evidence = explanation["evidence"]
+        if evidence is not None:
+            status = self.evidence_store.stat(str(evidence["digest"]))
+            evidence["status"] = {
+                "availability": status.availability,
+                "byte_size": status.byte_size,
+                "verification": status.verification,
+            }
         explanation["schema_fingerprint"] = self.schema.fingerprint
         return explanation
 
@@ -603,11 +1031,26 @@ class MemoryApplication:
             )
             for item in catalog
         ]
+        stored_digests, stored_truncated = self.evidence_store.list_digests(limit)
+        orphans = []
+        for digest in stored_digests:
+            known, _ = self.memory_store.evidence_catalog(1, digest)
+            if known:
+                continue
+            status = self.evidence_store.stat(digest)
+            orphans.append(
+                {
+                    "byte_size": status.byte_size,
+                    "digest": digest,
+                    "verification": status.verification,
+                }
+            )
         return {
             "checked_at": checked,
-            "complete": not truncated,
+            "complete": not truncated and not stored_truncated,
+            "orphans": orphans,
             "results": results,
-            "truncated": truncated,
+            "truncated": truncated or stored_truncated,
         }
 
     def retention_report(self, *, as_of: str | None = None) -> dict[str, Any]:
@@ -796,26 +1239,19 @@ class MemoryApplication:
         privacy_ceiling: str = "public",
         created_at: str | None = None,
     ) -> dict[str, Any]:
-        if privacy_ceiling not in PRIVACY_ORDER:
-            raise ValueError("unknown privacy ceiling")
+        if privacy_ceiling != "public":
+            raise ValueError("shareable export is public-only")
         if destination.exists():
             raise FileExistsError(destination)
-        ceiling = PRIVACY_ORDER[privacy_ceiling]
+        records = self.memory_store.export_current()
         document = {
             "artifact_kind": "sanitized-export",
+            "attributes": records["attributes"],
             "created_at": created_at or _now(),
-            "facts": [
-                item
-                for item in self.memory_store.current_facts()
-                if PRIVACY_ORDER[str(item["privacy_class"])] <= ceiling
-            ],
             "format_version": "1",
+            "nodes": records["nodes"],
             "privacy_ceiling": privacy_ceiling,
-            "relations": [
-                item
-                for item in self.memory_store.current_relations()
-                if PRIVACY_ORDER[str(item["privacy_class"])] <= ceiling
-            ],
+            "relations": records["relations"],
             "restore_compatible": False,
             "schema_fingerprint": self.schema.fingerprint,
         }
@@ -836,16 +1272,6 @@ class MemoryApplication:
             temporary.unlink(missing_ok=True)
         return document
 
-    def _add_evidence_status(self, bindings: list[dict[str, Any]]) -> None:
-        for binding in bindings:
-            digest = str(binding["object"]["digest"])
-            status = self.evidence_store.stat(digest)
-            binding["status"] = {
-                "availability": status.availability,
-                "verification": status.verification,
-                "byte_size": status.byte_size,
-            }
-
     def capabilities(self) -> dict[str, Any]:
         memory_status = self.memory_store.status()
         evidence_status = self.evidence_store.status()
@@ -861,8 +1287,9 @@ class MemoryApplication:
                 "snapshots": {"enabled": True, "format_version": "1"},
             },
             "limits": {
-                "ingestion_batch_bytes": MAX_BATCH_BYTES,
-                "returned_explanation_assertions": MAX_EXPLANATION_ASSERTIONS,
+                "evidence_ingest_bytes": MAX_EVIDENCE_INGEST_BYTES,
+                "jsonl_chunk_records": MAX_IMPORT_CHUNK_RECORDS,
+                "jsonl_line_bytes": MAX_JSONL_LINE_BYTES,
                 "returned_query_items": MAX_QUERY_RESULTS,
                 "search_results": MAX_SEARCH_RESULTS,
                 "snapshot_uncompressed_bytes": MAX_SNAPSHOT_BYTES,
@@ -872,16 +1299,20 @@ class MemoryApplication:
             },
             "logical_schema_fingerprint": self.schema.fingerprint,
             "operations": {
-                "explain": {"enabled": True, "mutating": False},
-                "ingestion_apply": {"enabled": True, "mutating": True},
-                "ingestion_preview": {"enabled": True, "mutating": False},
+                "delete_node": {"enabled": True, "mutating": True},
+                "entity_declaration": {"enabled": True, "mutating": True},
                 "evidence_audit": {"enabled": True, "mutating": True},
                 "evidence_read": {"enabled": True, "mutating": False},
                 "evidence_status": {"enabled": True, "mutating": False},
                 "evidence_verify": {"enabled": True, "mutating": True},
-                "query_current_facts": {"enabled": True, "mutating": False},
+                "jsonl_import": {"enabled": True, "mutating": True},
+                "analytical_attribute_write": {"enabled": True, "mutating": True},
+                "analytical_metric_write": {"enabled": True, "mutating": True},
+                "join_materialize": {"enabled": True, "mutating": True},
+                "ontology": {"enabled": True, "mutating": False},
+                "query_execute": {"enabled": True, "mutating": False},
                 "query_current_metric": {"enabled": True, "mutating": False},
-                "query_current_slots": {"enabled": True, "mutating": False},
+                "relation_deactivate": {"enabled": True, "mutating": True},
                 "search_text": {"enabled": True, "mutating": False},
                 "search_semantic": {"enabled": True, "mutating": False},
                 "embedding_rebuild": {"enabled": True, "mutating": True},
