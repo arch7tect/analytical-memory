@@ -130,7 +130,7 @@ testable.
   method identity as parts of the stable assertion key, while historical
   queries remain deferred;
 - a privacy class field on canonical records with one bootstrap default;
-- the `MemoryStore` and `EvidenceStore` ports;
+- the `MemoryStore` and `EvidenceStore` abstract base classes;
 - one hand-written SQLite migration tracked by `PRAGMA user_version` and a
   transactional adapter;
 - a local content-addressed filesystem adapter;
@@ -165,6 +165,8 @@ steps.
   clean clone;
 - `uv run memory --help` exits successfully;
 - the package imports without adapter side effects;
+- adapters inherit from explicit abstract interfaces; structural `Protocol`
+  interfaces are not used;
 - the quickstart runs from a clean clone without external services;
 - a second apply of the same batch is recognized as a replay, returns the
   original batch result and canonical IDs, and writes no rows;

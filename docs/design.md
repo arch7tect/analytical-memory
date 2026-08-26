@@ -625,7 +625,7 @@ The planned repository layout is:
 │   └── analytical_memory/
 │       ├── domain/         records, value objects, and pure semantics
 │       ├── application/    use cases and transaction orchestration
-│       ├── ports/          storage, evidence, retrieval, and transport ports
+│       ├── ports/          explicit abstract storage and service interfaces
 │       ├── adapters/
 │       │   ├── sqlite/
 │       │   ├── postgresql/
@@ -646,6 +646,8 @@ Placement rules:
 
 - domain semantics must not import adapters;
 - application use cases depend only on domain types and ports;
+- ports are abstract base classes, and adapters implement them through explicit
+  inheritance;
 - backend-specific SQL belongs under its adapter and migration tree;
 - authoritative machine-readable contracts live under `schema/`, not `docs/`;
 - `docs/design.md` describes system invariants rather than duplicating schemas;

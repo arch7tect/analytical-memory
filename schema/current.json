@@ -1,0 +1,55 @@
+{
+  "assertion": {
+    "basis": ["observed", "computed", "inferred", "declared"],
+    "lifecycle": ["active", "superseded", "retracted"],
+    "stances": ["supports", "contradicts"],
+    "target_kinds": ["node_attribute"]
+  },
+  "compatibility": {
+    "minimum_reader": "1"
+  },
+  "fact_states": ["supported", "contested", "contradicted", "unasserted"],
+  "ingestion_batch": {
+    "evidence_locator_kinds": ["whole_object"],
+    "format_version": "1",
+    "required": [
+      "schema_fingerprint",
+      "idempotency_key",
+      "recorded_at",
+      "source",
+      "run",
+      "evidence",
+      "nodes"
+    ]
+  },
+  "ontology_version": "0.1.0",
+  "privacy_classes": ["public", "private", "restricted", "forbidden"],
+  "record_types": [
+    "Source",
+    "AnalyticalRun",
+    "Node",
+    "NodeAttribute",
+    "Assertion",
+    "EvidenceObject",
+    "EvidenceFragment",
+    "EvidenceBinding",
+    "IngestionBatch"
+  ],
+  "saved_queries": {
+    "current-facts": {
+      "ordering": ["namespace", "node_type", "natural_key", "attribute_name", "attribute_id"],
+      "result": [
+        "attribute_id",
+        "namespace",
+        "node_type",
+        "natural_key",
+        "attribute_name",
+        "value",
+        "state",
+        "privacy_class"
+      ]
+    }
+  },
+  "schema_document_version": "1",
+  "schema_fingerprint": "21c6a71444f7d5725703ca31cc6e410c21958009b9bed902ad213a82a65c272f"
+}
