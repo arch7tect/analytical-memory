@@ -79,6 +79,7 @@ async def test_discovery_and_tools_match_cli_contracts(
             "current-facts",
             "current-metric",
             "current-slots",
+            "search-semantic",
             "search-text",
             "traverse-relations",
         ]
@@ -92,6 +93,7 @@ async def test_discovery_and_tools_match_cli_contracts(
             "memory_evidence_read",
             "memory_evidence_status",
             "memory_evidence_verify",
+            "memory_embedding_status",
             "memory_explain",
             "memory_explain_metric",
             "memory_explain_relation",
@@ -101,6 +103,7 @@ async def test_discovery_and_tools_match_cli_contracts(
             "memory_query_current_metric",
             "memory_query_current_slots",
             "memory_search_text",
+            "memory_search_semantic",
             "memory_traverse_relations",
         }
         assert tools_by_name["memory_ingest_preview"].input_schema["required"] == [
@@ -251,7 +254,7 @@ async def test_local_stdio_server_is_discoverable(
             "memory_ingest_preview", {"batch_path": str(fixture.batch_path)}
         )
 
-    assert len(tools.tools) == 14
+    assert len(tools.tools) == 16
     assert len(resources.resources) == 3
     assert _tool_json(preview)["writes"] is False
 

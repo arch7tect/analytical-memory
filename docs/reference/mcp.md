@@ -21,6 +21,8 @@ with these optional environment variables:
 | `ANALYTICAL_MEMORY_DB` | `.local/memory.db` | SQLite database |
 | `ANALYTICAL_MEMORY_EVIDENCE_ROOT` | `.local/evidence` | Local evidence store |
 | `ANALYTICAL_MEMORY_SCHEMA` | repository `schema/current.json` | Schema document |
+| `OPENAI_API_KEY` | unset | Commercial embedding API credential |
+| `ANALYTICAL_MEMORY_EMBEDDING_PRIVACY` | `restricted` | Provider privacy ceiling |
 
 Runtime paths are never included in schema or capabilities resources.
 
@@ -48,6 +50,8 @@ definitions.
 | `memory_query_current_metric` | No | Deterministic current metric selection |
 | `memory_traverse_relations` | No | Bounded relation-only traversal |
 | `memory_search_text` | No | FTS results with fact provenance |
+| `memory_embedding_status` | No | Local profile coverage and readiness |
+| `memory_search_semantic` | No | Exact ranking after a remote query embedding |
 | `memory_explain` | No | Bounded provenance explanation |
 | `memory_explain_relation` | No | Relation assertion provenance |
 | `memory_explain_metric` | No | Metric run and evidence provenance |
@@ -65,3 +69,7 @@ queries and explanations never return evidence bytes. The MCP surface does not
 expose arbitrary SQL, migrations, snapshots, retirement, or network
 transports. Snapshot and retention workflows remain CLI operations because
 they create files or retire exact planned local copies.
+
+`memory_search_semantic` is the sole tool in this surface that calls an external
+service. It sends the query text to the configured embedding API. Profile
+creation and billable document rebuilds remain explicit CLI operations.

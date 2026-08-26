@@ -18,6 +18,12 @@
       "file": "003_evidence_lifecycle.sql",
       "target_fingerprint": "bf108e283cbf1b02ebda39cc3104c1f01a84d5d20479d7d310264453139a7e25",
       "version": 3
+    },
+    {
+      "checksum": "af068176d13e92c5c3662a55e3e4c0bf69f5ea716c325431729b5407fe2f37ef",
+      "file": "004_semantic_retrieval.sql",
+      "target_fingerprint": "5740c0e445a6b4bf215e6545618ef61dd34382052a1b886e2f7501a451446de0",
+      "version": 4
     }
   ]
 }

@@ -12,6 +12,7 @@ from analytical_memory.api_models import (
     CurrentFactsResponse,
     CurrentMetricResponse,
     CurrentSlotsResponse,
+    EmbeddingProfileResponse,
     EvidenceAuditResponse,
     EvidenceReadResponse,
     EvidenceStatusResponse,
@@ -21,6 +22,7 @@ from analytical_memory.api_models import (
     PreviewResponse,
     RelationExplanationResponse,
     SearchResponse,
+    SemanticSearchResponse,
     TraversalResponse,
 )
 from analytical_memory.application import MemoryApplication
@@ -225,6 +227,58 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
     def search_text(query: str, limit: int = 20) -> SearchResponse:
         try:
             return api.search_text(query, limit)
+        except (MemoryErrorBase, OSError, ValueError) as exc:
+            raise ToolError(str(exc)) from exc
+
+    @server.tool(
+        name="memory_embedding_status",
+        description="Return local coverage and provider readiness for one profile.",
+        annotations=ToolAnnotations(
+            read_only_hint=True,
+            destructive_hint=False,
+            idempotent_hint=True,
+            open_world_hint=False,
+        ),
+        structured_output=True,
+    )
+    def embedding_status(profile_id: str) -> EmbeddingProfileResponse:
+        try:
+            return api.embedding_profile_status(profile_id)
+        except (MemoryErrorBase, OSError, ValueError) as exc:
+            raise ToolError(str(exc)) from exc
+
+    @server.tool(
+        name="memory_search_semantic",
+        description=(
+            "Rank locally stored facts by exact cosine similarity. The query text "
+            "is sent to the configured commercial embedding API."
+        ),
+        annotations=ToolAnnotations(
+            read_only_hint=True,
+            destructive_hint=False,
+            idempotent_hint=True,
+            open_world_hint=True,
+        ),
+        structured_output=True,
+    )
+    def search_semantic(
+        profile_id: str,
+        query: str,
+        namespace: str | None = None,
+        node_type: str | None = None,
+        privacy_ceiling: Literal["public", "private", "restricted", "forbidden"]
+        | None = None,
+        limit: int = 20,
+    ) -> SemanticSearchResponse:
+        try:
+            return api.search_semantic(
+                profile_id,
+                query,
+                namespace=namespace,
+                node_type=node_type,
+                privacy_ceiling=privacy_ceiling,
+                limit=limit,
+            )
         except (MemoryErrorBase, OSError, ValueError) as exc:
             raise ToolError(str(exc)) from exc
 

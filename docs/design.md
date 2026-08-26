@@ -83,11 +83,12 @@ Versioned metadata defines logical types, validation, saved queries, privacy
 rules, and exposed capabilities. Database introspection verifies physical
 conformance; it does not invent the logical schema.
 
-### Privacy propagates monotonically
+### Privacy is conservative and identity-bound
 
 Derived records inherit the strictest privacy class of their inputs. Lowering
 a class requires a separately materialized sanitizer output with a new content
-identity.
+identity. V1 also rejects in-place privacy changes to an existing graph or
+search record; reclassification requires a new identity.
 
 ### Repeated work is idempotent
 
@@ -308,11 +309,10 @@ extraction or chunking version, and lifecycle state.
 
 ### EmbeddingProfile
 
-A property-scoped semantic index policy. It records target eligibility, model
-resolver key, model identity and artifact digest, dimensions, preprocessing,
-similarity function, privacy ceiling, generation mode, readiness, and coverage.
-Model artifacts are runtime dependencies and are not canonical snapshot
-members.
+A property-scoped semantic index policy. It records target eligibility,
+provider and model identity, dimensions, preprocessing, similarity function,
+privacy ceiling, readiness, and coverage. Provider credentials are runtime
+configuration and are never canonical records or snapshot members.
 
 ### EmbeddingRecord
 
@@ -425,9 +425,9 @@ Snapshot creation fails if a present object is absent, corrupt, or unverified.
 Import verifies every present member before applying canonical records or
 installing evidence bytes.
 
-Full-text and vector projections are excluded. Imported embedding profiles are
-`pending` with zero indexed coverage until a matching model artifact is
-resolved and vectors are rebuilt. Canonical queries and provenance remain
+Full-text and semantic projections, including profiles and vectors, are
+excluded. A profile is recreated and vectors are rebuilt through a matching
+provider contract after restore. Canonical queries and provenance remain
 available without semantic retrieval.
 
 A privacy-filtered export is a separate sanitized interchange artifact and is
@@ -490,9 +490,10 @@ proven, the adapter falls back to the application implementation.
 Approximate search is outside v1. Exact search remains the conformance oracle
 for any future optimization.
 
-An embedding profile reports `pending`, `building`, `ready`, `degraded`, or
-`failed`, plus indexed and eligible counts. A missing or mismatched model
-artifact creates no new vectors and never affects canonical query results.
+An embedding profile reports `pending`, `building`, `ready`, or `degraded`,
+plus indexed and eligible counts. A missing API key, provider failure, or model
+identity mismatch creates no new vectors and never affects canonical query
+results.
 
 ## Privacy and security
 
@@ -501,13 +502,21 @@ The logical contract defines ordered privacy classes such as `public`,
 classes while preserving a total strictness order.
 
 The effective class of a derived record is the maximum of its declared class
-and every input source, acquisition, object, fragment, and target. Sanitization
-creates a distinct derived object, records the derivation, and assigns a new
-digest.
+and every input source, acquisition, object, fragment, and target. The class of
+an existing source, node, attribute, relation, or search document is immutable
+in V1. Evidence privacy may only tighten when a new acquisition is recorded.
+Sanitization creates a distinct derived object, records the derivation, and
+assigns a new digest.
 
 Automation is not a trust boundary. Structured write tools validate the same
 schemas and permissions as the Python API. Evidence reads are bounded and
 explicit. Ordinary search and traversal do not return raw evidence bytes.
+
+An external embedding provider receives text only after the profile and
+provider privacy ceilings are checked. Credentials come from the gitignored
+`.env` file, are never stored in SQLite, and are never returned by APIs. The
+default ceiling is `restricted`, so only explicitly `forbidden` content is
+excluded unless an operator selects a lower ceiling.
 
 V1 trusts the local process identity and filesystem permissions. Hashes detect
 corruption but do not authenticate content against a malicious writer. A
@@ -566,7 +575,7 @@ memory init | status | validate
 memory schema | capabilities
 memory ingest preview | apply
 memory query | traverse | search | explain
-memory reindex
+memory embedding create-profile | status | rebuild
 memory evidence status | read | verify | audit
 memory retention report | plan | retire
 memory snapshot create | verify | import
@@ -667,7 +676,6 @@ delivered; the invariants in this document remain the conformance boundary.
 - remote or encrypted evidence providers;
 - automatic replication and disaster recovery;
 - approximate vector retrieval;
-- external embedding calls;
 - background retention execution;
 - separate graph projections.
 

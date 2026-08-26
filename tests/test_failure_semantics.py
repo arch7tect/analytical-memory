@@ -10,7 +10,13 @@ import pytest
 
 from analytical_memory.adapters.filesystem import FileEvidenceStore
 from analytical_memory.application import MemoryApplication
-from analytical_memory.domain import BatchPlan, MemoryStoreStatus, StoredBatch
+from analytical_memory.domain import (
+    BatchPlan,
+    EmbeddingProfileRecord,
+    EmbeddingRecord,
+    MemoryStoreStatus,
+    StoredBatch,
+)
 from analytical_memory.errors import (
     BatchValidationError,
     IdempotencyConflictError,
@@ -236,6 +242,39 @@ class FailingMemoryStore(MemoryStore):
 
     def evidence_digests(self, limit: int) -> tuple[list[str], bool]:
         return [], False
+
+    def put_embedding_profile(self, profile: EmbeddingProfileRecord) -> None:
+        raise AssertionError("not used")
+
+    def get_embedding_profile(self, profile_id: str) -> dict[str, Any]:
+        raise AssertionError("not used")
+
+    def set_embedding_profile_status(
+        self, profile_id: str, status: str, last_error: str | None
+    ) -> None:
+        raise AssertionError("not used")
+
+    def embedding_documents(self, profile_id: str) -> list[dict[str, Any]]:
+        raise AssertionError("not used")
+
+    def put_embedding_records(self, records: list[EmbeddingRecord]) -> None:
+        raise AssertionError("not used")
+
+    def clear_embedding_records(self, profile_id: str) -> int:
+        raise AssertionError("not used")
+
+    def embedding_candidates(
+        self,
+        profile_id: str,
+        *,
+        namespace: str | None,
+        node_type: str | None,
+        privacy_ceiling: str | None,
+    ) -> list[dict[str, Any]]:
+        raise AssertionError("not used")
+
+    def embedding_coverage(self, profile_id: str) -> dict[str, int]:
+        raise AssertionError("not used")
 
 
 def test_database_failure_leaves_addressable_unreferenced_evidence(

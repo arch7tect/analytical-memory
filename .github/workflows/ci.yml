@@ -26,3 +26,4 @@ jobs:
       - run: uv run python scripts/mcp_smoke.py
       - run: uv run python scripts/querying_smoke.py
       - run: uv run python scripts/portability_smoke.py
+      - run: uv run python scripts/semantic_smoke.py

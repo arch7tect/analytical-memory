@@ -11,8 +11,10 @@ requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [{ name = "Analytical Memory contributors" }]
 dependencies = [
+    "httpx>=0.28,<1",
     "mcp>=2.1.1,<3",
     "pydantic>=2.13.4,<3",
+    "python-dotenv>=1.1,<2",
 ]
 
 [project.scripts]

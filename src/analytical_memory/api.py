@@ -7,6 +7,7 @@ from analytical_memory.api_models import (
     CurrentFactsResponse,
     CurrentMetricResponse,
     CurrentSlotsResponse,
+    EmbeddingProfileResponse,
     EvidenceAuditResponse,
     EvidenceReadResponse,
     EvidenceStatusResponse,
@@ -16,6 +17,7 @@ from analytical_memory.api_models import (
     PreviewResponse,
     RelationExplanationResponse,
     SearchResponse,
+    SemanticSearchResponse,
     TraversalResponse,
 )
 from analytical_memory.application import MemoryApplication
@@ -69,6 +71,48 @@ class MemoryAPI:
 
     def search_text(self, query: str, limit: int = 20) -> SearchResponse:
         return SearchResponse.model_validate(self.application.search_text(query, limit))
+
+    def embedding_profile_create(
+        self, attribute_name: str, privacy_ceiling: str | None = None
+    ) -> EmbeddingProfileResponse:
+        return EmbeddingProfileResponse.model_validate(
+            self.application.embedding_profile_create(
+                attribute_name, privacy_ceiling=privacy_ceiling
+            )
+        )
+
+    def embedding_profile_status(self, profile_id: str) -> EmbeddingProfileResponse:
+        return EmbeddingProfileResponse.model_validate(
+            self.application.embedding_profile_status(profile_id)
+        )
+
+    def embedding_rebuild(
+        self, profile_id: str, *, reset: bool = False
+    ) -> EmbeddingProfileResponse:
+        return EmbeddingProfileResponse.model_validate(
+            self.application.embedding_rebuild(profile_id, reset=reset)
+        )
+
+    def search_semantic(
+        self,
+        profile_id: str,
+        query: str,
+        *,
+        namespace: str | None = None,
+        node_type: str | None = None,
+        privacy_ceiling: str | None = None,
+        limit: int = 20,
+    ) -> SemanticSearchResponse:
+        return SemanticSearchResponse.model_validate(
+            self.application.search_semantic(
+                profile_id,
+                query,
+                namespace=namespace,
+                node_type=node_type,
+                privacy_ceiling=privacy_ceiling,
+                limit=limit,
+            )
+        )
 
     def explain(self, attribute_id: str) -> ExplanationResponse:
         return ExplanationResponse.model_validate(

@@ -70,8 +70,8 @@ def test_version_one_database_is_upgraded_and_backfilled(tmp_path: Path) -> None
     store.initialize()
     integrity = store.integrity()
 
-    assert integrity["schema_version"] == 3
-    assert [item["version"] for item in integrity["migrations"]] == [1, 2, 3]
+    assert integrity["schema_version"] == 4
+    assert [item["version"] for item in integrity["migrations"]] == [1, 2, 3, 4]
     assert integrity["migrations"][0]["checksum"] == (
         "328ec2c72de2af17c4aeb0fa072302148497220d8051edb50c666a1d6ef1ef94"
     )

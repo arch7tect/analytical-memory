@@ -14,7 +14,18 @@ from analytical_memory.canonical import (
     sha256_bytes,
     stable_uuid,
 )
-from analytical_memory.domain import BatchPlan, MemoryStoreStatus, StoredBatch
+from analytical_memory.domain import (
+    AttributeRecord,
+    BatchPlan,
+    EmbeddingProfileRecord,
+    EmbeddingRecord,
+    MemoryStoreStatus,
+    NodeRecord,
+    RelationRecord,
+    SearchDocumentRecord,
+    SourceRecord,
+    StoredBatch,
+)
 from analytical_memory.errors import (
     BatchValidationError,
     RecordNotFoundError,
@@ -159,6 +170,35 @@ class SqliteMemoryStore(MemoryStore):
             ],
         )
 
+    @staticmethod
+    def _validate_immutable_privacy(
+        connection: sqlite3.Connection,
+        table: str,
+        records: Iterable[
+            SourceRecord
+            | NodeRecord
+            | AttributeRecord
+            | RelationRecord
+            | SearchDocumentRecord
+        ],
+    ) -> None:
+        if table not in {
+            "source",
+            "node",
+            "node_attribute",
+            "relation",
+            "search_document",
+        }:
+            raise ValueError(f"privacy validation is not supported for {table}")
+        for record in records:
+            row = connection.execute(
+                f"SELECT privacy_class FROM {table} WHERE id = ?", (record.id,)
+            ).fetchone()
+            if row is not None and str(row["privacy_class"]) != record.privacy_class:
+                raise BatchValidationError(
+                    f"{table} privacy_class is immutable for id {record.id}"
+                )
+
     def apply(self, plan: BatchPlan) -> dict[str, Any]:
         result = plan.result()
         with self._write_connection() as connection:
@@ -176,6 +216,15 @@ class SqliteMemoryStore(MemoryStore):
                     canonical_json(result),
                     plan.recorded_at,
                 ),
+            )
+            self._validate_immutable_privacy(connection, "source", (plan.source,))
+            self._validate_immutable_privacy(connection, "node", plan.nodes)
+            self._validate_immutable_privacy(
+                connection, "node_attribute", plan.attributes
+            )
+            self._validate_immutable_privacy(connection, "relation", plan.relations)
+            self._validate_immutable_privacy(
+                connection, "search_document", plan.search_documents
             )
             self._insert_many(
                 connection,
@@ -1697,7 +1746,7 @@ class SqliteMemoryStore(MemoryStore):
             version = int(connection.execute("PRAGMA user_version").fetchone()[0])
         return MemoryStoreStatus(
             backend="sqlite",
-            initialized=version == 3,
+            initialized=version == 4,
             schema_version=version,
         )
 
@@ -1708,3 +1757,234 @@ class SqliteMemoryStore(MemoryStore):
                 (limit + 1,),
             ).fetchall()
         return [str(row["digest"]) for row in rows[:limit]], len(rows) > limit
+
+    def put_embedding_profile(self, profile: EmbeddingProfileRecord) -> None:
+        with self._write_connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO embedding_profile (
+                    id, attribute_name, provider, model, dimensions,
+                    preprocessing_version, similarity, privacy_ceiling,
+                    contract_hash, status, last_error, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO NOTHING
+                """,
+                (
+                    profile.id,
+                    profile.attribute_name,
+                    profile.provider,
+                    profile.model,
+                    profile.dimensions,
+                    profile.preprocessing_version,
+                    profile.similarity,
+                    profile.privacy_ceiling,
+                    profile.contract_hash,
+                    profile.status,
+                    profile.last_error,
+                    profile.created_at,
+                ),
+            )
+
+    def get_embedding_profile(self, profile_id: str) -> dict[str, Any]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM embedding_profile WHERE id = ?", (profile_id,)
+            ).fetchone()
+        if row is None:
+            raise RecordNotFoundError(f"embedding profile not found: {profile_id}")
+        return dict(row)
+
+    def set_embedding_profile_status(
+        self, profile_id: str, status: str, last_error: str | None
+    ) -> None:
+        with self._write_connection() as connection:
+            cursor = connection.execute(
+                "UPDATE embedding_profile SET status = ?, last_error = ? WHERE id = ?",
+                (status, last_error, profile_id),
+            )
+        if cursor.rowcount != 1:
+            raise RecordNotFoundError(f"embedding profile not found: {profile_id}")
+
+    def embedding_documents(self, profile_id: str) -> list[dict[str, Any]]:
+        profile = self.get_embedding_profile(profile_id)
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT search_document.*, node.namespace, node.type AS node_type,
+                       node_attribute.name AS attribute_name
+                FROM search_document
+                JOIN node_attribute ON node_attribute.id = search_document.target_id
+                JOIN node ON node.id = node_attribute.node_id
+                WHERE search_document.lifecycle = 'active'
+                  AND search_document.target_kind = 'node_attribute'
+                  AND node_attribute.searchable = 1
+                  AND node_attribute.name = ?
+                  AND CASE search_document.privacy_class
+                        WHEN 'public' THEN 0 WHEN 'private' THEN 1
+                        WHEN 'restricted' THEN 2 ELSE 3 END
+                      <= CASE ?
+                        WHEN 'public' THEN 0 WHEN 'private' THEN 1
+                        WHEN 'restricted' THEN 2 ELSE 3 END
+                  AND NOT EXISTS (
+                      SELECT 1 FROM embedding_record
+                      WHERE embedding_record.profile_id = ?
+                        AND embedding_record.search_document_id = search_document.id
+                        AND embedding_record.input_content_hash =
+                            search_document.content_hash
+                  )
+                ORDER BY search_document.id
+                """,
+                (profile["attribute_name"], profile["privacy_ceiling"], profile_id),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def put_embedding_records(self, records: list[EmbeddingRecord]) -> None:
+        with self._write_connection() as connection:
+            connection.executemany(
+                """
+                INSERT INTO embedding_record (
+                    id, search_document_id, profile_id, input_content_hash,
+                    vector_blob, dimensions, response_model, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(search_document_id, profile_id, input_content_hash)
+                DO NOTHING
+                """,
+                [
+                    (
+                        record.id,
+                        record.search_document_id,
+                        record.profile_id,
+                        record.input_content_hash,
+                        record.vector_blob,
+                        record.dimensions,
+                        record.response_model,
+                        record.created_at,
+                    )
+                    for record in records
+                ],
+            )
+
+    def clear_embedding_records(self, profile_id: str) -> int:
+        self.get_embedding_profile(profile_id)
+        with self._write_connection() as connection:
+            cursor = connection.execute(
+                "DELETE FROM embedding_record WHERE profile_id = ?", (profile_id,)
+            )
+        return cursor.rowcount
+
+    def embedding_candidates(
+        self,
+        profile_id: str,
+        *,
+        namespace: str | None,
+        node_type: str | None,
+        privacy_ceiling: str | None,
+    ) -> list[dict[str, Any]]:
+        profile = self.get_embedding_profile(profile_id)
+        effective_ceiling = privacy_ceiling or str(profile["privacy_ceiling"])
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT embedding_record.*, search_document.target_kind,
+                       search_document.target_id, search_document.content,
+                       search_document.content_hash,
+                       search_document.privacy_class, node.namespace,
+                       node.type AS node_type, node_attribute.name AS attribute_name
+                FROM embedding_record
+                JOIN search_document
+                  ON search_document.id = embedding_record.search_document_id
+                JOIN node_attribute ON node_attribute.id = search_document.target_id
+                JOIN node ON node.id = node_attribute.node_id
+                WHERE embedding_record.profile_id = ?
+                  AND embedding_record.input_content_hash =
+                      search_document.content_hash
+                  AND embedding_record.dimensions = ?
+                  AND embedding_record.response_model = ?
+                  AND search_document.lifecycle = 'active'
+                  AND search_document.target_kind = 'node_attribute'
+                  AND node_attribute.searchable = 1
+                  AND node_attribute.name = ?
+                  AND (? IS NULL OR node.namespace = ?)
+                  AND (? IS NULL OR node.type = ?)
+                  AND CASE search_document.privacy_class
+                        WHEN 'public' THEN 0 WHEN 'private' THEN 1
+                        WHEN 'restricted' THEN 2 ELSE 3 END
+                      <= CASE ?
+                        WHEN 'public' THEN 0 WHEN 'private' THEN 1
+                        WHEN 'restricted' THEN 2 ELSE 3 END
+                ORDER BY search_document.id
+                """,
+                (
+                    profile_id,
+                    profile["dimensions"],
+                    profile["model"],
+                    profile["attribute_name"],
+                    namespace,
+                    namespace,
+                    node_type,
+                    node_type,
+                    effective_ceiling,
+                ),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def embedding_coverage(self, profile_id: str) -> dict[str, int]:
+        profile = self.get_embedding_profile(profile_id)
+        parameters = (profile["attribute_name"], profile["privacy_ceiling"])
+        with self._connect() as connection:
+            eligible = int(
+                connection.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM search_document
+                    JOIN node_attribute
+                      ON node_attribute.id = search_document.target_id
+                    WHERE search_document.lifecycle = 'active'
+                      AND search_document.target_kind = 'node_attribute'
+                      AND node_attribute.searchable = 1
+                      AND node_attribute.name = ?
+                      AND CASE search_document.privacy_class
+                            WHEN 'public' THEN 0 WHEN 'private' THEN 1
+                            WHEN 'restricted' THEN 2 ELSE 3 END
+                          <= CASE ?
+                            WHEN 'public' THEN 0 WHEN 'private' THEN 1
+                            WHEN 'restricted' THEN 2 ELSE 3 END
+                    """,
+                    parameters,
+                ).fetchone()[0]
+            )
+            indexed = int(
+                connection.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM embedding_record
+                    JOIN search_document
+                      ON search_document.id = embedding_record.search_document_id
+                    JOIN node_attribute
+                      ON node_attribute.id = search_document.target_id
+                    WHERE embedding_record.profile_id = ?
+                      AND embedding_record.input_content_hash =
+                          search_document.content_hash
+                      AND embedding_record.dimensions = ?
+                      AND embedding_record.response_model = ?
+                      AND search_document.lifecycle = 'active'
+                      AND search_document.target_kind = 'node_attribute'
+                      AND node_attribute.searchable = 1
+                      AND node_attribute.name = ?
+                      AND CASE search_document.privacy_class
+                            WHEN 'public' THEN 0 WHEN 'private' THEN 1
+                            WHEN 'restricted' THEN 2 ELSE 3 END
+                          <= CASE ?
+                            WHEN 'public' THEN 0 WHEN 'private' THEN 1
+                            WHEN 'restricted' THEN 2 ELSE 3 END
+                    """,
+                    (
+                        profile_id,
+                        profile["dimensions"],
+                        profile["model"],
+                        profile["attribute_name"],
+                        profile["privacy_ceiling"],
+                    ),
+                ).fetchone()[0]
+            )
+        return {"eligible_count": eligible, "indexed_count": indexed}

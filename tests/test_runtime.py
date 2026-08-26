@@ -30,6 +30,7 @@ def test_capabilities_are_discoverable_and_path_free(
         "current-facts",
         "current-metric",
         "current-slots",
+        "search-semantic",
         "search-text",
         "traverse-relations",
     ]

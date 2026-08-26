@@ -40,6 +40,18 @@
   "compatibility": {
     "minimum_reader": "1"
   },
+  "embedding": {
+    "canonical_encoding": "finite-little-endian-float32",
+    "exact_search": "application-cosine",
+    "first_provider": {
+      "dimensions": 1536,
+      "model": "text-embedding-3-small",
+      "preprocessing_version": "unicode-nfc-lines-v1",
+      "provider": "openai"
+    },
+    "privacy_enforcement": "profile-and-provider-ceiling",
+    "profile_scope": "node_attribute_name"
+  },
   "evidence": {
     "audit_outcomes": [
       "verified",
@@ -87,7 +99,7 @@
       "time_interval",
       "sample_interval"
     ],
-    "format_version": "3",
+    "format_version": "4",
     "optional": [
       "relations",
       "metrics"
@@ -110,7 +122,7 @@
     ],
     "dimensions": "canonical_json_object"
   },
-  "ontology_version": "0.3.0",
+  "ontology_version": "0.4.0",
   "privacy_classes": [
     "public",
     "private",
@@ -134,6 +146,8 @@
     "EvidenceVerification",
     "EvidenceRetirement",
     "SearchDocument",
+    "EmbeddingProfile",
+    "EmbeddingRecord",
     "IngestionBatch",
     "SchemaMigration"
   ],
@@ -203,6 +217,25 @@
         "candidates"
       ]
     },
+    "search-semantic": {
+      "ordering": [
+        "score_desc",
+        "document_id"
+      ],
+      "parameters": [
+        "profile_id",
+        "query",
+        "namespace",
+        "node_type",
+        "privacy_ceiling",
+        "limit"
+      ],
+      "result": [
+        "results",
+        "coverage",
+        "status"
+      ]
+    },
     "search-text": {
       "parameters": [
         "query",
@@ -239,8 +272,8 @@
       ]
     }
   },
-  "schema_document_version": "3",
-  "schema_fingerprint": "bf108e283cbf1b02ebda39cc3104c1f01a84d5d20479d7d310264453139a7e25",
+  "schema_document_version": "4",
+  "schema_fingerprint": "5740c0e445a6b4bf215e6545618ef61dd34382052a1b886e2f7501a451446de0",
   "search_document": {
     "coverage": "active_indexed_documents_vs_searchable_attributes",
     "eligibility": {

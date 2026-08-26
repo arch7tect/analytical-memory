@@ -352,6 +352,10 @@ def plan_batch(path: Path, schema: SchemaContract) -> BatchPlan:
                 raise BatchValidationError(
                     f"{prefix}.value must be a string when searchable"
                 )
+            declared_attribute_privacy = _privacy(
+                attribute_input.get("privacy_class", node.privacy_class),
+                f"{prefix}.privacy_class",
+            )
             attribute = AttributeRecord(
                 id=stable_uuid("node_attribute", *attribute_key),
                 node_id=node.id,
@@ -360,9 +364,8 @@ def plan_batch(path: Path, schema: SchemaContract) -> BatchPlan:
                 value_json=value_json,
                 value_hash=value_hash,
                 searchable=int(searchable),
-                privacy_class=_privacy(
-                    attribute_input.get("privacy_class", node.privacy_class),
-                    f"{prefix}.privacy_class",
+                privacy_class=strictest_privacy(
+                    declared_attribute_privacy, node.privacy_class
                 ),
                 recorded_at=recorded_at,
             )
@@ -396,7 +399,11 @@ def plan_batch(path: Path, schema: SchemaContract) -> BatchPlan:
                         content=raw_value,
                         content_hash=content_hash,
                         extraction_version="identity-text-v1",
-                        privacy_class=attribute.privacy_class,
+                        privacy_class=strictest_privacy(
+                            attribute.privacy_class,
+                            node.privacy_class,
+                            source.privacy_class,
+                        ),
                         lifecycle="active",
                         recorded_at=recorded_at,
                     )

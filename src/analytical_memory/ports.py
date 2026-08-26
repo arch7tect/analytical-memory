@@ -6,12 +6,27 @@ from typing import Any
 
 from analytical_memory.domain import (
     BatchPlan,
+    EmbeddingBatch,
+    EmbeddingProfileRecord,
+    EmbeddingProviderInfo,
+    EmbeddingRecord,
     EvidenceObjectRecord,
     EvidenceStatus,
     EvidenceStoreStatus,
     MemoryStoreStatus,
     StoredBatch,
 )
+
+
+class EmbeddingProvider(ABC):
+    @property
+    @abstractmethod
+    def info(self) -> EmbeddingProviderInfo:
+        raise NotImplementedError
+
+    @abstractmethod
+    def embed(self, texts: list[str]) -> EmbeddingBatch:
+        raise NotImplementedError
 
 
 class EvidenceStore(ABC):
@@ -199,4 +214,45 @@ class MemoryStore(ABC):
 
     @abstractmethod
     def evidence_digests(self, limit: int) -> tuple[list[str], bool]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def put_embedding_profile(self, profile: EmbeddingProfileRecord) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_embedding_profile(self, profile_id: str) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def set_embedding_profile_status(
+        self, profile_id: str, status: str, last_error: str | None
+    ) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def embedding_documents(self, profile_id: str) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def put_embedding_records(self, records: list[EmbeddingRecord]) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def clear_embedding_records(self, profile_id: str) -> int:
+        raise NotImplementedError
+
+    @abstractmethod
+    def embedding_candidates(
+        self,
+        profile_id: str,
+        *,
+        namespace: str | None,
+        node_type: str | None,
+        privacy_ceiling: str | None,
+    ) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def embedding_coverage(self, profile_id: str) -> dict[str, int]:
         raise NotImplementedError

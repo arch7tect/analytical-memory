@@ -360,6 +360,58 @@ class SearchResponse(APIModel):
     schema_fingerprint: str
 
 
+class EmbeddingProfile(APIModel):
+    id: str
+    attribute_name: str
+    provider: str
+    model: str
+    dimensions: int
+    preprocessing_version: str
+    similarity: Literal["cosine"]
+    privacy_ceiling: Literal["public", "private", "restricted", "forbidden"]
+    contract_hash: str
+    status: Literal["pending", "building", "ready", "degraded"]
+    last_error: str | None
+    created_at: str
+
+
+class EmbeddingProviderReadiness(APIModel):
+    configured: bool
+    matches: bool
+
+
+class EmbeddingProfileResponse(APIModel):
+    profile: EmbeddingProfile
+    coverage: SearchCoverage
+    provider: EmbeddingProviderReadiness
+    schema_fingerprint: str
+
+
+class SemanticSearchMatch(APIModel):
+    attribute_name: str
+    content: str
+    content_hash: str
+    document_id: str
+    fact: Fact
+    namespace: str
+    node_type: str
+    privacy_class: Literal["public", "private", "restricted", "forbidden"]
+    provenance: SearchProvenance
+    score: float
+    target_id: str
+    target_kind: Literal["node_attribute"]
+
+
+class SemanticSearchResponse(APIModel):
+    coverage: SearchCoverage
+    profile_id: str
+    query: Literal["search-semantic"]
+    results: list[SemanticSearchMatch]
+    schema_fingerprint: str
+    status: Literal["ready", "degraded"]
+    text: str
+
+
 class EvidenceStatusResponse(APIModel):
     availability: Literal["present", "missing"]
     byte_size: int | None

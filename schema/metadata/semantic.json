@@ -1,0 +1,14 @@
+{
+  "embedding": {
+    "canonical_encoding": "finite-little-endian-float32",
+    "exact_search": "application-cosine",
+    "first_provider": {
+      "dimensions": 1536,
+      "model": "text-embedding-3-small",
+      "preprocessing_version": "unicode-nfc-lines-v1",
+      "provider": "openai"
+    },
+    "privacy_enforcement": "profile-and-provider-ceiling",
+    "profile_scope": "node_attribute_name"
+  }
+}

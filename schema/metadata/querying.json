@@ -30,6 +30,11 @@
       "parameters": ["query", "limit"],
       "result": ["results", "coverage"]
     },
+    "search-semantic": {
+      "ordering": ["score_desc", "document_id"],
+      "parameters": ["profile_id", "query", "namespace", "node_type", "privacy_ceiling", "limit"],
+      "result": ["results", "coverage", "status"]
+    },
     "traverse-relations": {
       "parameters": ["start_node_id", "relation_types", "direction", "max_depth", "limit", "states"],
       "ordering": ["depth", "source_namespace", "source_natural_key", "relation_type", "target_namespace", "target_natural_key", "logical_key", "relation_id"],

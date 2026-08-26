@@ -34,3 +34,7 @@ class RetentionBlockedError(MemoryErrorBase):
 
 class SnapshotError(MemoryErrorBase):
     pass
+
+
+class EmbeddingProviderError(MemoryErrorBase):
+    pass

@@ -68,6 +68,29 @@ def _parser() -> argparse.ArgumentParser:
     search = subcommands.add_parser("search")
     search.add_argument("text")
     search.add_argument("--limit", type=int, default=20)
+    search.add_argument("--semantic-profile")
+    search.add_argument("--namespace")
+    search.add_argument("--node-type")
+    search.add_argument(
+        "--privacy-ceiling",
+        choices=("public", "private", "restricted", "forbidden"),
+    )
+
+    embedding = subcommands.add_parser("embedding")
+    embedding_commands = embedding.add_subparsers(
+        dest="embedding_command", required=True
+    )
+    embedding_create = embedding_commands.add_parser("create-profile")
+    embedding_create.add_argument("attribute_name")
+    embedding_create.add_argument(
+        "--privacy-ceiling",
+        choices=("public", "private", "restricted", "forbidden"),
+    )
+    embedding_status = embedding_commands.add_parser("status")
+    embedding_status.add_argument("profile_id")
+    embedding_rebuild = embedding_commands.add_parser("rebuild")
+    embedding_rebuild.add_argument("profile_id")
+    embedding_rebuild.add_argument("--reset", action="store_true")
 
     explain = subcommands.add_parser("explain")
     explain.add_argument("record_id")
@@ -178,7 +201,28 @@ def _execute(arguments: argparse.Namespace) -> dict[str, Any]:
             states=arguments.states,
         ).model_dump(mode="json")
     if arguments.command == "search":
+        if arguments.semantic_profile is not None:
+            return api.search_semantic(
+                arguments.semantic_profile,
+                arguments.text,
+                namespace=arguments.namespace,
+                node_type=arguments.node_type,
+                privacy_ceiling=arguments.privacy_ceiling,
+                limit=arguments.limit,
+            ).model_dump(mode="json")
         return api.search_text(arguments.text, arguments.limit).model_dump(mode="json")
+    if arguments.command == "embedding":
+        if arguments.embedding_command == "create-profile":
+            return api.embedding_profile_create(
+                arguments.attribute_name, arguments.privacy_ceiling
+            ).model_dump(mode="json")
+        if arguments.embedding_command == "status":
+            return api.embedding_profile_status(arguments.profile_id).model_dump(
+                mode="json"
+            )
+        return api.embedding_rebuild(
+            arguments.profile_id, reset=arguments.reset
+        ).model_dump(mode="json")
     if arguments.command == "explain":
         if arguments.kind == "relation":
             return api.explain_relation(arguments.record_id).model_dump(mode="json")

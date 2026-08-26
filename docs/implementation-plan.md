@@ -278,18 +278,18 @@ steps.
 ### Deliver
 
 - property-scoped EmbeddingProfile and EmbeddingRecord support;
-- a local embedding-provider port and one pinned local provider;
+- an explicit embedding-provider port and one fixed commercial API adapter;
 - canonical finite little-endian float32 BLOB storage;
 - exact application-level vector search;
 - exact structured prefilters and deterministic ordering;
-- coverage, readiness, stale-input, and model-artifact checks;
+- coverage, readiness, stale-input, and provider/model identity checks;
 - vector rebuild commands;
 - hybrid exact-filter plus semantic-ranking queries.
 
 ### Acceptance
 
 - a profile or input change creates a new embedding record;
-- a missing or mismatched model artifact degrades only semantic retrieval;
+- a missing key, provider failure, or model mismatch degrades only semantic retrieval;
 - index deletion and rebuild preserve canonical records;
 - exact search returns deterministic fixture results;
 - restricted inputs cannot reach a provider that exceeds their privacy policy;
@@ -298,8 +298,11 @@ steps.
 
 ### Approval gate
 
-Select and pin the first model artifact, preprocessing contract, dimensions,
-license, and distribution method before implementing the provider adapter.
+Approved v1 contract: OpenAI `text-embedding-3-small`, 1536 dimensions,
+`unicode-nfc-lines-v1` preprocessing, cosine similarity, float responses, and
+an API key loaded from a gitignored `.env`. The default provider privacy ceiling
+is `restricted`, so all content except explicitly `forbidden` text is eligible.
+Privacy classes on existing graph and search records are immutable in V1.
 
 ## Milestone 5: PostgreSQL conformance and transfer
 

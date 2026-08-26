@@ -28,6 +28,19 @@ The commands write local state under the ignored `.local/` directory. Preview
 does not write, repeated apply is idempotent, current-facts returns all four
 fact states, and explain verifies the referenced evidence object by SHA-256.
 
+Semantic retrieval uses the OpenAI embeddings API. Copy `.env.template` to the
+gitignored `.env`, set `OPENAI_API_KEY`, ingest searchable attributes, then run:
+
+```console
+uv run memory embedding create-profile description
+uv run memory embedding rebuild <profile-id>
+uv run memory search "related text" --semantic-profile <profile-id>
+```
+
+The default provider policy sends `public`, `private`, and `restricted` text.
+Only content explicitly marked `forbidden` is ineligible. Set
+`ANALYTICAL_MEMORY_EMBEDDING_PRIVACY` to a lower ceiling when needed.
+
 Run the complete synthetic smoke path without retaining state:
 
 ```console
@@ -35,6 +48,7 @@ uv run python scripts/smoke.py
 uv run python scripts/mcp_smoke.py
 uv run python scripts/querying_smoke.py
 uv run python scripts/portability_smoke.py
+uv run python scripts/semantic_smoke.py
 ```
 
 The MCP smoke path launches the `memory-mcp` stdio server as a subprocess,
@@ -49,6 +63,9 @@ metadata compiler.
 The [evidence portability reference](docs/reference/evidence-portability.md)
 covers deterministic fragments, bounded reads, verification history, retention
 plans, private snapshots, restore, and separate sanitized exports.
+
+The [semantic retrieval reference](docs/reference/semantic-retrieval.md) covers
+profiles, rebuilds, privacy ceilings, exact ranking, and secret configuration.
 
 ## Development
 

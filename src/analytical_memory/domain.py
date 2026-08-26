@@ -118,6 +118,50 @@ class SearchDocumentRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class EmbeddingProviderInfo:
+    provider: str
+    model: str
+    dimensions: int
+    preprocessing_version: str
+    privacy_ceiling: str
+    configured: bool
+
+
+@dataclass(frozen=True, slots=True)
+class EmbeddingBatch:
+    vectors: tuple[tuple[float, ...], ...]
+    response_model: str
+
+
+@dataclass(frozen=True, slots=True)
+class EmbeddingProfileRecord:
+    id: str
+    attribute_name: str
+    provider: str
+    model: str
+    dimensions: int
+    preprocessing_version: str
+    similarity: str
+    privacy_ceiling: str
+    contract_hash: str
+    status: str
+    last_error: str | None
+    created_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class EmbeddingRecord:
+    id: str
+    search_document_id: str
+    profile_id: str
+    input_content_hash: str
+    vector_blob: bytes
+    dimensions: int
+    response_model: str
+    created_at: str
+
+
+@dataclass(frozen=True, slots=True)
 class EvidenceObjectRecord:
     id: str
     digest: str

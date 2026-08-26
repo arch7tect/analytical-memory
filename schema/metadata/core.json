@@ -28,7 +28,7 @@
       "time_interval",
       "sample_interval"
     ],
-    "format_version": "3",
+    "format_version": "4",
     "optional": ["relations", "metrics"],
     "required": [
       "schema_fingerprint",
@@ -40,7 +40,7 @@
       "nodes"
     ]
   },
-  "ontology_version": "0.3.0",
+  "ontology_version": "0.4.0",
   "privacy_classes": ["public", "private", "restricted", "forbidden"],
   "record_types": [
     "Source",
@@ -59,6 +59,8 @@
     "EvidenceVerification",
     "EvidenceRetirement",
     "SearchDocument",
+    "EmbeddingProfile",
+    "EmbeddingRecord",
     "IngestionBatch",
     "SchemaMigration"
   ],
@@ -66,5 +68,5 @@
     "directions": ["outbound", "inbound", "both"],
     "properties_allowed": false
   },
-  "schema_document_version": "3"
+  "schema_document_version": "4"
 }

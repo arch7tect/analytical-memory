@@ -8,9 +8,19 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from analytical_memory.canonical import canonical_json, sha256_bytes, sha256_json
-from analytical_memory.domain import BatchPlan
+from analytical_memory.canonical import (
+    canonical_json,
+    sha256_bytes,
+    sha256_json,
+    stable_uuid,
+)
+from analytical_memory.domain import (
+    BatchPlan,
+    EmbeddingProfileRecord,
+    EmbeddingRecord,
+)
 from analytical_memory.errors import (
+    EmbeddingProviderError,
     IdempotencyConflictError,
     RecordNotFoundError,
     RetentionBlockedError,
@@ -30,9 +40,15 @@ from analytical_memory.limits import (
     MAX_VALIDATION_EVIDENCE_OBJECTS,
 )
 from analytical_memory.planner import plan_batch
-from analytical_memory.ports import EvidenceStore, MemoryStore
+from analytical_memory.ports import EmbeddingProvider, EvidenceStore, MemoryStore
 from analytical_memory.schema_contract import SchemaContract
 from analytical_memory.snapshot import create_snapshot, import_snapshot, load_snapshot
+from analytical_memory.vectors import (
+    cosine_similarity,
+    decode_vector,
+    encode_vector,
+    preprocess_text,
+)
 
 
 def _now() -> str:
@@ -45,10 +61,12 @@ class MemoryApplication:
         memory_store: MemoryStore,
         evidence_store: EvidenceStore,
         schema: SchemaContract,
+        embedding_provider: EmbeddingProvider | None = None,
     ) -> None:
         self.memory_store = memory_store
         self.evidence_store = evidence_store
         self.schema = schema
+        self.embedding_provider = embedding_provider
 
     def initialize(self) -> dict[str, Any]:
         self.memory_store.initialize()
@@ -171,6 +189,271 @@ class MemoryApplication:
             "coverage": result["coverage"],
             "schema_fingerprint": self.schema.fingerprint,
         }
+
+    def embedding_profile_create(
+        self,
+        attribute_name: str,
+        *,
+        privacy_ceiling: str | None = None,
+        created_at: str | None = None,
+    ) -> dict[str, Any]:
+        provider = self._require_embedding_provider()
+        info = provider.info
+        ceiling = privacy_ceiling or info.privacy_ceiling
+        if ceiling not in PRIVACY_ORDER:
+            raise ValueError("unknown privacy ceiling")
+        if PRIVACY_ORDER[ceiling] > PRIVACY_ORDER[info.privacy_ceiling]:
+            raise ValueError("profile privacy ceiling exceeds provider policy")
+        attribute_name = attribute_name.strip()
+        if not attribute_name:
+            raise ValueError("attribute_name must not be empty")
+        contract = {
+            "attribute_name": attribute_name,
+            "dimensions": info.dimensions,
+            "model": info.model,
+            "preprocessing_version": info.preprocessing_version,
+            "privacy_ceiling": ceiling,
+            "provider": info.provider,
+            "similarity": "cosine",
+        }
+        contract_hash = sha256_json(contract)
+        profile = EmbeddingProfileRecord(
+            id=stable_uuid("embedding-profile", contract_hash),
+            attribute_name=attribute_name,
+            provider=info.provider,
+            model=info.model,
+            dimensions=info.dimensions,
+            preprocessing_version=info.preprocessing_version,
+            similarity="cosine",
+            privacy_ceiling=ceiling,
+            contract_hash=contract_hash,
+            status="pending",
+            last_error=None,
+            created_at=created_at or _now(),
+        )
+        self.memory_store.put_embedding_profile(profile)
+        return self.embedding_profile_status(profile.id)
+
+    def embedding_profile_status(self, profile_id: str) -> dict[str, Any]:
+        profile = self.memory_store.get_embedding_profile(profile_id)
+        coverage = self.memory_store.embedding_coverage(profile_id)
+        provider_matches = self._provider_matches_profile(profile)
+        configured = bool(
+            self.embedding_provider is not None
+            and self.embedding_provider.info.configured
+        )
+        coverage_complete = coverage["eligible_count"] == coverage["indexed_count"]
+        if profile["status"] == "ready" and (
+            not provider_matches or not configured or not coverage_complete
+        ):
+            profile = {**profile, "status": "degraded"}
+        return {
+            "profile": profile,
+            "coverage": {
+                **coverage,
+                "complete": coverage_complete,
+            },
+            "provider": {
+                "configured": configured,
+                "matches": provider_matches,
+            },
+            "schema_fingerprint": self.schema.fingerprint,
+        }
+
+    def embedding_rebuild(
+        self, profile_id: str, *, reset: bool = False
+    ) -> dict[str, Any]:
+        profile = self.memory_store.get_embedding_profile(profile_id)
+        try:
+            provider = self._require_matching_provider(profile)
+        except EmbeddingProviderError as exc:
+            self.memory_store.set_embedding_profile_status(
+                profile_id, "degraded", str(exc)
+            )
+            return self.embedding_profile_status(profile_id)
+        if not provider.info.configured:
+            self.memory_store.set_embedding_profile_status(
+                profile_id, "degraded", "embedding provider is not configured"
+            )
+            return self.embedding_profile_status(profile_id)
+        if reset:
+            self.memory_store.clear_embedding_records(profile_id)
+        documents = self.memory_store.embedding_documents(profile_id)
+        self.memory_store.set_embedding_profile_status(profile_id, "building", None)
+        try:
+            records: list[EmbeddingRecord] = []
+            for start in range(0, len(documents), 64):
+                group = documents[start : start + 64]
+                texts = [preprocess_text(str(item["content"])) for item in group]
+                batch = provider.embed(texts)
+                if batch.response_model != str(profile["model"]):
+                    raise EmbeddingProviderError(
+                        "embedding API response model does not match the profile"
+                    )
+                for document, vector in zip(group, batch.vectors, strict=True):
+                    records.append(
+                        EmbeddingRecord(
+                            id=stable_uuid(
+                                "embedding-record",
+                                document["id"],
+                                profile_id,
+                                document["content_hash"],
+                            ),
+                            search_document_id=str(document["id"]),
+                            profile_id=profile_id,
+                            input_content_hash=str(document["content_hash"]),
+                            vector_blob=encode_vector(
+                                vector, int(profile["dimensions"])
+                            ),
+                            dimensions=int(profile["dimensions"]),
+                            response_model=batch.response_model,
+                            created_at=_now(),
+                        )
+                    )
+            self.memory_store.put_embedding_records(records)
+            coverage = self.memory_store.embedding_coverage(profile_id)
+            status = (
+                "ready"
+                if coverage["eligible_count"] == coverage["indexed_count"]
+                else "degraded"
+            )
+            self.memory_store.set_embedding_profile_status(profile_id, status, None)
+        except (EmbeddingProviderError, ValueError) as exc:
+            self.memory_store.set_embedding_profile_status(
+                profile_id, "degraded", str(exc)
+            )
+        return self.embedding_profile_status(profile_id)
+
+    def search_semantic(
+        self,
+        profile_id: str,
+        query: str,
+        *,
+        namespace: str | None = None,
+        node_type: str | None = None,
+        privacy_ceiling: str | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        if not 1 <= limit <= MAX_SEARCH_RESULTS:
+            raise ValueError(f"limit must be between 1 and {MAX_SEARCH_RESULTS}")
+        profile = self.memory_store.get_embedding_profile(profile_id)
+        effective_ceiling = privacy_ceiling or str(profile["privacy_ceiling"])
+        if effective_ceiling not in PRIVACY_ORDER:
+            raise ValueError("unknown privacy ceiling")
+        if (
+            PRIVACY_ORDER[effective_ceiling]
+            > PRIVACY_ORDER[str(profile["privacy_ceiling"])]
+        ):
+            raise ValueError("query privacy ceiling exceeds the profile policy")
+        candidates = self.memory_store.embedding_candidates(
+            profile_id,
+            namespace=namespace,
+            node_type=node_type,
+            privacy_ceiling=effective_ceiling,
+        )
+        coverage = self.memory_store.embedding_coverage(profile_id)
+        base = {
+            "coverage": {
+                **coverage,
+                "complete": coverage["eligible_count"] == coverage["indexed_count"],
+            },
+            "profile_id": profile_id,
+            "query": "search-semantic",
+            "schema_fingerprint": self.schema.fingerprint,
+            "text": query,
+        }
+        if not candidates:
+            status = (
+                "ready"
+                if coverage["eligible_count"] == coverage["indexed_count"]
+                else "degraded"
+            )
+            return {**base, "results": [], "status": status}
+        try:
+            provider = self._require_matching_provider(profile)
+        except EmbeddingProviderError:
+            return {**base, "results": [], "status": "degraded"}
+        if not provider.info.configured:
+            return {**base, "results": [], "status": "degraded"}
+        try:
+            batch = provider.embed([preprocess_text(query)])
+            if batch.response_model != str(profile["model"]):
+                raise EmbeddingProviderError(
+                    "embedding API response model does not match the profile"
+                )
+            query_vector = decode_vector(
+                encode_vector(batch.vectors[0], int(profile["dimensions"])),
+                int(profile["dimensions"]),
+            )
+        except (EmbeddingProviderError, ValueError):
+            return {**base, "results": [], "status": "degraded"}
+        ranked = []
+        for candidate in candidates:
+            vector = decode_vector(
+                bytes(candidate["vector_blob"]), int(profile["dimensions"])
+            )
+            ranked.append(
+                (
+                    cosine_similarity(query_vector, vector),
+                    str(candidate["search_document_id"]),
+                    candidate,
+                )
+            )
+        ranked.sort(key=lambda item: (-item[0], item[1]))
+        results = []
+        for score, _, candidate in ranked[:limit]:
+            explanation = self.explain(str(candidate["target_id"]))
+            results.append(
+                {
+                    "attribute_name": str(candidate["attribute_name"]),
+                    "content": str(candidate["content"]),
+                    "content_hash": str(candidate["content_hash"]),
+                    "document_id": str(candidate["search_document_id"]),
+                    "fact": explanation["fact"],
+                    "namespace": str(candidate["namespace"]),
+                    "node_type": str(candidate["node_type"]),
+                    "privacy_class": str(candidate["privacy_class"]),
+                    "provenance": {
+                        "assertions": explanation["assertions"],
+                        "node": explanation["node"],
+                    },
+                    "score": score,
+                    "target_id": str(candidate["target_id"]),
+                    "target_kind": str(candidate["target_kind"]),
+                }
+            )
+        status = (
+            "ready"
+            if coverage["eligible_count"] == coverage["indexed_count"]
+            else "degraded"
+        )
+        return {**base, "results": results, "status": status}
+
+    def _require_embedding_provider(self) -> EmbeddingProvider:
+        if self.embedding_provider is None:
+            raise EmbeddingProviderError("embedding provider is not configured")
+        return self.embedding_provider
+
+    def _provider_matches_profile(self, profile: dict[str, Any]) -> bool:
+        if self.embedding_provider is None:
+            return False
+        info = self.embedding_provider.info
+        return (
+            info.provider == profile["provider"]
+            and info.model == profile["model"]
+            and info.dimensions == profile["dimensions"]
+            and info.preprocessing_version == profile["preprocessing_version"]
+            and PRIVACY_ORDER[info.privacy_ceiling]
+            >= PRIVACY_ORDER[str(profile["privacy_ceiling"])]
+        )
+
+    def _require_matching_provider(self, profile: dict[str, Any]) -> EmbeddingProvider:
+        provider = self._require_embedding_provider()
+        if not self._provider_matches_profile(profile):
+            raise EmbeddingProviderError(
+                "configured embedding provider does not match the profile"
+            )
+        return provider
 
     def explain(self, attribute_id: str) -> dict[str, Any]:
         explanation = self.memory_store.explain_attribute(attribute_id)
@@ -600,6 +883,8 @@ class MemoryApplication:
                 "query_current_metric": {"enabled": True, "mutating": False},
                 "query_current_slots": {"enabled": True, "mutating": False},
                 "search_text": {"enabled": True, "mutating": False},
+                "search_semantic": {"enabled": True, "mutating": False},
+                "embedding_rebuild": {"enabled": True, "mutating": True},
                 "traverse_relations": {"enabled": True, "mutating": False},
                 "retention": {"enabled": True, "mutating": True},
                 "sanitized_export": {"enabled": True, "mutating": False},
@@ -608,7 +893,19 @@ class MemoryApplication:
             "record_types": list(self.schema.document["record_types"]),
             "retrieval": {
                 "full_text": {"enabled": True, "engine": "sqlite-fts5"},
-                "vector": {"enabled": False, "mode": "disabled"},
+                "vector": {
+                    "enabled": True,
+                    "mode": "exact-application-cosine",
+                    "provider": (
+                        None
+                        if self.embedding_provider is None
+                        else self.embedding_provider.info.provider
+                    ),
+                    "configured": bool(
+                        self.embedding_provider is not None
+                        and self.embedding_provider.info.configured
+                    ),
+                },
             },
             "saved_queries": sorted(self.schema.document["saved_queries"]),
             "storage": {
