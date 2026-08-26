@@ -51,11 +51,17 @@ definitions.
 | `memory_explain` | No | Bounded provenance explanation |
 | `memory_explain_relation` | No | Relation assertion provenance |
 | `memory_explain_metric` | No | Metric run and evidence provenance |
+| `memory_evidence_status` | No | Current provider and effective privacy state |
+| `memory_evidence_read` | No | Bounded base64 evidence byte range |
+| `memory_evidence_verify` | Yes | Appended object and fragment verification |
+| `memory_evidence_audit` | Yes | Bounded verification audit and history |
 
 Ingestion tools take a `batch_path` on the server host. Apply performs the same
 schema-fingerprint validation as the CLI. Expected failures are returned as MCP
 tool errors with the current fingerprint and schema refresh URI when relevant.
 
-The MCP surface does not expose raw evidence reads, arbitrary SQL, migrations,
-network transports, or retention operations. Explanations return evidence
-metadata and current verification status, never evidence bytes.
+The only raw evidence surface is the explicit bounded read tool; ordinary
+queries and explanations never return evidence bytes. The MCP surface does not
+expose arbitrary SQL, migrations, snapshots, retirement, or network
+transports. Snapshot and retention workflows remain CLI operations because
+they create files or retire exact planned local copies.

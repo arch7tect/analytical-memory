@@ -24,7 +24,23 @@ class EvidenceStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def put_bytes(self, data: bytes, expected: EvidenceObjectRecord) -> EvidenceStatus:
+        raise NotImplementedError
+
+    @abstractmethod
     def stat(self, digest: str) -> EvidenceStatus:
+        raise NotImplementedError
+
+    @abstractmethod
+    def read(self, digest: str, offset: int, limit: int) -> bytes:
+        raise NotImplementedError
+
+    @abstractmethod
+    def copy_verified(self, digest: str, destination: Path) -> int:
+        raise NotImplementedError
+
+    @abstractmethod
+    def retire(self, digest: str) -> bool:
         raise NotImplementedError
 
     @abstractmethod
@@ -94,6 +110,83 @@ class MemoryStore(ABC):
 
     @abstractmethod
     def explain_metric(self, metric_id: str) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def evidence_catalog(
+        self, limit: int, digest: str | None = None
+    ) -> tuple[list[dict[str, Any]], bool]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def record_evidence_check(
+        self,
+        digest: str,
+        *,
+        availability: str,
+        verification: str,
+        byte_size: int | None,
+        checked_at: str,
+        method: str,
+    ) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def record_fragment_check(
+        self,
+        fragment_id: str,
+        *,
+        digest: str,
+        outcome: str,
+        byte_size: int | None,
+        checked_at: str,
+        method: str,
+    ) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def record_artifact_check(
+        self,
+        target_kind: str,
+        target_id: str,
+        *,
+        digest: str,
+        outcome: str,
+        byte_size: int | None,
+        checked_at: str,
+        method: str,
+    ) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def retention_report(self, as_of: str) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def record_retirement(
+        self, digest: str, *, plan_id: str, reason: str, retired_at: str
+    ) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def record_retirements(
+        self,
+        digests: list[str],
+        *,
+        plan_id: str,
+        reason: str,
+        retired_at: str,
+    ) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def snapshot_records(self) -> dict[str, list[dict[str, Any]]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def import_snapshot_records(
+        self, records: dict[str, list[dict[str, Any]]]
+    ) -> dict[str, int]:
         raise NotImplementedError
 
     @abstractmethod

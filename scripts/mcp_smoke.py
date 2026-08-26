@@ -60,6 +60,16 @@ async def run_smoke() -> dict[str, Any]:
                     "memory_ingest_apply", {"batch_path": str(BATCH)}
                 )
             )
+            digest = str(applied["result"]["evidence_digest"])
+            evidence_status = structured(
+                await client.call_tool("memory_evidence_status", {"digest": digest})
+            )
+            evidence_read = structured(
+                await client.call_tool(
+                    "memory_evidence_read",
+                    {"digest": digest, "offset": 0, "limit": 8},
+                )
+            )
             current = structured(
                 await client.call_tool("memory_query_current_facts", {})
             )
@@ -82,6 +92,10 @@ async def run_smoke() -> dict[str, Any]:
             raise RuntimeError("MCP preview unexpectedly wrote state")
         if verification != "verified":
             raise RuntimeError("MCP explanation did not verify evidence")
+        if evidence_status["verification"] != "verified":
+            raise RuntimeError("MCP evidence status did not verify the object")
+        if evidence_read["byte_count"] != 8:
+            raise RuntimeError("MCP bounded evidence read returned the wrong size")
         if "NodeAttribute" not in schema["record_types"]:
             raise RuntimeError("schema discovery omitted implemented record types")
         if "current-facts" not in capabilities["saved_queries"]:

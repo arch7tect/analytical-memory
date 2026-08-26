@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class APIModel(BaseModel):
@@ -13,6 +13,7 @@ class IngestionResult(APIModel):
     attribute_ids: list[str]
     batch_id: str
     evidence_digest: str
+    fragment_id: str
     metric_ids: list[str]
     node_ids: list[str]
     relation_ids: list[str]
@@ -25,7 +26,11 @@ class PreviewCounts(APIModel):
     assertions: int
     attributes: int
     bindings: int
+    derivations: int
+    evidence_acquisitions: int
+    evidence_locations: int
     evidence_objects: int
+    evidence_verifications: int
     metrics: int
     nodes: int
     relations: int
@@ -90,13 +95,80 @@ class WholeObjectLocator(APIModel):
     kind: Literal["whole_object"]
 
 
+class StructuredLocator(APIModel):
+    input_format: Literal["canonical-json"]
+    kind: Literal["structured"]
+    pointer: str
+
+
+class RecordKeyLocator(APIModel):
+    input_format: Literal["canonical-jsonl"]
+    key_field: str
+    key_value: Any
+    kind: Literal["record_key"]
+
+
+class ByteRangeLocator(APIModel):
+    end: int
+    kind: Literal["byte_range"]
+    start: int
+
+
+class LineRangeLocator(APIModel):
+    end_line: int
+    kind: Literal["line_range"]
+    start_line: int
+
+
+class TimeIntervalLocator(APIModel):
+    end: str
+    input_format: Literal["canonical-jsonl"]
+    kind: Literal["time_interval"]
+    start: str
+    timestamp_field: str
+
+
+class SampleIntervalLocator(APIModel):
+    bit_width: int
+    byte_order: str
+    channels: int
+    end_sample: int
+    interleaved: bool
+    kind: Literal["sample_interval"]
+    sample_format: str
+    sample_rate: int
+    start_sample: int
+
+
+EvidenceLocator = Annotated[
+    WholeObjectLocator
+    | StructuredLocator
+    | RecordKeyLocator
+    | ByteRangeLocator
+    | LineRangeLocator
+    | TimeIntervalLocator
+    | SampleIntervalLocator,
+    Field(discriminator="kind"),
+]
+
+LocatorKind = Literal[
+    "whole_object",
+    "structured",
+    "record_key",
+    "byte_range",
+    "line_range",
+    "time_interval",
+    "sample_interval",
+]
+
+
 class EvidenceBindingSummary(APIModel):
     binding_id: str
     extractor: ExtractorSummary
     fragment: EvidenceFragmentSummary
     fragment_id: str
-    locator: WholeObjectLocator
-    locator_kind: Literal["whole_object"]
+    locator: EvidenceLocator
+    locator_kind: LocatorKind
     object: EvidenceObjectSummary
     role: Literal["supports", "contradicts", "contextualizes"]
     status: EvidenceReadStatus
@@ -286,3 +358,44 @@ class SearchResponse(APIModel):
     results: list[SearchMatch]
     coverage: SearchCoverage
     schema_fingerprint: str
+
+
+class EvidenceStatusResponse(APIModel):
+    availability: Literal["present", "missing"]
+    byte_size: int | None
+    digest: str
+    effective_privacy: Literal["public", "private", "restricted", "forbidden"]
+    retired: bool
+    verification: Literal["verified", "corrupt", "unverified"]
+
+
+class EvidenceReadResponse(APIModel):
+    byte_count: int
+    data_base64: str
+    digest: str
+    eof: bool
+    limit: int
+    offset: int
+
+
+class FragmentVerificationResult(APIModel):
+    expected_digest: str
+    fragment_id: str
+    outcome: Literal["verified", "corrupt"]
+    reproduced_digest: str
+
+
+class EvidenceVerifyResponse(APIModel):
+    availability: Literal["present", "missing"]
+    byte_size: int | None
+    checked_at: str
+    digest: str
+    fragments: list[FragmentVerificationResult]
+    verification: Literal["verified", "corrupt", "unverified"]
+
+
+class EvidenceAuditResponse(APIModel):
+    checked_at: str
+    complete: bool
+    results: list[EvidenceVerifyResponse]
+    truncated: bool

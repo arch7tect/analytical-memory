@@ -36,8 +36,8 @@ def test_capabilities_are_discoverable_and_path_free(
     assert "NodeAttribute" in before["record_types"]
     assert before["limits"]["ingestion_batch_bytes"] == 1_048_576
     assert before["evidence_store"]["raw_read"] == {
-        "enabled": False,
-        "max_bytes": 0,
+        "enabled": True,
+        "max_bytes": 1_048_576,
     }
     assert str(fixture.database) not in canonical_json(before)
     assert str(fixture.evidence_store.root) not in canonical_json(before)

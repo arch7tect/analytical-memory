@@ -44,8 +44,13 @@ def _all_table_counts(database: Path) -> dict[str, int]:
         "node_attribute",
         "assertion",
         "evidence_object",
+        "evidence_acquisition",
+        "evidence_derivation",
         "evidence_fragment",
         "evidence_binding",
+        "evidence_location",
+        "evidence_verification",
+        "evidence_retirement",
         "relation",
         "metric",
         "search_document",
@@ -153,6 +158,74 @@ class FailingMemoryStore(MemoryStore):
         raise AssertionError("not used")
 
     def explain_metric(self, metric_id: str) -> dict[str, Any]:
+        raise AssertionError("not used")
+
+    def evidence_catalog(
+        self, limit: int, digest: str | None = None
+    ) -> tuple[list[dict[str, Any]], bool]:
+        return [], False
+
+    def record_evidence_check(
+        self,
+        digest: str,
+        *,
+        availability: str,
+        verification: str,
+        byte_size: int | None,
+        checked_at: str,
+        method: str,
+    ) -> dict[str, Any]:
+        raise AssertionError("not used")
+
+    def record_fragment_check(
+        self,
+        fragment_id: str,
+        *,
+        digest: str,
+        outcome: str,
+        byte_size: int | None,
+        checked_at: str,
+        method: str,
+    ) -> None:
+        raise AssertionError("not used")
+
+    def record_artifact_check(
+        self,
+        target_kind: str,
+        target_id: str,
+        *,
+        digest: str,
+        outcome: str,
+        byte_size: int | None,
+        checked_at: str,
+        method: str,
+    ) -> None:
+        raise AssertionError("not used")
+
+    def retention_report(self, as_of: str) -> list[dict[str, Any]]:
+        return []
+
+    def record_retirement(
+        self, digest: str, *, plan_id: str, reason: str, retired_at: str
+    ) -> None:
+        raise AssertionError("not used")
+
+    def record_retirements(
+        self,
+        digests: list[str],
+        *,
+        plan_id: str,
+        reason: str,
+        retired_at: str,
+    ) -> None:
+        raise AssertionError("not used")
+
+    def snapshot_records(self) -> dict[str, list[dict[str, Any]]]:
+        return {}
+
+    def import_snapshot_records(
+        self, records: dict[str, list[dict[str, Any]]]
+    ) -> dict[str, int]:
         raise AssertionError("not used")
 
     def integrity(self) -> dict[str, Any]:

@@ -7,6 +7,10 @@ from analytical_memory.api_models import (
     CurrentFactsResponse,
     CurrentMetricResponse,
     CurrentSlotsResponse,
+    EvidenceAuditResponse,
+    EvidenceReadResponse,
+    EvidenceStatusResponse,
+    EvidenceVerifyResponse,
     ExplanationResponse,
     MetricExplanationResponse,
     PreviewResponse,
@@ -79,4 +83,26 @@ class MemoryAPI:
     def explain_metric(self, metric_id: str) -> MetricExplanationResponse:
         return MetricExplanationResponse.model_validate(
             self.application.explain_metric(metric_id)
+        )
+
+    def evidence_status(self, digest: str) -> EvidenceStatusResponse:
+        return EvidenceStatusResponse.model_validate(
+            self.application.evidence_status(digest)
+        )
+
+    def evidence_read(
+        self, digest: str, *, offset: int = 0, limit: int = 65536
+    ) -> EvidenceReadResponse:
+        return EvidenceReadResponse.model_validate(
+            self.application.evidence_read(digest, offset=offset, limit=limit)
+        )
+
+    def evidence_verify(self, digest: str) -> EvidenceVerifyResponse:
+        return EvidenceVerifyResponse.model_validate(
+            self.application.evidence_verify(digest)
+        )
+
+    def evidence_audit(self, limit: int = 1000) -> EvidenceAuditResponse:
+        return EvidenceAuditResponse.model_validate(
+            self.application.evidence_audit(limit=limit)
         )

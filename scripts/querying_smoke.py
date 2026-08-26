@@ -64,7 +64,7 @@ def main() -> None:
         }
         if result != {
             "metric_value": 3,
-            "migration_versions": [1, 2],
+            "migration_versions": [1, 2, 3],
             "relation_evidence": "verified",
             "metric_evidence": "verified",
             "schema_compiled": True,

@@ -19,8 +19,16 @@
   },
   "fact_states": ["supported", "contested", "contradicted", "unasserted"],
   "ingestion_batch": {
-    "evidence_locator_kinds": ["whole_object"],
-    "format_version": "2",
+    "evidence_locator_kinds": [
+      "whole_object",
+      "structured",
+      "record_key",
+      "byte_range",
+      "line_range",
+      "time_interval",
+      "sample_interval"
+    ],
+    "format_version": "3",
     "optional": ["relations", "metrics"],
     "required": [
       "schema_fingerprint",
@@ -32,7 +40,7 @@
       "nodes"
     ]
   },
-  "ontology_version": "0.2.0",
+  "ontology_version": "0.3.0",
   "privacy_classes": ["public", "private", "restricted", "forbidden"],
   "record_types": [
     "Source",
@@ -43,8 +51,13 @@
     "Assertion",
     "Metric",
     "EvidenceObject",
+    "EvidenceAcquisition",
+    "EvidenceDerivation",
+    "EvidenceLocation",
     "EvidenceFragment",
     "EvidenceBinding",
+    "EvidenceVerification",
+    "EvidenceRetirement",
     "SearchDocument",
     "IngestionBatch",
     "SchemaMigration"
@@ -53,5 +66,5 @@
     "directions": ["outbound", "inbound", "both"],
     "properties_allowed": false
   },
-  "schema_document_version": "2"
+  "schema_document_version": "3"
 }

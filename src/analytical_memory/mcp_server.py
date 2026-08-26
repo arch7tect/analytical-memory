@@ -12,6 +12,10 @@ from analytical_memory.api_models import (
     CurrentFactsResponse,
     CurrentMetricResponse,
     CurrentSlotsResponse,
+    EvidenceAuditResponse,
+    EvidenceReadResponse,
+    EvidenceStatusResponse,
+    EvidenceVerifyResponse,
     ExplanationResponse,
     MetricExplanationResponse,
     PreviewResponse,
@@ -32,7 +36,8 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
         version="0.1.0",
         instructions=(
             "Inspect schema and capabilities resources before calling typed tools. "
-            "Raw evidence reads and arbitrary database operations are not exposed."
+            "Raw evidence is available only through the explicit bounded read tool; "
+            "arbitrary database operations are not exposed."
         ),
     )
 
@@ -271,6 +276,78 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
     def explain_metric(metric_id: str) -> MetricExplanationResponse:
         try:
             return api.explain_metric(metric_id)
+        except (MemoryErrorBase, OSError, ValueError) as exc:
+            raise ToolError(str(exc)) from exc
+
+    @server.tool(
+        name="memory_evidence_status",
+        description="Return current provider state for one canonical evidence digest.",
+        annotations=ToolAnnotations(
+            read_only_hint=True,
+            destructive_hint=False,
+            idempotent_hint=True,
+            open_world_hint=False,
+        ),
+        structured_output=True,
+    )
+    def evidence_status(digest: str) -> EvidenceStatusResponse:
+        try:
+            return api.evidence_status(digest)
+        except (MemoryErrorBase, OSError, ValueError) as exc:
+            raise ToolError(str(exc)) from exc
+
+    @server.tool(
+        name="memory_evidence_read",
+        description="Read one bounded byte range as base64 without exposing a path.",
+        annotations=ToolAnnotations(
+            read_only_hint=True,
+            destructive_hint=False,
+            idempotent_hint=True,
+            open_world_hint=False,
+        ),
+        structured_output=True,
+    )
+    def evidence_read(
+        digest: str, offset: int = 0, limit: int = 65536
+    ) -> EvidenceReadResponse:
+        try:
+            return api.evidence_read(digest, offset=offset, limit=limit)
+        except (MemoryErrorBase, OSError, ValueError) as exc:
+            raise ToolError(str(exc)) from exc
+
+    @server.tool(
+        name="memory_evidence_verify",
+        description=(
+            "Verify one object and its deterministic fragments and append history."
+        ),
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=False,
+            idempotent_hint=False,
+            open_world_hint=False,
+        ),
+        structured_output=True,
+    )
+    def evidence_verify(digest: str) -> EvidenceVerifyResponse:
+        try:
+            return api.evidence_verify(digest)
+        except (MemoryErrorBase, OSError, ValueError) as exc:
+            raise ToolError(str(exc)) from exc
+
+    @server.tool(
+        name="memory_evidence_audit",
+        description="Boundedly verify canonical evidence and append audit history.",
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=False,
+            idempotent_hint=False,
+            open_world_hint=False,
+        ),
+        structured_output=True,
+    )
+    def evidence_audit(limit: int = 1000) -> EvidenceAuditResponse:
+        try:
+            return api.evidence_audit(limit)
         except (MemoryErrorBase, OSError, ValueError) as exc:
             raise ToolError(str(exc)) from exc
 

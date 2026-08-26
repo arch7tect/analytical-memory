@@ -29,6 +29,18 @@ def _cli_json(capsys: Any, arguments: list[str]) -> dict[str, Any]:
     return value
 
 
+def _without_checked_at(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _without_checked_at(item)
+            for key, item in value.items()
+            if key != "checked_at"
+        }
+    if isinstance(value, list):
+        return [_without_checked_at(item) for item in value]
+    return value
+
+
 @pytest.mark.anyio
 async def test_discovery_and_tools_match_cli_contracts(
     application_fixture: ApplicationFixture,
@@ -76,6 +88,10 @@ async def test_discovery_and_tools_match_cli_contracts(
         tools = await client.list_tools()
         tools_by_name = {tool.name: tool for tool in tools.tools}
         assert set(tools_by_name) == {
+            "memory_evidence_audit",
+            "memory_evidence_read",
+            "memory_evidence_status",
+            "memory_evidence_verify",
             "memory_explain",
             "memory_explain_metric",
             "memory_explain_relation",
@@ -116,6 +132,26 @@ async def test_discovery_and_tools_match_cli_contracts(
         mcp_explain = _tool_json(
             await client.call_tool("memory_explain", {"attribute_id": attribute_id})
         )
+        evidence_digest = str(mcp_apply["result"]["evidence_digest"])
+        mcp_evidence_status = _tool_json(
+            await client.call_tool(
+                "memory_evidence_status", {"digest": evidence_digest}
+            )
+        )
+        mcp_evidence_read = _tool_json(
+            await client.call_tool(
+                "memory_evidence_read",
+                {"digest": evidence_digest, "offset": 1, "limit": 8},
+            )
+        )
+        mcp_evidence_verify = _tool_json(
+            await client.call_tool(
+                "memory_evidence_verify", {"digest": evidence_digest}
+            )
+        )
+        mcp_evidence_audit = _tool_json(
+            await client.call_tool("memory_evidence_audit", {"limit": 10})
+        )
 
     cli_database = tmp_path / "cli-memory.db"
     cli_evidence = tmp_path / "cli-evidence"
@@ -132,10 +168,40 @@ async def test_discovery_and_tools_match_cli_contracts(
     )
     cli_query = _cli_json(capsys, [*cli_shared, "query", "current-facts"])
     cli_explain = _cli_json(capsys, [*cli_shared, "explain", attribute_id])
+    cli_evidence_status = _cli_json(
+        capsys, [*cli_shared, "evidence", "status", evidence_digest]
+    )
+    cli_evidence_read = _cli_json(
+        capsys,
+        [
+            *cli_shared,
+            "evidence",
+            "read",
+            evidence_digest,
+            "--offset",
+            "1",
+            "--limit",
+            "8",
+        ],
+    )
+    cli_evidence_verify = _cli_json(
+        capsys, [*cli_shared, "evidence", "verify", evidence_digest]
+    )
+    cli_evidence_audit = _cli_json(
+        capsys, [*cli_shared, "evidence", "audit", "--limit", "10"]
+    )
 
     assert mcp_apply == cli_apply
     assert mcp_query == cli_query
     assert mcp_explain == cli_explain
+    assert mcp_evidence_status == cli_evidence_status
+    assert mcp_evidence_read == cli_evidence_read
+    assert _without_checked_at(mcp_evidence_verify) == _without_checked_at(
+        cli_evidence_verify
+    )
+    assert _without_checked_at(mcp_evidence_audit) == _without_checked_at(
+        cli_evidence_audit
+    )
 
 
 @pytest.mark.anyio
@@ -185,7 +251,7 @@ async def test_local_stdio_server_is_discoverable(
             "memory_ingest_preview", {"batch_path": str(fixture.batch_path)}
         )
 
-    assert len(tools.tools) == 10
+    assert len(tools.tools) == 14
     assert len(resources.resources) == 3
     assert _tool_json(preview)["writes"] is False
 

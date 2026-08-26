@@ -70,8 +70,8 @@ def test_version_one_database_is_upgraded_and_backfilled(tmp_path: Path) -> None
     store.initialize()
     integrity = store.integrity()
 
-    assert integrity["schema_version"] == 2
-    assert [item["version"] for item in integrity["migrations"]] == [1, 2]
+    assert integrity["schema_version"] == 3
+    assert [item["version"] for item in integrity["migrations"]] == [1, 2, 3]
     assert integrity["migrations"][0]["checksum"] == (
         "328ec2c72de2af17c4aeb0fa072302148497220d8051edb50c666a1d6ef1ef94"
     )
@@ -151,3 +151,44 @@ def test_failed_migration_rolls_back_its_partial_schema(tmp_path: Path) -> None:
         ).fetchone()
     assert version == 1
     assert partial is None
+
+
+def test_failed_evidence_migration_preserves_version_two_state(tmp_path: Path) -> None:
+    database = tmp_path / "version-two.db"
+    source = REPOSITORY_ROOT / "migrations" / "sqlite"
+    migrations = tmp_path / "migrations"
+    shutil.copytree(source, migrations)
+    with sqlite3.connect(database) as connection:
+        connection.executescript(
+            (source / "001_initial.sql").read_text(encoding="utf-8")
+        )
+        connection.execute("PRAGMA foreign_keys = OFF")
+        connection.executescript(
+            (source / "002_useful_querying.sql").read_text(encoding="utf-8")
+        )
+    third = migrations / "003_evidence_lifecycle.sql"
+    third.write_text(
+        third.read_text(encoding="utf-8")
+        + "\nCREATE TABLE evidence_partial_marker (id INTEGER);\n"
+        + "SELECT missing_function();\n",
+        encoding="utf-8",
+    )
+    manifest_path = migrations / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["migrations"][2]["checksum"] = sha256_bytes(third.read_bytes())
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(StoreNotInitializedError, match="migration failed"):
+        SqliteMemoryStore(database, migrations).initialize()
+
+    with sqlite3.connect(database) as connection:
+        version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+    assert version == 2
+    assert "evidence_acquisition" not in tables
+    assert "evidence_partial_marker" not in tables

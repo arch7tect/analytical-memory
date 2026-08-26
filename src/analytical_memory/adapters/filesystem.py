@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import os
+import shutil
 import tempfile
 from contextlib import suppress
 from pathlib import Path
@@ -11,6 +13,7 @@ from analytical_memory.domain import (
     EvidenceStatus,
     EvidenceStoreStatus,
 )
+from analytical_memory.limits import MAX_EVIDENCE_INGEST_BYTES
 from analytical_memory.ports import EvidenceStore
 
 
@@ -30,8 +33,15 @@ class FileEvidenceStore(EvidenceStore):
         return self.root / "objects" / "sha256" / digest[:2] / digest
 
     def put(self, source: Path, expected: EvidenceObjectRecord) -> EvidenceStatus:
-        self.initialize()
+        if source.stat().st_size > MAX_EVIDENCE_INGEST_BYTES:
+            raise ValueError("evidence object exceeds the local ingest limit")
         data = source.read_bytes()
+        return self.put_bytes(data, expected)
+
+    def put_bytes(self, data: bytes, expected: EvidenceObjectRecord) -> EvidenceStatus:
+        if len(data) > MAX_EVIDENCE_INGEST_BYTES:
+            raise ValueError("evidence object exceeds the local ingest limit")
+        self.initialize()
         digest = sha256_bytes(data)
         if digest != expected.digest or len(data) != expected.byte_size:
             raise ValueError("evidence changed after planning")
@@ -57,6 +67,36 @@ class FileEvidenceStore(EvidenceStore):
             temporary_path.unlink(missing_ok=True)
         return self.stat(digest)
 
+    def read(self, digest: str, offset: int, limit: int) -> bytes:
+        if offset < 0 or limit < 1:
+            raise ValueError("offset must be >= 0 and limit must be >= 1")
+        path = self.object_path(digest)
+        if not path.is_file():
+            raise FileNotFoundError(f"evidence object is missing: {digest}")
+        with path.open("rb") as stream:
+            stream.seek(offset)
+            return stream.read(limit)
+
+    def copy_verified(self, digest: str, destination: Path) -> int:
+        status = self.stat(digest)
+        if status.verification != "verified" or status.byte_size is None:
+            raise ValueError(f"evidence object is not verified: {digest}")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists():
+            raise FileExistsError(destination)
+        shutil.copyfile(self.object_path(digest), destination)
+        os.chmod(destination, 0o600)
+        return status.byte_size
+
+    def retire(self, digest: str) -> bool:
+        path = self.object_path(digest)
+        if not path.exists():
+            return False
+        if not path.is_file():
+            raise ValueError("evidence object path is not a regular file")
+        path.unlink()
+        return True
+
     def stat(self, digest: str) -> EvidenceStatus:
         path = self.object_path(digest)
         if not path.is_file():
@@ -66,13 +106,18 @@ class FileEvidenceStore(EvidenceStore):
                 digest=digest,
                 byte_size=None,
             )
-        data = path.read_bytes()
-        actual = sha256_bytes(data)
+        hasher = hashlib.sha256()
+        byte_size = 0
+        with path.open("rb") as stream:
+            while chunk := stream.read(1_048_576):
+                hasher.update(chunk)
+                byte_size += len(chunk)
+        actual = hasher.hexdigest()
         return EvidenceStatus(
             availability="present",
             verification="verified" if actual == digest else "corrupt",
             digest=digest,
-            byte_size=len(data),
+            byte_size=byte_size,
         )
 
     def status(self) -> EvidenceStoreStatus:

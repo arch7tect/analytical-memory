@@ -34,6 +34,7 @@ Run the complete synthetic smoke path without retaining state:
 uv run python scripts/smoke.py
 uv run python scripts/mcp_smoke.py
 uv run python scripts/querying_smoke.py
+uv run python scripts/portability_smoke.py
 ```
 
 The MCP smoke path launches the `memory-mcp` stdio server as a subprocess,
@@ -44,6 +45,10 @@ for resources, tools, environment variables, and boundaries.
 The [querying reference](docs/reference/querying.md) covers slot semantics,
 relation traversal, immutable metrics, declared full-text documents, and the
 metadata compiler.
+
+The [evidence portability reference](docs/reference/evidence-portability.md)
+covers deterministic fragments, bounded reads, verification history, retention
+plans, private snapshots, restore, and separate sanitized exports.
 
 ## Development
 

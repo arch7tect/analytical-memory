@@ -12,16 +12,39 @@ from analytical_memory.canonical import (
     canonical_json,
     canonical_text_key,
     sha256_bytes,
+    stable_uuid,
 )
 from analytical_memory.domain import BatchPlan, MemoryStoreStatus, StoredBatch
 from analytical_memory.errors import (
     BatchValidationError,
     RecordNotFoundError,
+    RetentionBlockedError,
+    SnapshotError,
     StoreNotInitializedError,
 )
 from analytical_memory.limits import MAX_EXPLANATION_ASSERTIONS, MAX_QUERY_RESULTS
 from analytical_memory.migrations import default_migrations_directory, migrate_sqlite
 from analytical_memory.ports import MemoryStore
+
+SNAPSHOT_TABLES = (
+    "ingestion_batch",
+    "source",
+    "analytical_run",
+    "node",
+    "node_attribute",
+    "relation",
+    "assertion",
+    "metric",
+    "evidence_object",
+    "evidence_acquisition",
+    "evidence_derivation",
+    "evidence_fragment",
+    "evidence_binding",
+    "search_document",
+    "evidence_location",
+    "evidence_verification",
+    "evidence_retirement",
+)
 
 
 def _fact_state(supports: int, contradicts: int) -> str:
@@ -284,7 +307,41 @@ class SqliteMemoryStore(MemoryStore):
                     "privacy_class",
                     "recorded_at",
                 ),
-                (plan.evidence.object,),
+                (
+                    plan.evidence.object,
+                    *(item[0] for item in plan.evidence.materialized_objects),
+                ),
+            )
+            self._insert_many(
+                connection,
+                "evidence_acquisition",
+                (
+                    "id",
+                    "evidence_object_id",
+                    "source_id",
+                    "run_id",
+                    "privacy_class",
+                    "retention_required",
+                    "retain_until",
+                    "method",
+                    "review_status",
+                    "recorded_at",
+                ),
+                plan.evidence.acquisitions,
+            )
+            self._insert_many(
+                connection,
+                "evidence_derivation",
+                (
+                    "id",
+                    "input_object_id",
+                    "output_object_id",
+                    "method",
+                    "method_version",
+                    "parameters_json",
+                    "recorded_at",
+                ),
+                plan.evidence.derivations,
             )
             self._insert_many(
                 connection,
@@ -302,6 +359,36 @@ class SqliteMemoryStore(MemoryStore):
                     "recorded_at",
                 ),
                 (plan.evidence.fragment,),
+            )
+            self._insert_many(
+                connection,
+                "evidence_location",
+                (
+                    "id",
+                    "evidence_object_id",
+                    "provider",
+                    "root_id",
+                    "object_key",
+                    "availability",
+                    "verified_at",
+                    "recorded_at",
+                ),
+                plan.evidence.locations,
+            )
+            self._insert_many(
+                connection,
+                "evidence_verification",
+                (
+                    "id",
+                    "target_kind",
+                    "target_id",
+                    "digest",
+                    "outcome",
+                    "byte_size",
+                    "method",
+                    "checked_at",
+                ),
+                plan.evidence.verifications,
             )
             self._insert_many(
                 connection,
@@ -346,6 +433,37 @@ class SqliteMemoryStore(MemoryStore):
                     "INSERT INTO search_document_fts (document_id, content) "
                     "VALUES (?, ?)",
                     (document.id, document.content),
+                )
+            for acquisition in plan.evidence.acquisitions:
+                connection.execute(
+                    """
+                    UPDATE evidence_object
+                    SET privacy_class = CASE
+                        WHEN CASE privacy_class
+                            WHEN 'public' THEN 0 WHEN 'private' THEN 1
+                            WHEN 'restricted' THEN 2 ELSE 3 END
+                           >= CASE ?
+                            WHEN 'public' THEN 0 WHEN 'private' THEN 1
+                            WHEN 'restricted' THEN 2 ELSE 3 END
+                        THEN privacy_class ELSE ? END
+                    WHERE id = ?
+                    """,
+                    (
+                        acquisition.privacy_class,
+                        acquisition.privacy_class,
+                        acquisition.evidence_object_id,
+                    ),
+                )
+                connection.execute(
+                    """
+                    UPDATE evidence_fragment
+                    SET privacy_class = (
+                        SELECT privacy_class FROM evidence_object
+                        WHERE evidence_object.id = evidence_fragment.evidence_object_id
+                    )
+                    WHERE evidence_object_id = ?
+                    """,
+                    (acquisition.evidence_object_id,),
                 )
         return result
 
@@ -1166,6 +1284,385 @@ class SqliteMemoryStore(MemoryStore):
             },
         }
 
+    def evidence_catalog(
+        self, limit: int, digest: str | None = None
+    ) -> tuple[list[dict[str, Any]], bool]:
+        with self._connect() as connection:
+            object_rows = connection.execute(
+                "SELECT * FROM evidence_object WHERE (? IS NULL OR digest = ?) "
+                "ORDER BY digest LIMIT ?",
+                (digest, digest, limit + 1),
+            ).fetchall()
+            selected = object_rows[:limit]
+            catalog: list[dict[str, Any]] = []
+            for row in selected:
+                object_id = str(row["id"])
+                acquisitions = connection.execute(
+                    "SELECT * FROM evidence_acquisition WHERE evidence_object_id = ? "
+                    "ORDER BY recorded_at, id",
+                    (object_id,),
+                ).fetchall()
+                fragments = connection.execute(
+                    "SELECT * FROM evidence_fragment WHERE evidence_object_id = ? "
+                    "ORDER BY recorded_at, id",
+                    (object_id,),
+                ).fetchall()
+                locations = connection.execute(
+                    "SELECT * FROM evidence_location WHERE evidence_object_id = ? "
+                    "ORDER BY provider, root_id, object_key",
+                    (object_id,),
+                ).fetchall()
+                verifications = connection.execute(
+                    "SELECT * FROM evidence_verification "
+                    "WHERE target_kind = 'object' AND target_id = ? "
+                    "ORDER BY checked_at, id",
+                    (object_id,),
+                ).fetchall()
+                retirement = connection.execute(
+                    "SELECT * FROM evidence_retirement WHERE evidence_object_id = ?",
+                    (object_id,),
+                ).fetchone()
+                catalog.append(
+                    {
+                        "object": dict(row),
+                        "acquisitions": [dict(item) for item in acquisitions],
+                        "fragments": [dict(item) for item in fragments],
+                        "locations": [dict(item) for item in locations],
+                        "verifications": [dict(item) for item in verifications],
+                        "retirement": None if retirement is None else dict(retirement),
+                    }
+                )
+        return catalog, len(object_rows) > limit
+
+    def record_evidence_check(
+        self,
+        digest: str,
+        *,
+        availability: str,
+        verification: str,
+        byte_size: int | None,
+        checked_at: str,
+        method: str,
+    ) -> dict[str, Any]:
+        with self._write_connection() as connection:
+            row = connection.execute(
+                "SELECT id FROM evidence_object WHERE digest = ?", (digest,)
+            ).fetchone()
+            if row is None:
+                raise RecordNotFoundError(f"evidence object not found: {digest}")
+            object_id = str(row["id"])
+            location_id = stable_uuid(
+                "evidence_location", object_id, "local-filesystem", "default"
+            )
+            object_key = f"objects/sha256/{digest[:2]}/{digest}"
+            connection.execute(
+                """
+                INSERT INTO evidence_location (
+                    id, evidence_object_id, provider, root_id, object_key,
+                    availability, verified_at, recorded_at
+                ) VALUES (?, ?, 'local-filesystem', 'default', ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    availability = excluded.availability,
+                    verified_at = excluded.verified_at,
+                    recorded_at = excluded.recorded_at
+                """,
+                (
+                    location_id,
+                    object_id,
+                    object_key,
+                    availability,
+                    checked_at,
+                    checked_at,
+                ),
+            )
+            outcome = "missing" if availability == "missing" else verification
+            verification_id = stable_uuid(
+                "evidence_verification", object_id, checked_at, method
+            )
+            connection.execute(
+                """
+                INSERT INTO evidence_verification (
+                    id, target_kind, target_id, digest, outcome, byte_size,
+                    method, checked_at
+                ) VALUES (?, 'object', ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO NOTHING
+                """,
+                (
+                    verification_id,
+                    object_id,
+                    digest,
+                    outcome,
+                    byte_size,
+                    method,
+                    checked_at,
+                ),
+            )
+        return {
+            "availability": availability,
+            "byte_size": byte_size,
+            "digest": digest,
+            "verification": verification,
+        }
+
+    def record_fragment_check(
+        self,
+        fragment_id: str,
+        *,
+        digest: str,
+        outcome: str,
+        byte_size: int | None,
+        checked_at: str,
+        method: str,
+    ) -> None:
+        with self._write_connection() as connection:
+            if (
+                connection.execute(
+                    "SELECT 1 FROM evidence_fragment WHERE id = ?", (fragment_id,)
+                ).fetchone()
+                is None
+            ):
+                raise RecordNotFoundError(f"evidence fragment not found: {fragment_id}")
+            verification_id = stable_uuid(
+                "evidence_verification", fragment_id, checked_at, method
+            )
+            connection.execute(
+                """
+                INSERT INTO evidence_verification (
+                    id, target_kind, target_id, digest, outcome, byte_size,
+                    method, checked_at
+                ) VALUES (?, 'fragment', ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO NOTHING
+                """,
+                (
+                    verification_id,
+                    fragment_id,
+                    digest,
+                    outcome,
+                    byte_size,
+                    method,
+                    checked_at,
+                ),
+            )
+
+    def record_artifact_check(
+        self,
+        target_kind: str,
+        target_id: str,
+        *,
+        digest: str,
+        outcome: str,
+        byte_size: int | None,
+        checked_at: str,
+        method: str,
+    ) -> None:
+        if target_kind not in {"snapshot", "import"}:
+            raise ValueError("artifact verification target must be snapshot or import")
+        verification_id = stable_uuid(
+            "evidence_verification", target_kind, target_id, checked_at, method
+        )
+        with self._write_connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO evidence_verification (
+                    id, target_kind, target_id, digest, outcome, byte_size,
+                    method, checked_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO NOTHING
+                """,
+                (
+                    verification_id,
+                    target_kind,
+                    target_id,
+                    digest,
+                    outcome,
+                    byte_size,
+                    method,
+                    checked_at,
+                ),
+            )
+
+    def retention_report(self, as_of: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                WITH acquisition_summary AS (
+                    SELECT evidence_object_id,
+                           SUM(CASE
+                               WHEN retention_required = 1 OR retain_until > ?
+                               THEN 1 ELSE 0 END
+                           ) AS blocking_acquisitions,
+                           COUNT(*) AS acquisition_count
+                    FROM evidence_acquisition
+                    GROUP BY evidence_object_id
+                )
+                SELECT evidence_object.*,
+                       COALESCE(acquisition_summary.blocking_acquisitions, 0)
+                           AS blocking_acquisitions,
+                       COALESCE(acquisition_summary.acquisition_count, 0)
+                           AS acquisition_count,
+                       evidence_retirement.retired_at,
+                       evidence_location.availability
+                FROM evidence_object
+                LEFT JOIN acquisition_summary
+                    ON acquisition_summary.evidence_object_id = evidence_object.id
+                LEFT JOIN evidence_retirement
+                    ON evidence_retirement.evidence_object_id = evidence_object.id
+                LEFT JOIN evidence_location
+                    ON evidence_location.evidence_object_id = evidence_object.id
+                   AND evidence_location.provider = 'local-filesystem'
+                   AND evidence_location.root_id = 'default'
+                ORDER BY evidence_object.digest
+                """,
+                (as_of,),
+            ).fetchall()
+        return [
+            {
+                "object_id": str(row["id"]),
+                "digest": str(row["digest"]),
+                "byte_size": int(row["byte_size"]),
+                "privacy_class": str(row["privacy_class"]),
+                "availability": str(row["availability"] or "missing"),
+                "acquisition_count": int(row["acquisition_count"]),
+                "blocking_acquisitions": int(row["blocking_acquisitions"]),
+                "retention_state": (
+                    "retired"
+                    if row["retired_at"] is not None
+                    else ("active" if int(row["blocking_acquisitions"]) else "expired")
+                ),
+            }
+            for row in rows
+        ]
+
+    def record_retirement(
+        self, digest: str, *, plan_id: str, reason: str, retired_at: str
+    ) -> None:
+        self.record_retirements(
+            [digest],
+            plan_id=plan_id,
+            reason=reason,
+            retired_at=retired_at,
+        )
+
+    def record_retirements(
+        self,
+        digests: list[str],
+        *,
+        plan_id: str,
+        reason: str,
+        retired_at: str,
+    ) -> None:
+        with self._write_connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            for digest in digests:
+                row = connection.execute(
+                    """
+                    SELECT evidence_object.id,
+                           evidence_retirement.plan_id AS existing_plan_id,
+                           EXISTS (
+                               SELECT 1 FROM evidence_acquisition
+                               WHERE evidence_acquisition.evidence_object_id =
+                                     evidence_object.id
+                                 AND (
+                                     evidence_acquisition.retention_required = 1
+                                     OR evidence_acquisition.retain_until > ?
+                                 )
+                           ) AS blocked
+                    FROM evidence_object
+                    LEFT JOIN evidence_retirement
+                        ON evidence_retirement.evidence_object_id = evidence_object.id
+                    WHERE evidence_object.digest = ?
+                    """,
+                    (retired_at, digest),
+                ).fetchone()
+                if row is None:
+                    raise RecordNotFoundError(f"evidence object not found: {digest}")
+                if bool(row["blocked"]):
+                    raise RetentionBlockedError(
+                        f"active retention requirement blocks retirement: {digest}"
+                    )
+                if row["existing_plan_id"] is not None:
+                    if str(row["existing_plan_id"]) == plan_id:
+                        continue
+                    raise RetentionBlockedError(
+                        f"evidence object is already retired by another plan: {digest}"
+                    )
+                object_id = str(row["id"])
+                connection.execute(
+                    """
+                    INSERT INTO evidence_retirement (
+                        evidence_object_id, digest, plan_id, reason, retired_at
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (object_id, digest, plan_id, reason, retired_at),
+                )
+                connection.execute(
+                    """
+                    UPDATE evidence_location
+                    SET availability = 'missing', verified_at = ?, recorded_at = ?
+                    WHERE evidence_object_id = ?
+                      AND provider = 'local-filesystem' AND root_id = 'default'
+                    """,
+                    (retired_at, retired_at, object_id),
+                )
+
+    def snapshot_records(self) -> dict[str, list[dict[str, Any]]]:
+        with self._connect() as connection:
+            return {
+                table: [
+                    dict(row)
+                    for row in connection.execute(f"SELECT * FROM {table} ORDER BY 1")
+                ]
+                for table in SNAPSHOT_TABLES
+            }
+
+    def import_snapshot_records(
+        self, records: dict[str, list[dict[str, Any]]]
+    ) -> dict[str, int]:
+        if set(records) != set(SNAPSHOT_TABLES):
+            raise SnapshotError("snapshot canonical table set does not match")
+        counts: dict[str, int] = {}
+        with self._write_connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("PRAGMA defer_foreign_keys = ON")
+            nonempty = [
+                table
+                for table in SNAPSHOT_TABLES
+                if int(
+                    connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                )
+            ]
+            if nonempty:
+                raise SnapshotError("snapshot import requires an empty canonical store")
+            for table in SNAPSHOT_TABLES:
+                rows = records[table]
+                columns = tuple(
+                    str(row["name"])
+                    for row in connection.execute(f"PRAGMA table_info({table})")
+                )
+                placeholders = ", ".join("?" for _ in columns)
+                statement = (
+                    f"INSERT INTO {table} ({', '.join(columns)}) "
+                    f"VALUES ({placeholders})"
+                )
+                for row in rows:
+                    if set(row) != set(columns):
+                        raise SnapshotError(
+                            f"snapshot row columns do not match table {table}"
+                        )
+                    connection.execute(
+                        statement,
+                        tuple(row[column] for column in columns),
+                    )
+                counts[table] = len(rows)
+            connection.execute("DELETE FROM search_document_fts")
+            connection.execute(
+                """
+                INSERT INTO search_document_fts(document_id, content)
+                SELECT id, content FROM search_document WHERE lifecycle = 'active'
+                """
+            )
+        return counts
+
     def integrity(self) -> dict[str, Any]:
         with self._connect() as connection:
             integrity_rows = connection.execute("PRAGMA integrity_check").fetchall()
@@ -1200,7 +1697,7 @@ class SqliteMemoryStore(MemoryStore):
             version = int(connection.execute("PRAGMA user_version").fetchone()[0])
         return MemoryStoreStatus(
             backend="sqlite",
-            initialized=version == 2,
+            initialized=version == 3,
             schema_version=version,
         )
 

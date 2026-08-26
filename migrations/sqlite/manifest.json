@@ -12,6 +12,12 @@
       "file": "002_useful_querying.sql",
       "target_fingerprint": "5161ccab9612c1c6b4cf99a980e1c29305ccdde2acc721851d1e160d53d0c953",
       "version": 2
+    },
+    {
+      "checksum": "41dcfcbce1eba85716d211e621df1ff5e2ded6655cbf2467251d51f221d2a93e",
+      "file": "003_evidence_lifecycle.sql",
+      "target_fingerprint": "bf108e283cbf1b02ebda39cc3104c1f01a84d5d20479d7d310264453139a7e25",
+      "version": 3
     }
   ]
 }

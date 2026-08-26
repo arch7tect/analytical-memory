@@ -142,6 +142,55 @@ class EvidenceFragmentRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class EvidenceAcquisitionRecord:
+    id: str
+    evidence_object_id: str
+    source_id: str
+    run_id: str
+    privacy_class: str
+    retention_required: int
+    retain_until: str | None
+    method: str
+    review_status: str
+    recorded_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceLocationRecord:
+    id: str
+    evidence_object_id: str
+    provider: str
+    root_id: str
+    object_key: str
+    availability: str
+    verified_at: str | None
+    recorded_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceVerificationRecord:
+    id: str
+    target_kind: str
+    target_id: str
+    digest: str
+    outcome: str
+    byte_size: int | None
+    method: str
+    checked_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceDerivationRecord:
+    id: str
+    input_object_id: str
+    output_object_id: str
+    method: str
+    method_version: str
+    parameters_json: str
+    recorded_at: str
+
+
+@dataclass(frozen=True, slots=True)
 class EvidenceBindingRecord:
     id: str
     target_kind: str
@@ -159,7 +208,12 @@ class EvidenceBindingRecord:
 class PreparedEvidence:
     source_path: Path
     object: EvidenceObjectRecord
+    materialized_objects: tuple[tuple[EvidenceObjectRecord, bytes], ...]
     fragment: EvidenceFragmentRecord
+    acquisitions: tuple[EvidenceAcquisitionRecord, ...]
+    locations: tuple[EvidenceLocationRecord, ...]
+    verifications: tuple[EvidenceVerificationRecord, ...]
+    derivations: tuple[EvidenceDerivationRecord, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,6 +239,7 @@ class BatchPlan:
             "attribute_ids": [record.id for record in self.attributes],
             "batch_id": self.id,
             "evidence_digest": self.evidence.object.digest,
+            "fragment_id": self.evidence.fragment.id,
             "metric_ids": [record.id for record in self.metrics],
             "node_ids": [record.id for record in self.nodes],
             "relation_ids": [record.id for record in self.relations],
@@ -199,7 +254,11 @@ class BatchPlan:
                 "assertions": len(self.assertions),
                 "attributes": len(self.attributes),
                 "bindings": len(self.bindings),
-                "evidence_objects": 1,
+                "derivations": len(self.evidence.derivations),
+                "evidence_acquisitions": len(self.evidence.acquisitions),
+                "evidence_locations": len(self.evidence.locations),
+                "evidence_objects": 1 + len(self.evidence.materialized_objects),
+                "evidence_verifications": len(self.evidence.verifications),
                 "metrics": len(self.metrics),
                 "nodes": len(self.nodes),
                 "relations": len(self.relations),

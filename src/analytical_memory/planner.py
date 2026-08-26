@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -15,9 +16,13 @@ from analytical_memory.domain import (
     AssertionRecord,
     AttributeRecord,
     BatchPlan,
+    EvidenceAcquisitionRecord,
     EvidenceBindingRecord,
+    EvidenceDerivationRecord,
     EvidenceFragmentRecord,
+    EvidenceLocationRecord,
     EvidenceObjectRecord,
+    EvidenceVerificationRecord,
     MetricRecord,
     NodeRecord,
     PreparedEvidence,
@@ -27,7 +32,12 @@ from analytical_memory.domain import (
     SourceRecord,
 )
 from analytical_memory.errors import BatchValidationError, SchemaChangedError
-from analytical_memory.limits import MAX_BATCH_BYTES
+from analytical_memory.evidence import (
+    fragment_digest,
+    select_fragment,
+    strictest_privacy,
+)
+from analytical_memory.limits import MAX_BATCH_BYTES, MAX_EVIDENCE_INGEST_BYTES
 from analytical_memory.schema_contract import SchemaContract
 
 PRIVACY_CLASSES = {"public", "private", "restricted", "forbidden"}
@@ -95,6 +105,17 @@ def _timestamp(value: object, field: str) -> str:
         return normalize_timestamp(value, field)
     except ValueError as exc:
         raise BatchValidationError(str(exc)) from exc
+
+
+def _source_locator(value: object) -> str:
+    locator = _text(value, "source.locator")
+    if locator.startswith(("/", "~", "file://")) or re.match(
+        r"^[A-Za-z]:[\\/]", locator
+    ):
+        raise BatchValidationError(
+            "source.locator must not be an absolute machine path"
+        )
+    return locator
 
 
 def _load_document(path: Path) -> dict[str, Any]:
@@ -225,7 +246,7 @@ def plan_batch(path: Path, schema: SchemaContract) -> BatchPlan:
         id=stable_uuid("source", source_natural_key),
         natural_key=source_natural_key,
         kind=_text(source_input.get("kind"), "source.kind"),
-        locator=_text(source_input.get("locator"), "source.locator"),
+        locator=_source_locator(source_input.get("locator")),
         privacy_class=_privacy(
             source_input.get("privacy_class", "public"), "source.privacy_class"
         ),
@@ -509,14 +530,28 @@ def plan_batch(path: Path, schema: SchemaContract) -> BatchPlan:
         raise BatchValidationError("evidence.path must be a safe relative path")
     evidence_source_path = path.parent / evidence_relative_path
     try:
+        if evidence_source_path.stat().st_size > MAX_EVIDENCE_INGEST_BYTES:
+            raise BatchValidationError(
+                f"evidence exceeds maximum size of {MAX_EVIDENCE_INGEST_BYTES} bytes"
+            )
         evidence_bytes = evidence_source_path.read_bytes()
+        if len(evidence_bytes) > MAX_EVIDENCE_INGEST_BYTES:
+            raise BatchValidationError(
+                f"evidence exceeds maximum size of {MAX_EVIDENCE_INGEST_BYTES} bytes"
+            )
     except OSError as exc:
         raise BatchValidationError(
             f"cannot read evidence: {evidence_relative_path}"
         ) from exc
     evidence_digest = sha256_bytes(evidence_bytes)
-    evidence_privacy = _privacy(
+    declared_evidence_privacy = _privacy(
         evidence_input.get("privacy_class", "public"), "evidence.privacy_class"
+    )
+    evidence_privacy = strictest_privacy(
+        declared_evidence_privacy,
+        source.privacy_class,
+        *(attribute.privacy_class for attribute in attribute_records),
+        *(relation.privacy_class for relation in relation_records),
     )
     evidence_object = EvidenceObjectRecord(
         id=stable_uuid("evidence_object", evidence_digest),
@@ -526,25 +561,128 @@ def plan_batch(path: Path, schema: SchemaContract) -> BatchPlan:
         privacy_class=evidence_privacy,
         recorded_at=recorded_at,
     )
-    locator_json = canonical_json({"kind": "whole_object"})
+    selection = select_fragment(evidence_bytes, evidence_input.get("fragment"))
+    addressed_digest = sha256_bytes(selection.addressed_bytes)
+    addressed_object = evidence_object
+    materialized_objects: tuple[tuple[EvidenceObjectRecord, bytes], ...] = ()
+    derivations: tuple[EvidenceDerivationRecord, ...] = ()
+    if addressed_digest != evidence_digest:
+        addressed_object = EvidenceObjectRecord(
+            id=stable_uuid("evidence_object", addressed_digest),
+            digest=addressed_digest,
+            byte_size=len(selection.addressed_bytes),
+            media_type=(
+                "application/x-ndjson"
+                if selection.locator["input_format"] == "canonical-jsonl"
+                else "application/json"
+            ),
+            privacy_class=evidence_privacy,
+            recorded_at=recorded_at,
+        )
+        materialized_objects = ((addressed_object, selection.addressed_bytes),)
+        assert selection.derivation_method is not None
+        derivation_parameters = canonical_json(selection.derivation_parameters or {})
+        derivations = (
+            EvidenceDerivationRecord(
+                id=stable_uuid(
+                    "evidence_derivation",
+                    evidence_object.id,
+                    addressed_object.id,
+                    selection.derivation_method,
+                    "1",
+                    derivation_parameters,
+                ),
+                input_object_id=evidence_object.id,
+                output_object_id=addressed_object.id,
+                method=selection.derivation_method,
+                method_version="1",
+                parameters_json=derivation_parameters,
+                recorded_at=recorded_at,
+            ),
+        )
+    locator_json = canonical_json(selection.locator)
     fragment = EvidenceFragmentRecord(
         id=stable_uuid(
             "evidence_fragment",
-            evidence_object.id,
-            "whole_object",
+            addressed_object.id,
+            selection.locator["kind"],
             locator_json,
-            "identity",
-            "1",
+            selection.extractor_id,
+            selection.extractor_version,
         ),
-        evidence_object_id=evidence_object.id,
-        locator_kind="whole_object",
+        evidence_object_id=addressed_object.id,
+        locator_kind=str(selection.locator["kind"]),
         locator_json=locator_json,
-        extractor_id="identity",
-        extractor_version="1",
-        byte_size=len(evidence_bytes),
-        digest=evidence_digest,
+        extractor_id=selection.extractor_id,
+        extractor_version=selection.extractor_version,
+        byte_size=len(selection.extracted_bytes),
+        digest=fragment_digest(selection),
         privacy_class=evidence_privacy,
         recorded_at=recorded_at,
+    )
+    retention_input = _mapping(
+        evidence_input.get("retention", {}), "evidence.retention"
+    )
+    retention_required = _boolean(
+        retention_input.get("required", False), "evidence.retention.required"
+    )
+    retain_until_value = retention_input.get("until")
+    retain_until = (
+        None
+        if retain_until_value is None
+        else _timestamp(retain_until_value, "evidence.retention.until")
+    )
+    acquisition_method = _text(
+        evidence_input.get("acquisition_method", run.method),
+        "evidence.acquisition_method",
+    )
+    acquisition_review = _text(
+        evidence_input.get("review_status", "unreviewed"),
+        "evidence.review_status",
+    )
+    all_objects = (evidence_object, *(item[0] for item in materialized_objects))
+    acquisitions = tuple(
+        EvidenceAcquisitionRecord(
+            id=stable_uuid("evidence_acquisition", item.id, run.id),
+            evidence_object_id=item.id,
+            source_id=source.id,
+            run_id=run.id,
+            privacy_class=evidence_privacy,
+            retention_required=int(retention_required),
+            retain_until=retain_until,
+            method=acquisition_method,
+            review_status=acquisition_review,
+            recorded_at=recorded_at,
+        )
+        for item in all_objects
+    )
+    locations = tuple(
+        EvidenceLocationRecord(
+            id=stable_uuid("evidence_location", item.id, "local-filesystem", "default"),
+            evidence_object_id=item.id,
+            provider="local-filesystem",
+            root_id="default",
+            object_key=f"objects/sha256/{item.digest[:2]}/{item.digest}",
+            availability="present",
+            verified_at=recorded_at,
+            recorded_at=recorded_at,
+        )
+        for item in all_objects
+    )
+    verifications = tuple(
+        EvidenceVerificationRecord(
+            id=stable_uuid(
+                "evidence_verification", item.id, recorded_at, "ingestion-put"
+            ),
+            target_kind="object",
+            target_id=item.id,
+            digest=item.digest,
+            outcome="verified",
+            byte_size=item.byte_size,
+            method="ingestion-put",
+            checked_at=recorded_at,
+        )
+        for item in all_objects
     )
     assertion_bindings = tuple(
         EvidenceBindingRecord(
@@ -599,7 +737,12 @@ def plan_batch(path: Path, schema: SchemaContract) -> BatchPlan:
         evidence=PreparedEvidence(
             source_path=evidence_source_path,
             object=evidence_object,
+            materialized_objects=materialized_objects,
             fragment=fragment,
+            acquisitions=acquisitions,
+            locations=locations,
+            verifications=verifications,
+            derivations=derivations,
         ),
         nodes=tuple(node_records),
         attributes=tuple(attribute_records),

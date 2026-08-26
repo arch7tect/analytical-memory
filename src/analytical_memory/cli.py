@@ -82,6 +82,53 @@ def _parser() -> argparse.ArgumentParser:
     schema_commands.add_parser("show")
     compile_command = schema_commands.add_parser("compile")
     compile_command.add_argument("--check", action="store_true")
+
+    evidence = subcommands.add_parser("evidence")
+    evidence_commands = evidence.add_subparsers(dest="evidence_command", required=True)
+    evidence_status = evidence_commands.add_parser("status")
+    evidence_status.add_argument("digest")
+    evidence_read = evidence_commands.add_parser("read")
+    evidence_read.add_argument("digest")
+    evidence_read.add_argument("--offset", type=int, default=0)
+    evidence_read.add_argument("--limit", type=int, default=65536)
+    evidence_verify = evidence_commands.add_parser("verify")
+    evidence_verify.add_argument("digest")
+    evidence_audit = evidence_commands.add_parser("audit")
+    evidence_audit.add_argument("--limit", type=int, default=1000)
+
+    retention = subcommands.add_parser("retention")
+    retention_commands = retention.add_subparsers(
+        dest="retention_command", required=True
+    )
+    retention_report = retention_commands.add_parser("report")
+    retention_report.add_argument("--as-of")
+    retention_plan = retention_commands.add_parser("plan")
+    retention_plan.add_argument("output", type=Path)
+    retention_plan.add_argument("--digest", action="append", dest="digests")
+    retention_plan.add_argument("--created-at")
+    retention_retire = retention_commands.add_parser("retire")
+    retention_retire.add_argument("plan", type=Path)
+    retention_retire.add_argument("--confirm", required=True)
+    retention_retire.add_argument("--retired-at")
+
+    snapshot = subcommands.add_parser("snapshot")
+    snapshot_commands = snapshot.add_subparsers(dest="snapshot_command", required=True)
+    snapshot_create = snapshot_commands.add_parser("create")
+    snapshot_create.add_argument("destination", type=Path)
+    snapshot_create.add_argument("--created-at")
+    snapshot_verify = snapshot_commands.add_parser("verify")
+    snapshot_verify.add_argument("source", type=Path)
+    snapshot_import = snapshot_commands.add_parser("import")
+    snapshot_import.add_argument("source", type=Path)
+
+    sanitized_export = subcommands.add_parser("export")
+    sanitized_export.add_argument("destination", type=Path)
+    sanitized_export.add_argument(
+        "--privacy-ceiling",
+        choices=("public", "private", "restricted", "forbidden"),
+        default="public",
+    )
+    sanitized_export.add_argument("--created-at")
     return parser
 
 
@@ -153,6 +200,44 @@ def _execute(arguments: argparse.Namespace) -> dict[str, Any]:
             "schema_fingerprint": compiled["schema_fingerprint"],
             "written": True,
         }
+    if arguments.command == "evidence":
+        if arguments.evidence_command == "status":
+            return api.evidence_status(arguments.digest).model_dump(mode="json")
+        if arguments.evidence_command == "read":
+            return api.evidence_read(
+                arguments.digest, offset=arguments.offset, limit=arguments.limit
+            ).model_dump(mode="json")
+        if arguments.evidence_command == "verify":
+            return api.evidence_verify(arguments.digest).model_dump(mode="json")
+        return api.evidence_audit(arguments.limit).model_dump(mode="json")
+    if arguments.command == "retention":
+        if arguments.retention_command == "report":
+            return application.retention_report(as_of=arguments.as_of)
+        if arguments.retention_command == "plan":
+            return application.retention_plan(
+                arguments.output,
+                digests=arguments.digests,
+                created_at=arguments.created_at,
+            )
+        return application.retention_retire(
+            arguments.plan,
+            confirmation=arguments.confirm,
+            retired_at=arguments.retired_at,
+        )
+    if arguments.command == "snapshot":
+        if arguments.snapshot_command == "create":
+            return application.snapshot_create(
+                arguments.destination, created_at=arguments.created_at
+            )
+        if arguments.snapshot_command == "verify":
+            return application.snapshot_verify(arguments.source)
+        return application.snapshot_import(arguments.source)
+    if arguments.command == "export":
+        return application.sanitized_export(
+            arguments.destination,
+            privacy_ceiling=arguments.privacy_ceiling,
+            created_at=arguments.created_at,
+        )
     raise AssertionError(f"unsupported command: {arguments.command}")
 
 

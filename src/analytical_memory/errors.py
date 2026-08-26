@@ -26,3 +26,11 @@ class StoreNotInitializedError(MemoryErrorBase):
 
 class RecordNotFoundError(MemoryErrorBase):
     pass
+
+
+class RetentionBlockedError(MemoryErrorBase):
+    pass
+
+
+class SnapshotError(MemoryErrorBase):
+    pass

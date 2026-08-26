@@ -25,8 +25,13 @@ def _table_counts(database: Path) -> dict[str, int]:
         "node_attribute",
         "assertion",
         "evidence_object",
+        "evidence_acquisition",
+        "evidence_derivation",
         "evidence_fragment",
         "evidence_binding",
+        "evidence_location",
+        "evidence_verification",
+        "evidence_retirement",
         "relation",
         "metric",
         "search_document",
@@ -48,7 +53,11 @@ def test_preview_is_non_writing(application_fixture: ApplicationFixture) -> None
         "assertions": 4,
         "attributes": 4,
         "bindings": 4,
+        "derivations": 0,
+        "evidence_acquisitions": 1,
+        "evidence_locations": 1,
         "evidence_objects": 1,
+        "evidence_verifications": 1,
         "metrics": 0,
         "nodes": 1,
         "relations": 0,
@@ -80,8 +89,13 @@ def test_apply_query_explain_and_exact_replay(
         "node_attribute": 4,
         "assertion": 4,
         "evidence_object": 1,
+        "evidence_acquisition": 1,
+        "evidence_derivation": 0,
         "evidence_fragment": 1,
         "evidence_binding": 4,
+        "evidence_location": 1,
+        "evidence_verification": 1,
+        "evidence_retirement": 0,
         "relation": 0,
         "metric": 0,
         "search_document": 0,
@@ -108,7 +122,7 @@ def test_apply_query_explain_and_exact_replay(
         "foreign_key_errors": 0,
         "integrity": ["ok"],
         "ok": True,
-        "schema_version": 2,
+        "schema_version": 3,
         "migrations": [
             {
                 "version": 1,
@@ -126,6 +140,15 @@ def test_apply_query_explain_and_exact_replay(
                 ),
                 "target_fingerprint": (
                     "5161ccab9612c1c6b4cf99a980e1c29305ccdde2acc721851d1e160d53d0c953"
+                ),
+            },
+            {
+                "version": 3,
+                "checksum": (
+                    "41dcfcbce1eba85716d211e621df1ff5e2ded6655cbf2467251d51f221d2a93e"
+                ),
+                "target_fingerprint": (
+                    "bf108e283cbf1b02ebda39cc3104c1f01a84d5d20479d7d310264453139a7e25"
                 ),
             },
         ],

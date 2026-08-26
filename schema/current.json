@@ -40,6 +40,37 @@
   "compatibility": {
     "minimum_reader": "1"
   },
+  "evidence": {
+    "audit_outcomes": [
+      "verified",
+      "corrupt",
+      "missing"
+    ],
+    "availability_states": [
+      "present",
+      "missing"
+    ],
+    "fragment_locator_kinds": [
+      "whole_object",
+      "structured",
+      "record_key",
+      "byte_range",
+      "line_range",
+      "time_interval",
+      "sample_interval"
+    ],
+    "privacy_propagation": "strictest_acquisition_wins",
+    "retention_states": [
+      "active",
+      "expired",
+      "retired"
+    ],
+    "verification_states": [
+      "unverified",
+      "verified",
+      "corrupt"
+    ]
+  },
   "fact_states": [
     "supported",
     "contested",
@@ -48,9 +79,15 @@
   ],
   "ingestion_batch": {
     "evidence_locator_kinds": [
-      "whole_object"
+      "whole_object",
+      "structured",
+      "record_key",
+      "byte_range",
+      "line_range",
+      "time_interval",
+      "sample_interval"
     ],
-    "format_version": "2",
+    "format_version": "3",
     "optional": [
       "relations",
       "metrics"
@@ -73,7 +110,7 @@
     ],
     "dimensions": "canonical_json_object"
   },
-  "ontology_version": "0.2.0",
+  "ontology_version": "0.3.0",
   "privacy_classes": [
     "public",
     "private",
@@ -89,8 +126,13 @@
     "Assertion",
     "Metric",
     "EvidenceObject",
+    "EvidenceAcquisition",
+    "EvidenceDerivation",
+    "EvidenceLocation",
     "EvidenceFragment",
     "EvidenceBinding",
+    "EvidenceVerification",
+    "EvidenceRetirement",
     "SearchDocument",
     "IngestionBatch",
     "SchemaMigration"
@@ -102,6 +144,11 @@
       "both"
     ],
     "properties_allowed": false
+  },
+  "sanitized_export": {
+    "artifact_kind": "sanitized-export",
+    "format_version": "1",
+    "restore_compatible": false
   },
   "saved_queries": {
     "current-facts": {
@@ -192,8 +239,8 @@
       ]
     }
   },
-  "schema_document_version": "2",
-  "schema_fingerprint": "5161ccab9612c1c6b4cf99a980e1c29305ccdde2acc721851d1e160d53d0c953",
+  "schema_document_version": "3",
+  "schema_fingerprint": "bf108e283cbf1b02ebda39cc3104c1f01a84d5d20479d7d310264453139a7e25",
   "search_document": {
     "coverage": "active_indexed_documents_vs_searchable_attributes",
     "eligibility": {
@@ -206,5 +253,13 @@
       ]
     },
     "fts_engine": "sqlite-fts5"
+  },
+  "snapshot": {
+    "artifact_kind": "private-restore-snapshot",
+    "format_version": "1",
+    "projections_excluded": [
+      "search_document_fts",
+      "embedding_index"
+    ]
   }
 }
