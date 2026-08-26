@@ -24,6 +24,7 @@ from analytical_memory.domain import (
     SourceRecord,
 )
 from analytical_memory.errors import BatchValidationError, SchemaChangedError
+from analytical_memory.limits import MAX_BATCH_BYTES
 from analytical_memory.schema_contract import SchemaContract
 
 PRIVACY_CLASSES = {"public", "private", "restricted", "forbidden"}
@@ -81,8 +82,13 @@ def _timestamp(value: object, field: str) -> str:
 
 def _load_document(path: Path) -> dict[str, Any]:
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        payload = path.read_bytes()
+        if len(payload) > MAX_BATCH_BYTES:
+            raise BatchValidationError(
+                f"batch exceeds maximum size of {MAX_BATCH_BYTES} bytes"
+            )
+        value = json.loads(payload.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise BatchValidationError(f"cannot read batch: {path}") from exc
     return _mapping(value, "batch")
 

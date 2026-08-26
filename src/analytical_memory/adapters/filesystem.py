@@ -6,7 +6,11 @@ from contextlib import suppress
 from pathlib import Path
 
 from analytical_memory.canonical import sha256_bytes
-from analytical_memory.domain import EvidenceObjectRecord, EvidenceStatus
+from analytical_memory.domain import (
+    EvidenceObjectRecord,
+    EvidenceStatus,
+    EvidenceStoreStatus,
+)
 from analytical_memory.ports import EvidenceStore
 
 
@@ -69,4 +73,10 @@ class FileEvidenceStore(EvidenceStore):
             verification="verified" if actual == digest else "corrupt",
             digest=digest,
             byte_size=len(data),
+        )
+
+    def status(self) -> EvidenceStoreStatus:
+        return EvidenceStoreStatus(
+            provider="local-filesystem",
+            initialized=(self.root / "objects" / "sha256").is_dir(),
         )

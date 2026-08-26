@@ -167,3 +167,16 @@ class EvidenceStatus:
     verification: str
     digest: str
     byte_size: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryStoreStatus:
+    backend: str
+    initialized: bool
+    schema_version: int
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceStoreStatus:
+    provider: str
+    initialized: bool

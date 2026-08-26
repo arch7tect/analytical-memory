@@ -15,6 +15,11 @@ from analytical_memory.schema_contract import SchemaContract, load_schema
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
 @dataclass(frozen=True)
 class ApplicationFixture:
     application: MemoryApplication

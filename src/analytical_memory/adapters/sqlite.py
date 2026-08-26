@@ -7,8 +7,9 @@ from pathlib import Path
 from typing import Any
 
 from analytical_memory.canonical import canonical_json, canonical_text_key
-from analytical_memory.domain import BatchPlan, StoredBatch
+from analytical_memory.domain import BatchPlan, MemoryStoreStatus, StoredBatch
 from analytical_memory.errors import RecordNotFoundError, StoreNotInitializedError
+from analytical_memory.limits import MAX_EXPLANATION_ASSERTIONS, MAX_QUERY_RESULTS
 from analytical_memory.ports import MemoryStore
 
 
@@ -235,7 +236,7 @@ class SqliteMemoryStore(MemoryStore):
             )
         return result
 
-    def current_facts(self) -> list[dict[str, Any]]:
+    def _current_facts(self, attribute_id: str | None = None) -> list[dict[str, Any]]:
         sql = """
             WITH effective_assertion AS (
                 SELECT assertion.*
@@ -267,6 +268,7 @@ class SqliteMemoryStore(MemoryStore):
             JOIN node ON node.id = node_attribute.node_id
             LEFT JOIN effective_assertion
                 ON effective_assertion.attribute_id = node_attribute.id
+            WHERE (? IS NULL OR node_attribute.id = ?)
             GROUP BY
                 node_attribute.id,
                 node.namespace,
@@ -277,7 +279,7 @@ class SqliteMemoryStore(MemoryStore):
                 node_attribute.privacy_class
         """
         with self._connect() as connection:
-            rows = connection.execute(sql).fetchall()
+            rows = connection.execute(sql, (attribute_id, attribute_id)).fetchall()
         facts = [
             {
                 "attribute_id": str(row["attribute_id"]),
@@ -301,6 +303,9 @@ class SqliteMemoryStore(MemoryStore):
             )
         )
         return facts
+
+    def current_facts(self) -> list[dict[str, Any]]:
+        return self._current_facts()[:MAX_QUERY_RESULTS]
 
     def explain_attribute(self, attribute_id: str) -> dict[str, Any]:
         with self._connect() as connection:
@@ -327,11 +332,15 @@ class SqliteMemoryStore(MemoryStore):
                 FROM assertion
                 WHERE assertion.attribute_id = ?
                 ORDER BY assertion.recorded_at, assertion.id
+                LIMIT ?
                 """,
-                (attribute_id,),
+                (attribute_id, MAX_EXPLANATION_ASSERTIONS),
             ).fetchall()
-            binding_rows = connection.execute(
-                """
+            assertion_ids = [str(row["id"]) for row in assertion_rows]
+            if assertion_ids:
+                placeholders = ", ".join("?" for _ in assertion_ids)
+                binding_rows = connection.execute(
+                    f"""
                 SELECT evidence_binding.*, evidence_fragment.locator_kind,
                        evidence_fragment.locator_json,
                        evidence_fragment.extractor_id,
@@ -345,13 +354,13 @@ class SqliteMemoryStore(MemoryStore):
                     ON evidence_fragment.id = evidence_binding.fragment_id
                 JOIN evidence_object
                     ON evidence_object.id = evidence_fragment.evidence_object_id
-                WHERE evidence_binding.assertion_id IN (
-                    SELECT id FROM assertion WHERE attribute_id = ?
-                )
+                WHERE evidence_binding.assertion_id IN ({placeholders})
                 ORDER BY evidence_binding.assertion_id, evidence_binding.id
                 """,
-                (attribute_id,),
-            ).fetchall()
+                    assertion_ids,
+                ).fetchall()
+            else:
+                binding_rows = []
 
         bindings_by_assertion: dict[str, list[dict[str, Any]]] = {}
         for row in binding_rows:
@@ -400,7 +409,7 @@ class SqliteMemoryStore(MemoryStore):
         ]
         fact = next(
             item
-            for item in self.current_facts()
+            for item in self._current_facts(attribute_id)
             if item["attribute_id"] == attribute_id
         )
         return {
@@ -426,3 +435,24 @@ class SqliteMemoryStore(MemoryStore):
             "ok": messages == ["ok"] and not foreign_key_rows,
             "schema_version": version,
         }
+
+    def status(self) -> MemoryStoreStatus:
+        if not self.database.is_file():
+            return MemoryStoreStatus(
+                backend="sqlite", initialized=False, schema_version=0
+            )
+        with self._connect() as connection:
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+        return MemoryStoreStatus(
+            backend="sqlite",
+            initialized=version == 1,
+            schema_version=version,
+        )
+
+    def evidence_digests(self, limit: int) -> tuple[list[str], bool]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT digest FROM evidence_object ORDER BY digest LIMIT ?",
+                (limit + 1,),
+            ).fetchall()
+        return [str(row["digest"]) for row in rows[:limit]], len(rows) > limit

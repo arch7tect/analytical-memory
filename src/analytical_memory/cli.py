@@ -2,17 +2,19 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from analytical_memory.adapters.filesystem import FileEvidenceStore
-from analytical_memory.adapters.sqlite import SqliteMemoryStore
+from analytical_memory.api import MemoryAPI
 from analytical_memory.application import MemoryApplication
+from analytical_memory.configuration import (
+    build_application,
+    environment_database,
+    environment_evidence_root,
+)
 from analytical_memory.errors import MemoryErrorBase
-from analytical_memory.schema_contract import load_schema
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -20,19 +22,20 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--database",
         type=Path,
-        default=Path(os.environ.get("ANALYTICAL_MEMORY_DB", ".local/memory.db")),
+        default=environment_database(),
     )
     parser.add_argument(
         "--evidence-root",
         type=Path,
-        default=Path(
-            os.environ.get("ANALYTICAL_MEMORY_EVIDENCE_ROOT", ".local/evidence")
-        ),
+        default=environment_evidence_root(),
     )
     parser.add_argument("--schema", type=Path)
     subcommands = parser.add_subparsers(dest="command", required=True)
 
     subcommands.add_parser("init")
+    subcommands.add_parser("status")
+    subcommands.add_parser("validate")
+    subcommands.add_parser("capabilities")
 
     ingest = subcommands.add_parser("ingest")
     ingest_commands = ingest.add_subparsers(dest="ingest_command", required=True)
@@ -49,26 +52,32 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _application(arguments: argparse.Namespace) -> MemoryApplication:
-    schema = load_schema(arguments.schema)
-    return MemoryApplication(
-        memory_store=SqliteMemoryStore(arguments.database),
-        evidence_store=FileEvidenceStore(arguments.evidence_root),
-        schema=schema,
+    return build_application(
+        database=arguments.database,
+        evidence_root=arguments.evidence_root,
+        schema_path=arguments.schema,
     )
 
 
 def _execute(arguments: argparse.Namespace) -> dict[str, Any]:
     application = _application(arguments)
+    api = MemoryAPI(application)
     if arguments.command == "init":
         return application.initialize()
+    if arguments.command == "status":
+        return application.status()
+    if arguments.command == "validate":
+        return application.validate()
+    if arguments.command == "capabilities":
+        return application.capabilities()
     if arguments.command == "ingest":
         if arguments.ingest_command == "preview":
-            return application.preview(arguments.batch)
-        return application.apply(arguments.batch)
+            return api.ingestion_preview(arguments.batch).model_dump(mode="json")
+        return api.ingestion_apply(arguments.batch).model_dump(mode="json")
     if arguments.command == "query":
-        return application.current_facts()
+        return api.query_current_facts().model_dump(mode="json")
     if arguments.command == "explain":
-        return application.explain(arguments.record_id)
+        return api.explain(arguments.record_id).model_dump(mode="json")
     raise AssertionError(f"unsupported command: {arguments.command}")
 
 
@@ -87,6 +96,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     json.dump(result, sys.stdout, ensure_ascii=False, indent=2, sort_keys=True)
     sys.stdout.write("\n")
+    if arguments.command == "validate" and not result["ok"]:
+        return 1
     return 0
 
 

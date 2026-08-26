@@ -19,6 +19,9 @@ uv run memory ingest preview examples/quickstart/batch.json
 uv run memory ingest apply examples/quickstart/batch.json
 uv run memory query current-facts
 uv run memory explain 51a612e1-68be-566e-8549-b3ba9f0becfb
+uv run memory status
+uv run memory capabilities
+uv run memory validate
 ```
 
 The commands write local state under the ignored `.local/` directory. Preview
@@ -29,7 +32,13 @@ Run the complete synthetic smoke path without retaining state:
 
 ```console
 uv run python scripts/smoke.py
+uv run python scripts/mcp_smoke.py
 ```
+
+The MCP smoke path launches the `memory-mcp` stdio server as a subprocess,
+discovers its schema and capabilities, and repeats preview, apply, query, and
+explain through a real MCP client. See the [MCP reference](docs/reference/mcp.md)
+for resources, tools, environment variables, and boundaries.
 
 ## Development
 

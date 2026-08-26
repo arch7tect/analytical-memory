@@ -8,6 +8,8 @@ from analytical_memory.domain import (
     BatchPlan,
     EvidenceObjectRecord,
     EvidenceStatus,
+    EvidenceStoreStatus,
+    MemoryStoreStatus,
     StoredBatch,
 )
 
@@ -23,6 +25,10 @@ class EvidenceStore(ABC):
 
     @abstractmethod
     def stat(self, digest: str) -> EvidenceStatus:
+        raise NotImplementedError
+
+    @abstractmethod
+    def status(self) -> EvidenceStoreStatus:
         raise NotImplementedError
 
 
@@ -49,4 +55,12 @@ class MemoryStore(ABC):
 
     @abstractmethod
     def integrity(self) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def status(self) -> MemoryStoreStatus:
+        raise NotImplementedError
+
+    @abstractmethod
+    def evidence_digests(self, limit: int) -> tuple[list[str], bool]:
         raise NotImplementedError

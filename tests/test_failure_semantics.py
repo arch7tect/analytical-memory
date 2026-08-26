@@ -10,7 +10,7 @@ import pytest
 
 from analytical_memory.adapters.filesystem import FileEvidenceStore
 from analytical_memory.application import MemoryApplication
-from analytical_memory.domain import BatchPlan, StoredBatch
+from analytical_memory.domain import BatchPlan, MemoryStoreStatus, StoredBatch
 from analytical_memory.errors import (
     BatchValidationError,
     IdempotencyConflictError,
@@ -119,6 +119,12 @@ class FailingMemoryStore(MemoryStore):
 
     def integrity(self) -> dict[str, Any]:
         return {"ok": False}
+
+    def status(self) -> MemoryStoreStatus:
+        return MemoryStoreStatus(backend="failing", initialized=True, schema_version=1)
+
+    def evidence_digests(self, limit: int) -> tuple[list[str], bool]:
+        return [], False
 
 
 def test_database_failure_leaves_addressable_unreferenced_evidence(
