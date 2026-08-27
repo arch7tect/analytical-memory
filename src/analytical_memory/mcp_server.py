@@ -142,6 +142,7 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
     def declare_entity(
         entity_type: str,
         contract_fingerprint: str,
+        description: str | None = None,
         privacy: Literal["public", "private"] = "public",
         fields: dict[str, FieldDeclarationInput] | None = None,
     ) -> OntologyResponse:
@@ -154,7 +155,29 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
                     for name, value in (fields or {}).items()
                 },
                 contract_fingerprint,
+                description,
             )
+        except (MemoryErrorBase, OSError, ValueError) as exc:
+            raise _tool_error(exc) from exc
+
+    @server.tool(
+        name="memory_ontology_declare_namespace",
+        description="Create or replace a namespace description.",
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=False,
+            idempotent_hint=True,
+            open_world_hint=False,
+        ),
+        structured_output=True,
+    )
+    def declare_namespace(
+        namespace: str,
+        description: str,
+        contract_fingerprint: str,
+    ) -> OntologyResponse:
+        try:
+            return api.declare_namespace(namespace, description, contract_fingerprint)
         except (MemoryErrorBase, OSError, ValueError) as exc:
             raise _tool_error(exc) from exc
 
@@ -277,6 +300,7 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
         to: JoinEndpointInput,
         contract_fingerprint: str,
         idempotency_key: str | None = None,
+        description: str | None = None,
     ) -> JoinMaterializationResponse:
         try:
             return api.materialize_join(
@@ -286,6 +310,7 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
                 to.model_dump(mode="json"),
                 contract_fingerprint,
                 idempotency_key,
+                description,
             )
         except (MemoryErrorBase, OSError, ValueError) as exc:
             raise _tool_error(exc) from exc

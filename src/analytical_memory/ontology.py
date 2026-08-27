@@ -6,6 +6,7 @@ from analytical_memory.canonical import sha256_json
 
 
 def ontology_document(
+    namespace_declarations: list[dict[str, Any]],
     declarations: list[dict[str, Any]],
     fields: list[dict[str, Any]],
     joins: list[dict[str, Any]],
@@ -15,6 +16,7 @@ def ontology_document(
     for declaration in declarations:
         entities[declaration["entity_type"]] = {
             "type": declaration["entity_type"],
+            "description": declaration["description"],
             "privacy": declaration["privacy_class"],
             "declared": True,
             "fields": {},
@@ -29,6 +31,7 @@ def ontology_document(
             field["entity_type"],
             {
                 "type": field["entity_type"],
+                "description": None,
                 "privacy": "public",
                 "declared": False,
                 "fields": {},
@@ -37,6 +40,7 @@ def ontology_document(
         )
         entity["fields"][field["field_name"]] = {
             "type": field["json_type"],
+            "description": field["description"],
             "privacy": field["privacy_class"],
             "declared": bool(field["declared"]),
             "required": bool(field["required"]),
@@ -54,6 +58,7 @@ def ontology_document(
         entity_shapes.append(
             {
                 "declared": entity["declared"],
+                "description": entity["description"],
                 "fields": entity["fields"],
                 "privacy": entity["privacy"],
                 "type": entity["type"],
@@ -62,6 +67,7 @@ def ontology_document(
     relation_shapes = [
         {
             "name": item["name"],
+            "description": item["description"],
             "relation": item["relation_type"],
             "from": {
                 "type": item["from_entity"],
@@ -72,6 +78,39 @@ def ontology_document(
         }
         for item in joins
     ]
+    declared_namespaces = {str(item["name"]): item for item in namespace_declarations}
+    namespace_names = set(declared_namespaces)
+    namespace_names.update(
+        str(entity["type"]).rpartition(".")[0] for entity in ordered_entities
+    )
+    namespaces = []
+    namespace_shapes = []
+    for name in sorted(namespace_names):
+        namespace_declaration = declared_namespaces.get(name)
+        namespace_shape = {
+            "name": name,
+            "description": (
+                None
+                if namespace_declaration is None
+                else namespace_declaration["description"]
+            ),
+            "declared": namespace_declaration is not None,
+        }
+        namespace_shapes.append(namespace_shape)
+        namespaces.append(
+            {
+                **namespace_shape,
+                "provenance": (
+                    None
+                    if namespace_declaration is None
+                    else {
+                        "fragment_id": namespace_declaration["fragment_id"],
+                        "recorded_at": namespace_declaration["recorded_at"],
+                        "source_id": namespace_declaration["source_id"],
+                    }
+                ),
+            }
+        )
     relations = [
         {
             **relation_shape,
@@ -88,12 +127,14 @@ def ontology_document(
         for relation_shape, item in zip(relation_shapes, joins, strict=True)
     ]
     shape = {
-        "ontology_version": "1",
+        "ontology_version": "2",
+        "namespaces": namespace_shapes,
         "entities": entity_shapes,
         "relations": relation_shapes,
     }
     return {
         "ontology_version": shape["ontology_version"],
+        "namespaces": namespaces,
         "entities": ordered_entities,
         "relations": relations,
         "ontology_fingerprint": sha256_json(shape),

@@ -36,12 +36,13 @@ Runtime paths and secrets are never included in discovery resources.
 | `memory://capabilities/current` | Backend, limits, operations, and readiness |
 
 The structural fingerprint gates writes. The ontology fingerprint changes when
-queryable shape changes, but not when only row counts change.
+queryable shape or its descriptions change, but not when only row counts change.
 
 ## M5 tools
 
 | Tool | Mutating | Result |
 | --- | --- | --- |
+| `memory_ontology_declare_namespace` | Yes | Namespace description and new ontology |
 | `memory_ontology_declare_entity` | Yes | Optional constraints and new ontology |
 | `memory_jsonl_import` | Yes | Atomic patch/upsert and ontology delta |
 | `memory_attribute_write_analysis` | Yes | Current attribute with run provenance |
@@ -67,6 +68,10 @@ JSONL import accepts a server-local `source_path`, a namespaced entity type, an
 ordered typed key selector, and the current structural fingerprint. The key is
 used only to resolve current nodes during that import. Join materialization is
 one explicit call; the server never infers or automatically reruns joins.
+Entity, field, and join descriptions are optional schema metadata; an explicit
+namespace declaration requires a non-empty description.
+They should describe meaning, not contain PII, credentials, or example records.
+Redeclaration replaces them; omitted optional descriptions are cleared.
 
 The only raw-evidence surface is the bounded read tool. Ordinary query,
 ontology, search, and explanation responses never contain evidence bytes. The

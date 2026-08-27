@@ -326,9 +326,10 @@ Status: implemented.
 - JSONL as the only general v1 import format, consumed from Python streams,
   CLI files or standard input, and server-local paths supplied through stdio
   MCP without materializing the full source in memory;
-- optional EntityDeclaration creation before import, with a namespaced entity
-  type, optional field type, required and nullable constraints, and entity- or
-  field-level privacy, but no import identity definition;
+- optional NamespaceDeclaration and EntityDeclaration creation before import,
+  with human-readable descriptions, a namespaced entity type, optional field
+  type, required and nullable constraints, and entity- or field-level privacy,
+  but no import identity definition;
 - one current EntityDeclaration per entity type; replacement validates current
   rows and leaves the prior declaration active on failure;
 - one atomic JSONL import contract that always carries entity type and typed
@@ -368,8 +369,8 @@ Status: implemented.
 - rollback compensation that removes temporary and exclusively newly installed
   evidence and preserves pre-existing deduplicated objects; crash-window orphan
   cleanup remains an evidence-audit concern;
-- a derived Current Ontology Document with entity, attribute, relation,
-  query-field, statistics, and provenance descriptions;
+- a derived Current Ontology Document with namespace, entity, attribute, and
+  relation descriptions plus query fields, statistics, and provenance;
 - independent contract and ontology fingerprints;
 - a structural-contract version and fingerprint bump for the streaming JSONL
   import, ontology, Query IR, and join-materialization request schemas;
@@ -398,7 +399,7 @@ Status: implemented.
   documents, and embedding projections while retaining shared provenance;
 - MCP resources for the structural contract, current ontology, namespace
   ontology, Query IR, and runtime capabilities;
-- MCP and Python API operations for entity declaration, streaming atomic JSONL
+- MCP and Python API operations for namespace and entity declaration, streaming atomic JSONL
   import, ontology description, Query IR execution, one-step join
   materialization, relation deactivation, and Node deletion;
 - matching CLI operations while preserving the existing saved-query,

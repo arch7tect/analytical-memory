@@ -5,7 +5,11 @@ All notable changes to Analytical Memory are documented here.
 ## 0.2.0 - 2026-08-27
 
 - Added dynamic, incrementally discovered ontology with optional declarations.
+- Added provenance-bearing namespace, entity, field, and relation descriptions
+  to ontology discovery.
 - Added streaming JSONL patch/upsert and explicit cross-dataset joins.
+- Changed import-key resolution to drive from the existing typed attribute index,
+  avoiding a growing node scan for each incoming record.
 - Added agent-discoverable JSON Query IR v1, typed MCP contracts, node bindings,
   structured errors, traversal, explanations, and current metrics.
 - Added evidence verification, audit, retention, snapshots, and portable local

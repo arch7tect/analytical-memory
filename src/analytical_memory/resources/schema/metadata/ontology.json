@@ -4,9 +4,11 @@
     "field_identity": ["entity_type", "field_name"],
     "fingerprint_excludes": ["counts", "coverage", "import_key_selectors"],
     "fingerprint_includes": [
+      "namespaces",
       "entity_types",
       "field_names",
       "effective_types",
+      "descriptions",
       "declared_constraints",
       "active_relation_declarations"
     ]

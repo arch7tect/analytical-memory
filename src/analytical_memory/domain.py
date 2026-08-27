@@ -109,6 +109,7 @@ class KeyField:
 @dataclass(frozen=True, slots=True)
 class FieldDeclaration:
     name: str
+    description: str | None = None
     type: str | None = None
     required: bool = False
     nullable: bool = True
@@ -119,8 +120,15 @@ class FieldDeclaration:
 @dataclass(frozen=True, slots=True)
 class EntityDeclaration:
     entity_type: str
+    description: str | None = None
     privacy: str = "public"
     fields: tuple[FieldDeclaration, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class NamespaceDeclaration:
+    name: str
+    description: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,6 +196,7 @@ class JoinEndpoint:
 class JoinRequest:
     name: str
     relation: str
+    description: str | None
     from_: JoinEndpoint
     to: JoinEndpoint
     contract_fingerprint: str

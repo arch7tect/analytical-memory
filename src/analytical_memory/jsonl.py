@@ -54,7 +54,18 @@ def split_entity_type(entity_type: str) -> tuple[str, str]:
     namespace, separator, name = entity_type.rpartition(".")
     if not separator or not namespace or not name:
         raise ImportValidationError("entity_type must be namespaced")
+    validate_namespace(namespace)
     return namespace, name
+
+
+def validate_namespace(namespace: str) -> str:
+    if not namespace or any(
+        not segment or segment.strip() != segment for segment in namespace.split(".")
+    ):
+        raise ImportValidationError(
+            "namespace must contain non-empty dot-separated segments"
+        )
+    return namespace
 
 
 def iter_jsonl(path: Path) -> Iterator[tuple[int, dict[str, Any]]]:

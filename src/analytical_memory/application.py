@@ -31,6 +31,7 @@ from analytical_memory.domain import (
     JoinRequest,
     JsonlImportRequest,
     KeyField,
+    NamespaceDeclaration,
 )
 from analytical_memory.errors import (
     BatchValidationError,
@@ -162,17 +163,27 @@ class MemoryApplication:
         self,
         entity_type: str,
         *,
+        description: str | None = None,
         privacy: str = "public",
         fields: dict[str, dict[str, Any]] | None = None,
         contract_fingerprint: str,
     ) -> dict[str, Any]:
         self._check_contract(contract_fingerprint)
+        description = None if description is None else description.strip()
+        if description == "":
+            raise BatchValidationError("entity description must not be empty")
         declaration = EntityDeclaration(
             entity_type=entity_type,
+            description=description,
             privacy=privacy,
             fields=tuple(
                 FieldDeclaration(
                     name=name,
+                    description=(
+                        None
+                        if specification.get("description") is None
+                        else str(specification["description"]).strip()
+                    ),
                     type=specification.get("type"),
                     required=bool(specification.get("required", False)),
                     nullable=bool(specification.get("nullable", True)),
@@ -182,6 +193,13 @@ class MemoryApplication:
                 for name, specification in sorted((fields or {}).items())
             ),
         )
+        empty_field_descriptions = [
+            field.name for field in declaration.fields if field.description == ""
+        ]
+        if empty_field_descriptions:
+            raise BatchValidationError(
+                f"field descriptions must not be empty: {empty_field_descriptions}"
+            )
         payload = canonical_json(
             {
                 "entity_type": declaration.entity_type,
@@ -193,10 +211,20 @@ class MemoryApplication:
                         "required": field.required,
                         "searchable": field.searchable,
                         "type": field.type,
+                        **(
+                            {"description": field.description}
+                            if field.description is not None
+                            else {}
+                        ),
                     }
                     for field in declaration.fields
                 ],
                 "privacy": declaration.privacy,
+                **(
+                    {"description": declaration.description}
+                    if declaration.description is not None
+                    else {}
+                ),
             }
         ).encode("utf-8")
         digest = sha256_bytes(payload)
@@ -223,6 +251,54 @@ class MemoryApplication:
                 digest,
                 checked_at=recorded_at,
                 method="entity-declaration-v1",
+                status=put_result.status,
+            )
+        return {
+            "contract_fingerprint": self.schema.fingerprint,
+            "document": document,
+            "ontology_fingerprint": document["ontology_fingerprint"],
+        }
+
+    def declare_namespace(
+        self,
+        namespace: str,
+        description: str,
+        *,
+        contract_fingerprint: str,
+    ) -> dict[str, Any]:
+        self._check_contract(contract_fingerprint)
+        namespace = namespace.strip()
+        description = description.strip()
+        if not description:
+            raise BatchValidationError("namespace description must not be empty")
+        declaration = NamespaceDeclaration(namespace, description)
+        payload = canonical_json(
+            {"description": description, "namespace": namespace}
+        ).encode("utf-8")
+        digest = sha256_bytes(payload)
+        recorded_at = _now()
+        evidence_object, fragment = self._whole_object_evidence(
+            digest,
+            len(payload),
+            "public",
+            recorded_at,
+            media_type="application/json",
+        )
+        with tempfile.NamedTemporaryFile() as temporary:
+            temporary.write(payload)
+            temporary.flush()
+            put_result = self.evidence_store.put_tracked(
+                Path(temporary.name), evidence_object
+            )
+            document = self.memory_store.put_namespace_declaration(
+                declaration,
+                contract_fingerprint,
+                ImportEvidence(evidence_object, fragment, put_result.created),
+            )
+            self._record_evidence_status(
+                digest,
+                checked_at=recorded_at,
+                method="namespace-declaration-v1",
                 status=put_result.status,
             )
         return {
@@ -317,31 +393,37 @@ class MemoryApplication:
         *,
         name: str,
         relation: str,
+        description: str | None = None,
         from_: dict[str, Any],
         to: dict[str, Any],
         contract_fingerprint: str,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         self._check_contract(contract_fingerprint)
+        description = None if description is None else description.strip()
+        if description == "":
+            raise BatchValidationError("join description must not be empty")
         request = JoinRequest(
             name=name,
             relation=relation,
+            description=description,
             from_=JoinEndpoint(type=str(from_["type"]), fields=tuple(from_["fields"])),
             to=JoinEndpoint(type=str(to["type"]), fields=tuple(to["fields"])),
             contract_fingerprint=contract_fingerprint,
             idempotency_key=idempotency_key,
         )
-        definition_bytes = canonical_json(
-            {
-                "from": {
-                    "fields": list(request.from_.fields),
-                    "type": request.from_.type,
-                },
-                "name": request.name,
-                "relation": request.relation,
-                "to": {"fields": list(request.to.fields), "type": request.to.type},
-            }
-        ).encode("utf-8")
+        definition: dict[str, Any] = {
+            "from": {
+                "fields": list(request.from_.fields),
+                "type": request.from_.type,
+            },
+            "name": request.name,
+            "relation": request.relation,
+            "to": {"fields": list(request.to.fields), "type": request.to.type},
+        }
+        if request.description is not None:
+            definition["description"] = request.description
+        definition_bytes = canonical_json(definition).encode("utf-8")
         digest = sha256_bytes(definition_bytes)
         recorded_at = _now()
         evidence_object, fragment = self._whole_object_evidence(
@@ -1410,6 +1492,12 @@ class MemoryApplication:
                     "enabled": True,
                     "interfaces": ["python", "cli", "mcp"],
                     "mcp_tool": "memory_ontology_declare_entity",
+                    "mutating": True,
+                },
+                "namespace_declaration": {
+                    "enabled": True,
+                    "interfaces": ["python", "cli", "mcp"],
+                    "mcp_tool": "memory_ontology_declare_namespace",
                     "mutating": True,
                 },
                 "evidence_audit": {

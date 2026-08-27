@@ -15,7 +15,8 @@ interface and public use cases.
 Milestones 0 through 7 are implemented. The working v1 includes:
 
 - streaming, atomic JSONL patch/upsert;
-- optional entity declarations and a data-derived current ontology;
+- optional namespace and entity descriptions, declarations, and a data-derived
+  current ontology;
 - explicit one-step joins between independently loaded datasets;
 - read-only JSON Query IR v1;
 - one current `NodeAttribute` or `Relation` with direct provenance;
@@ -52,6 +53,10 @@ uv run memory jsonl import examples/quickstart/messages.jsonl \
   --contract-fingerprint <contract-fingerprint>
 
 uv run memory ontology describe
+
+uv run memory ontology declare-namespace example \
+  --description "Quickstart data." \
+  --contract-fingerprint <contract-fingerprint>
 
 uv run memory join materialize examples/quickstart/join.json \
   --contract-fingerprint <contract-fingerprint>

@@ -116,6 +116,198 @@ def _resource_json(result: Any) -> dict[str, Any]:
     return value
 
 
+def test_ontology_namespaces_and_descriptions_are_replaceable(
+    m5: tuple[Any, ...], tmp_path: Path
+) -> None:
+    application, _, _ = m5
+    contract = application.schema.fingerprint
+    namespace_result = application.declare_namespace(
+        "calls.voice",
+        "Voice call records.",
+        contract_fingerprint=contract,
+    )
+    namespace = namespace_result["document"]["namespaces"][0]
+    assert namespace["name"] == "calls.voice"
+    assert namespace["description"] == "Voice call records."
+    assert namespace["declared"] is True
+    assert namespace["provenance"]["fragment_id"] is not None
+    assert namespace_result["document"]["entities"] == []
+
+    declared = application.declare_entity(
+        "calls.voice.Session",
+        description="One completed or attempted call.",
+        fields={
+            "id": {
+                "description": "Stable session identifier.",
+                "type": "string",
+                "required": True,
+                "nullable": False,
+            }
+        },
+        contract_fingerprint=contract,
+    )
+    entity = declared["document"]["entities"][0]
+    assert entity["description"] == "One completed or attempted call."
+    assert entity["fields"]["id"]["description"] == "Stable session identifier."
+    described_fingerprint = declared["ontology_fingerprint"]
+
+    cleared = application.declare_entity(
+        "calls.voice.Session",
+        fields={"id": {"type": "string", "required": True, "nullable": False}},
+        contract_fingerprint=contract,
+    )
+    entity = cleared["document"]["entities"][0]
+    assert entity["description"] is None
+    assert entity["fields"]["id"]["description"] is None
+    assert cleared["ontology_fingerprint"] != described_fingerprint
+
+    filtered = application.ontology("calls.voice")["document"]
+    assert [item["name"] for item in filtered["namespaces"]] == ["calls.voice"]
+
+    _import(
+        application,
+        _write(tmp_path / "sessions.jsonl", [{"id": "s1", "customer_id": "c1"}]),
+        "calls.voice.Session",
+    )
+    _import(
+        application,
+        _write(tmp_path / "customers.jsonl", [{"id": "c1"}]),
+        "crm.Customer",
+    )
+    arguments = {
+        "name": "session-customer",
+        "relation": "BELONGS_TO",
+        "from_": {"type": "calls.voice.Session", "fields": ["customer_id"]},
+        "to": {"type": "crm.Customer", "fields": ["id"]},
+        "contract_fingerprint": contract,
+    }
+    first = application.materialize_join(
+        **arguments,
+        description="Links a call to its customer.",
+        idempotency_key="description-join-1",
+    )
+    second = application.materialize_join(
+        **arguments,
+        description="Current customer link.",
+        idempotency_key="description-join-2",
+    )
+    relation = application.ontology()["document"]["relations"][0]
+    assert relation["description"] == "Current customer link."
+    assert relation["statistics"]["active_edges"] == 1
+    assert first["definition_hash"] == second["definition_hash"]
+    assert second["created_relations"] == 0
+    parent_view = application.ontology("calls")["document"]
+    assert [item["type"] for item in parent_view["entities"]] == [
+        "calls.voice.Session"
+    ]
+    assert parent_view["statistics"] == {
+        "active_relations": 1,
+        "attributes": 2,
+        "nodes": 1,
+    }
+
+
+def test_typed_composite_and_integer_import_keys(
+    m5: tuple[Any, ...], tmp_path: Path
+) -> None:
+    application, _, _ = m5
+    composite_key = [
+        {"field": "tenant", "type": "string"},
+        {"field": "code", "type": "number"},
+    ]
+    created = _import(
+        application,
+        _write(
+            tmp_path / "composite.jsonl",
+            [
+                {"tenant": "t1", "code": 1, "value": "first"},
+                {"tenant": "t2", "code": 1, "value": "second"},
+                {"tenant": "t1", "code": 2, "value": "third"},
+            ],
+        ),
+        "calls.CompositeSession",
+        composite_key,
+    )
+    assert created["created_nodes"] == 3
+    updated = _import(
+        application,
+        _write(
+            tmp_path / "composite-patch.jsonl",
+            [{"tenant": "t1", "code": 1, "value": "updated"}],
+        ),
+        "calls.CompositeSession",
+        composite_key,
+    )
+    assert updated["created_nodes"] == 0
+    assert updated["updated_nodes"] == 1
+
+    with pytest.raises(ImportValidationError, match="expected number"):
+        _import(
+            application,
+            _write(
+                tmp_path / "wrong-composite-type.jsonl",
+                [{"tenant": "t1", "code": "1"}],
+            ),
+            "calls.CompositeSession",
+            composite_key,
+        )
+
+    integer_key = [{"field": "code", "type": "integer"}]
+    integer_created = _import(
+        application,
+        _write(tmp_path / "integer.jsonl", [{"code": 7, "value": "first"}]),
+        "calls.IntegerSession",
+        integer_key,
+    )
+    integer_updated = _import(
+        application,
+        _write(
+            tmp_path / "integer-patch.jsonl",
+            [{"code": 7, "value": "updated"}],
+        ),
+        "calls.IntegerSession",
+        integer_key,
+    )
+    assert integer_created["created_nodes"] == 1
+    assert integer_updated["created_nodes"] == 0
+    assert integer_updated["updated_nodes"] == 1
+    assert len(application.memory_store.snapshot_records()["node"]) == 4
+
+
+def test_composite_import_key_ambiguity_rolls_back(
+    m5: tuple[Any, ...], tmp_path: Path
+) -> None:
+    application, _, _ = m5
+    _import(
+        application,
+        _write(
+            tmp_path / "ambiguous-composite-source.jsonl",
+            [
+                {"id": "a", "tenant": "t1", "code": 1},
+                {"id": "b", "tenant": "t1", "code": 1},
+            ],
+        ),
+        "calls.CompositeSession",
+    )
+    before = application.memory_store.snapshot_records()
+    with pytest.raises(ImportValidationError, match="ambiguous import key"):
+        _import(
+            application,
+            _write(
+                tmp_path / "ambiguous-composite-patch.jsonl",
+                [{"tenant": "t1", "code": 1, "value": "ambiguous"}],
+            ),
+            "calls.CompositeSession",
+            [
+                {"field": "tenant", "type": "string"},
+                {"field": "code", "type": "number"},
+            ],
+        )
+    after = application.memory_store.snapshot_records()
+    assert after["node"] == before["node"]
+    assert after["node_attribute"] == before["node_attribute"]
+
+
 def test_declaration_import_patch_replay_and_ontology(m5: tuple[Any, ...]) -> None:
     application, _, _ = m5
     fingerprint = application.schema.fingerprint
@@ -666,6 +858,7 @@ def test_redeclaration_resets_omitted_field_constraints_and_search(
     entity = application.ontology()["document"]["entities"][0]
     assert entity["fields"]["status"] == {
         "declared": False,
+        "description": None,
         "nullable": True,
         "privacy": "public",
         "required": False,
@@ -1107,8 +1300,14 @@ def test_text_semantic_snapshot_and_public_export(tmp_path: Path) -> None:
         FixtureEmbeddingProvider(),
     )
     application.initialize()
+    application.declare_namespace(
+        "calls",
+        "Call records.",
+        contract_fingerprint=schema.fingerprint,
+    )
     application.declare_entity(
         "calls.Session",
+        description="One call session.",
         fields={
             "status": {"type": "string", "searchable": True},
             "note": {
@@ -1155,6 +1354,7 @@ def test_text_semantic_snapshot_and_public_export(tmp_path: Path) -> None:
     }
 
     snapshot = tmp_path / "snapshot.tar.gz"
+    source_ontology = application.ontology()
     manifest = application.snapshot_create(snapshot)
     restored = MemoryApplication(
         SqliteMemoryStore(tmp_path / "restored.db"),
@@ -1163,6 +1363,7 @@ def test_text_semantic_snapshot_and_public_export(tmp_path: Path) -> None:
     )
     result = restored.snapshot_import(snapshot)
     assert result["snapshot_id"] == manifest["snapshot_id"]
+    assert restored.ontology() == source_ontology
     assert restored.ontology()["document"]["statistics"]["nodes"] == 2
 
     orphan_data = b"orphan"
@@ -1195,6 +1396,22 @@ def test_m5_cli_import_ontology_and_query(tmp_path: Path, capsys: Any) -> None:
     assert main([*shared, "init"]) == 0
     capsys.readouterr()
     fingerprint = load_schema(default_schema_path()).fingerprint
+    assert (
+        main(
+            [
+                *shared,
+                "ontology",
+                "declare-namespace",
+                "calls",
+                "--description",
+                "Call records.",
+                "--contract-fingerprint",
+                fingerprint,
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
     assert (
         main(
             [
@@ -1233,6 +1450,7 @@ def test_m5_cli_import_ontology_and_query(tmp_path: Path, capsys: Any) -> None:
     assert released["acquisition_ids"]
     assert main([*shared, "ontology", "describe"]) == 0
     ontology = json.loads(capsys.readouterr().out)
+    assert ontology["document"]["namespaces"][0]["description"] == "Call records."
     assert ontology["document"]["entities"][0]["type"] == "calls.Session"
     assert main([*shared, "query", "execute", "--document", str(query)]) == 0
     result = json.loads(capsys.readouterr().out)
@@ -1281,13 +1499,28 @@ async def test_real_m5_flow_through_mcp(m5: tuple[Any, ...], tmp_path: Path) -> 
         )
         assert query_contract["input_schema"]["properties"]["match"]
         assert query_contract["semantics"]["bindings"]
+        namespace_declaration = await client.call_tool(
+            "memory_ontology_declare_namespace",
+            {
+                "namespace": "calls",
+                "description": "Call records.",
+                "contract_fingerprint": fingerprint,
+            },
+        )
+        namespace_document = _tool_json(namespace_declaration)["document"]
+        assert namespace_document["namespaces"][0]["description"] == "Call records."
         declaration = await client.call_tool(
             "memory_ontology_declare_entity",
             {
                 "entity_type": "calls.Session",
                 "contract_fingerprint": fingerprint,
+                "description": "One call session.",
                 "fields": {
-                    "id": {"type": "string", "required": True},
+                    "id": {
+                        "description": "Session identifier.",
+                        "type": "string",
+                        "required": True,
+                    },
                     "note": {"type": "string"},
                 },
             },

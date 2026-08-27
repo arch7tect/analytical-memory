@@ -38,12 +38,28 @@ class MemoryAPI:
         privacy: str,
         fields: dict[str, dict[str, Any]],
         contract_fingerprint: str,
+        description: str | None = None,
     ) -> OntologyResponse:
         return OntologyResponse.model_validate(
             self.application.declare_entity(
                 entity_type,
+                description=description,
                 privacy=privacy,
                 fields=fields,
+                contract_fingerprint=contract_fingerprint,
+            )
+        )
+
+    def declare_namespace(
+        self,
+        namespace: str,
+        description: str,
+        contract_fingerprint: str,
+    ) -> OntologyResponse:
+        return OntologyResponse.model_validate(
+            self.application.declare_namespace(
+                namespace,
+                description,
                 contract_fingerprint=contract_fingerprint,
             )
         )
@@ -75,11 +91,13 @@ class MemoryAPI:
         to: dict[str, Any],
         contract_fingerprint: str,
         idempotency_key: str | None = None,
+        description: str | None = None,
     ) -> JoinMaterializationResponse:
         return JoinMaterializationResponse.model_validate(
             self.application.materialize_join(
                 name=name,
                 relation=relation,
+                description=description,
                 from_=from_,
                 to=to,
                 contract_fingerprint=contract_fingerprint,

@@ -9,7 +9,7 @@
     "semantics": "atomic_patch_upsert"
   },
   "json_types": ["unresolved", "string", "number", "boolean", "object", "array"],
-  "ontology_version": "1.0.0",
+  "ontology_version": "2.0.0",
   "privacy_classes": ["public", "private"],
   "record_types": [
     "Source",
@@ -18,6 +18,7 @@
     "NodeAttribute",
     "Relation",
     "Metric",
+    "NamespaceDeclaration",
     "EntityDeclaration",
     "ObservedField",
     "OntologyDeclaration",
@@ -38,5 +39,5 @@
     "directions": ["outbound", "inbound", "both"],
     "properties_allowed": false
   },
-  "schema_document_version": "7"
+  "schema_document_version": "8"
 }

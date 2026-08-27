@@ -37,6 +37,7 @@ QUERY_OPERATORS = frozenset(
 
 
 class FieldDeclarationInput(APIModel):
+    description: str | None = Field(default=None, min_length=1)
     type: DeclaredJsonType | None = None
     required: bool = False
     nullable: bool = True
@@ -61,6 +62,7 @@ class OntologyProvenance(APIModel):
 
 
 class OntologyField(APIModel):
+    description: str | None
     type: JsonType
     privacy: PrivacyClass
     declared: bool
@@ -71,6 +73,7 @@ class OntologyField(APIModel):
 
 class OntologyEntity(APIModel):
     type: str
+    description: str | None
     privacy: PrivacyClass
     declared: bool
     fields: dict[str, OntologyField]
@@ -85,6 +88,7 @@ class OntologyRelationStatistics(APIModel):
 class OntologyRelation(APIModel):
     name: str
     relation: str
+    description: str | None
     from_: JoinEndpointInput = Field(alias="from")
     to: JoinEndpointInput
     enabled: bool
@@ -98,8 +102,16 @@ class OntologyStatistics(APIModel):
     active_relations: int
 
 
+class OntologyNamespace(APIModel):
+    name: str
+    description: str | None
+    declared: bool
+    provenance: OntologyProvenance | None
+
+
 class OntologyDocument(APIModel):
-    ontology_version: Literal["1"]
+    ontology_version: Literal["2"]
+    namespaces: list[OntologyNamespace]
     entities: list[OntologyEntity]
     relations: list[OntologyRelation]
     ontology_fingerprint: str

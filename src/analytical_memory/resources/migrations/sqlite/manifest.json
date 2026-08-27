@@ -48,6 +48,12 @@
       "file": "008_retention_release.sql",
       "target_fingerprint": "0acf188864c209905b2022dd91cb7deed9077800c4b67b43877c23d89cbe1cc8",
       "version": 8
+    },
+    {
+      "checksum": "32111b9e00e955aaa19c6e4281d696f40b3c8cb28d2b9acbdb78dbc89f598946",
+      "file": "009_ontology_descriptions.sql",
+      "target_fingerprint": "3176355e7b7637b312c768bef5a11f299d2cb144cff8645dc0d5c306eb099b39",
+      "version": 9
     }
   ]
 }

@@ -187,12 +187,14 @@ The metadata compiler produces a backend-neutral canonical JSON document with:
 The ontology document combines explicit entity declarations with current
 canonical data and accumulated observed shape. It includes:
 
-- namespaces and entity types;
+- declared and observed namespaces, entity types, and their optional
+  human-readable descriptions;
 - optional declared field types, required fields, nullability, and entity- or
   field-level privacy even for entity types with no rows;
-- top-level field names, one declared or inferred JSON type, declared required
-  and nullable constraints, and search eligibility;
-- declared relation rules, endpoint types, review state, and provenance;
+- top-level field names, optional descriptions, one declared or inferred JSON
+  type, declared required and nullable constraints, and search eligibility;
+- declared relation rules, optional descriptions, endpoint types, review state,
+  and provenance;
 - observed entity, field, and relation counts;
 - supported query operators and entity-specific query fields;
 - a deterministic ontology fingerprint.
@@ -206,7 +208,7 @@ deferred.
 
 The fingerprint covers the queryable shape: namespaces, entities, top-level
 field names, effective types, declared required and nullable constraints,
-search eligibility, and active relation declarations. Import key selectors,
+search eligibility, descriptions, and active relation declarations. Import key selectors,
 exact row and edge counts, presence and null ratios, distinct counts, samples,
 join coverage, and other statistics are excluded from the fingerprint.
 
@@ -395,14 +397,18 @@ representation.
 
 ### Operational records
 
+- `NamespaceDeclaration`: a required non-empty description for one explicitly
+  declared exact namespace. It
+  may exist before any entity in that namespace and carries direct provenance.
 - `EntityDeclaration`: optional logical schema that may be created before
-  import. It records entity type, declared fields and JSON types, required and
-  nullable flags, entity and field privacy, provenance, and contract
+  import. It records entity type, optional entity and field descriptions,
+  declared fields and JSON types, required and nullable flags, entity and field
+  privacy, provenance, and contract
   fingerprint. It may describe an entity with zero rows and never rejects
   undeclared fields. Import key selection is not part of this record.
-- `OntologyDeclaration`: a provenance-bearing semantic annotation or join declaration
-  in a reserved ontology namespace. It augments entity declarations and
-  observed structure and is never a second store of observed counts or values.
+- `OntologyDeclaration`: a provenance-bearing join declaration with an optional
+  description. It augments entity declarations and observed structure and is
+  never a second store of observed counts or values.
 - `ObservedField`: one `(entity_type, field_name)` entry with an effective JSON
   type and first- and last-seen ingestion batches. Null does not establish or
   change its type; an all-null field remains `unresolved` until the first
@@ -420,6 +426,7 @@ Both relational backends enforce the same logical keys:
 - NodeAttribute: `(node_id, attribute_name)`;
 - Relation: `(source_node_id, type, target_node_id, logical_key)`;
 - EntityDeclaration: namespaced entity type;
+- NamespaceDeclaration: exact namespace name;
 - ObservedField: `(entity_type, field_name)`;
 - Metric: `(run_id, definition_version, canonical_dimensions_hash)`;
 - EvidenceFragment: object, locator, and extractor identity;
@@ -536,7 +543,12 @@ A user or agent may create an EntityDeclaration through API, CLI, or MCP before
 import, but this step is optional. A declaration exists independently from data
 and immediately appears in the Current Ontology Document. Its shortest form
 contains a namespaced entity `type` and optional privacy. Every field may declare
-its allowed JSON types, required presence, and nullability.
+its allowed JSON types, required presence, nullability, and a description. An
+entity may also have a description. An explicit namespace declaration requires
+a description. Description metadata is
+replaced by each declaration; omitting an optional entity, field, or join
+description clears it. Descriptions must explain meaning without embedding
+credentials, PII, or example records, and do not change privacy classification.
 Fields not mentioned by the declaration remain valid, inherit entity-level
 privacy, and extend observed ontology. Import key selection is not part of the
 declaration. Without a declaration, privacy defaults to `public`.
@@ -920,7 +932,7 @@ The initial command groups are:
 memory init | status | validate
 memory schema | capabilities
 memory jsonl import
-memory ontology declare-entity | describe
+memory ontology declare-namespace | declare-entity | describe
 memory query current-metric | execute
 memory traverse | search | explain
 memory join materialize | deactivate

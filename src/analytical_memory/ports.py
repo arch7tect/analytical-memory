@@ -21,6 +21,7 @@ from analytical_memory.domain import (
     JsonlImportRequest,
     JsonlScan,
     MemoryStoreStatus,
+    NamespaceDeclaration,
     QueryPlan,
     StoredBatch,
 )
@@ -98,6 +99,15 @@ class MemoryStore(ABC):
     def put_entity_declaration(
         self,
         declaration: EntityDeclaration,
+        contract_fingerprint: str,
+        evidence: ImportEvidence,
+    ) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def put_namespace_declaration(
+        self,
+        declaration: NamespaceDeclaration,
         contract_fingerprint: str,
         evidence: ImportEvidence,
     ) -> dict[str, Any]:

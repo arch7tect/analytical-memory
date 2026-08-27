@@ -83,10 +83,20 @@ def _query(application: MemoryApplication) -> dict[str, Any]:
 def _populate(application: MemoryApplication, tmp_path: Path) -> None:
     tmp_path.mkdir(parents=True, exist_ok=True)
     fingerprint = application.schema.fingerprint
+    application.declare_namespace(
+        "example",
+        "Example records.",
+        contract_fingerprint=fingerprint,
+    )
     application.declare_entity(
         "example.Session",
+        description="One session.",
         fields={
-            "status": {"type": "string", "searchable": True},
+            "status": {
+                "description": "Current status.",
+                "type": "string",
+                "searchable": True,
+            },
             "note": {"type": "string", "searchable": True},
         },
         contract_fingerprint=fingerprint,
@@ -120,6 +130,7 @@ def _populate(application: MemoryApplication, tmp_path: Path) -> None:
     application.materialize_join(
         name="message_to_session",
         relation="session",
+        description="Message owner session.",
         from_={"type": "example.Message", "fields": ["session_id"]},
         to={"type": "example.Session", "fields": ["id"]},
         contract_fingerprint=fingerprint,
@@ -143,6 +154,7 @@ def test_sqlite_to_postgresql_transfer_preserves_canonical_behavior(
     assert imported["verified"] is True
     assert imported["transfer_id"] == exported["transfer_id"]
     assert canonical_json(target.memory_store.transfer_records()) == before
+    assert target.ontology() == source.ontology()
     assert _query(target) == source_query
     for text in ("the", "run", "running", "the running"):
         source_search = source.search_text(text)
@@ -238,19 +250,19 @@ def test_postgresql_applies_each_manifest_migration(
     assert isinstance(postgres_store, PostgresMemoryStore)
     migrations = tmp_path / "postgresql-migrations"
     shutil.copytree(default_postgresql_migrations_directory(), migrations)
-    ninth = migrations / "009_probe.sql"
-    ninth.write_text(
+    tenth = migrations / "010_probe.sql"
+    tenth.write_text(
         "CREATE TABLE migration_probe (id INTEGER PRIMARY KEY);\n",
         encoding="utf-8",
     )
     manifest_path = migrations / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["schema_version"] = 9
+    manifest["schema_version"] = 10
     manifest["migrations"].append(
         {
-            "version": 9,
-            "file": ninth.name,
-            "checksum": sha256_bytes(ninth.read_bytes()),
+            "version": 10,
+            "file": tenth.name,
+            "checksum": sha256_bytes(tenth.read_bytes()),
             "target_fingerprint": load_schema().fingerprint,
         }
     )
@@ -264,12 +276,13 @@ def test_postgresql_applies_each_manifest_migration(
     store.initialize()
     store.initialize()
 
-    assert store.status().schema_version == 9
+    assert store.status().schema_version == 10
     assert [row["version"] for row in store.integrity()["migrations"]] == [
         6,
         7,
         8,
         9,
+        10,
     ]
     with store._connect() as connection:
         relation = connection.execute(

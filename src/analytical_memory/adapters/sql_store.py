@@ -25,6 +25,7 @@ from analytical_memory.domain import (
     JoinRequest,
     JsonlImportRequest,
     JsonlScan,
+    NamespaceDeclaration,
     QueryPlan,
     StoredBatch,
 )
@@ -42,7 +43,9 @@ from analytical_memory.jsonl import (
     import_idempotency_key,
     iter_jsonl,
     json_type,
+    normalize_declared_type,
     split_entity_type,
+    validate_namespace,
 )
 from analytical_memory.ontology import ontology_document
 from analytical_memory.ports import MemoryStore
@@ -56,6 +59,7 @@ SNAPSHOT_TABLES = (
     "relation",
     "metric",
     "entity_declaration",
+    "namespace_declaration",
     "observed_field",
     "ontology_declaration",
     "evidence_object",
@@ -294,6 +298,16 @@ class SqlMemoryStore(MemoryStore):
     def _ontology_snapshot_connection(
         connection: Any, namespace: str | None = None
     ) -> dict[str, Any]:
+        namespace_declarations = [
+            dict(row)
+            for row in connection.execute(
+                "SELECT * FROM namespace_declaration "
+                "WHERE (? IS NULL OR name = ? "
+                "OR substr(name, 1, length(?) + 1) = ? || '.') "
+                "ORDER BY name",
+                (namespace, namespace, namespace, namespace),
+            ).fetchall()
+        ]
         declarations = [
             dict(row)
             for row in connection.execute(
@@ -338,16 +352,18 @@ class SqlMemoryStore(MemoryStore):
         statistics = {
             "nodes": int(
                 connection.execute(
-                    "SELECT COUNT(*) FROM node WHERE (? IS NULL OR namespace = ?)",
-                    (namespace, namespace),
+                    "SELECT COUNT(*) FROM node WHERE (? IS NULL OR namespace = ? "
+                    "OR substr(namespace, 1, length(?) + 1) = ? || '.')",
+                    (namespace, namespace, namespace, namespace),
                 ).fetchone()[0]
             ),
             "attributes": int(
                 connection.execute(
                     "SELECT COUNT(*) FROM node_attribute AS attribute "
                     "JOIN node ON node.id = attribute.node_id "
-                    "WHERE (? IS NULL OR node.namespace = ?)",
-                    (namespace, namespace),
+                    "WHERE (? IS NULL OR node.namespace = ? "
+                    "OR substr(node.namespace, 1, length(?) + 1) = ? || '.')",
+                    (namespace, namespace, namespace, namespace),
                 ).fetchone()[0]
             ),
             "active_relations": int(
@@ -356,16 +372,102 @@ class SqlMemoryStore(MemoryStore):
                     "JOIN node AS source ON source.id = relation.source_node_id "
                     "JOIN node AS target ON target.id = relation.target_node_id "
                     "WHERE relation.active = 1 AND "
-                    "(? IS NULL OR source.namespace = ? OR target.namespace = ?)",
-                    (namespace, namespace, namespace),
+                    "(? IS NULL OR source.namespace = ? OR target.namespace = ? "
+                    "OR substr(source.namespace, 1, length(?) + 1) = ? || '.' "
+                    "OR substr(target.namespace, 1, length(?) + 1) = ? || '.')",
+                    (
+                        namespace,
+                        namespace,
+                        namespace,
+                        namespace,
+                        namespace,
+                        namespace,
+                        namespace,
+                    ),
                 ).fetchone()[0]
             ),
         }
-        return ontology_document(declarations, fields, joins, statistics)
+        return ontology_document(
+            namespace_declarations, declarations, fields, joins, statistics
+        )
 
     def ontology_snapshot(self, namespace: str | None = None) -> dict[str, Any]:
         with self._read_connection() as connection:
             return self._ontology_snapshot_connection(connection, namespace)
+
+    def put_namespace_declaration(
+        self,
+        declaration: NamespaceDeclaration,
+        contract_fingerprint: str,
+        evidence: ImportEvidence,
+    ) -> dict[str, Any]:
+        del contract_fingerprint
+        validate_namespace(declaration.name)
+        description = declaration.description.strip()
+        if not description:
+            raise ImportValidationError("namespace description must not be empty")
+        recorded_at = _now()
+        source_id = stable_uuid(
+            "source", "namespace-declaration", evidence.object.digest
+        )
+        run_id = stable_uuid(
+            "analytical_run", "namespace-declaration", evidence.object.digest
+        )
+        with self._write_connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._upsert_provenance_entities(
+                connection,
+                source_id=source_id,
+                source_natural_key=(f"namespace-declaration:{evidence.object.digest}"),
+                source_kind="namespace-declaration",
+                source_locator=f"evidence:sha256:{evidence.object.digest}",
+                source_privacy="public",
+                recorded_at=recorded_at,
+                evidence=evidence,
+            )
+            connection.execute(
+                "INSERT INTO analytical_run "
+                "(id, idempotency_key, batch_id, source_id, method, recorded_at) "
+                "VALUES (?, ?, NULL, ?, 'namespace-declaration-v1', ?) "
+                "ON CONFLICT(id) DO NOTHING",
+                (
+                    run_id,
+                    f"namespace-declaration:{evidence.object.digest}",
+                    source_id,
+                    recorded_at,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO evidence_acquisition "
+                "(id, evidence_object_id, source_id, run_id, privacy_class, "
+                "retention_required, retain_until, method, review_status, recorded_at) "
+                "VALUES (?, ?, ?, ?, 'public', 1, NULL, "
+                "'namespace-declaration-v1', 'unreviewed', ?) "
+                "ON CONFLICT(id) DO NOTHING",
+                (
+                    stable_uuid("evidence_acquisition", evidence.object.id, run_id),
+                    evidence.object.id,
+                    source_id,
+                    run_id,
+                    recorded_at,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO namespace_declaration "
+                "(name, description, source_id, fragment_id, recorded_at) "
+                "VALUES (?, ?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET "
+                "description = excluded.description, source_id = excluded.source_id, "
+                "fragment_id = excluded.fragment_id, "
+                "recorded_at = excluded.recorded_at",
+                (
+                    declaration.name,
+                    description,
+                    source_id,
+                    evidence.fragment.id,
+                    recorded_at,
+                ),
+            )
+            return self._ontology_snapshot_connection(connection)
 
     def put_entity_declaration(
         self,
@@ -374,12 +476,18 @@ class SqlMemoryStore(MemoryStore):
         evidence: ImportEvidence,
     ) -> dict[str, Any]:
         split_entity_type(declaration.entity_type)
+        entity_description = (
+            None if declaration.description is None else declaration.description.strip()
+        )
+        if declaration.description is not None and not entity_description:
+            raise ImportValidationError("entity description must not be empty")
         if declaration.privacy not in {"public", "private"}:
             raise ImportValidationError("privacy must be public or private")
         names = [field.name for field in declaration.fields]
         if len(names) != len(set(names)):
             raise ImportValidationError("declared field names must be unique")
         fields: dict[str, dict[str, Any]] = {}
+        field_descriptions: dict[str, str | None] = {}
         for field in declaration.fields:
             if not field.name:
                 raise ImportValidationError("declared field name must not be empty")
@@ -411,14 +519,33 @@ class SqlMemoryStore(MemoryStore):
                 "searchable": field.searchable,
                 "type": declared_type,
             }
+            description = (
+                None if field.description is None else field.description.strip()
+            )
+            if field.description is not None and not description:
+                raise ImportValidationError(
+                    f"description for field {field.name!r} must not be empty"
+                )
+            field_descriptions[field.name] = description
         fields_json = canonical_json(fields)
-        declaration_hash = sha256_json(
-            {
-                "entity_type": declaration.entity_type,
-                "fields": fields,
-                "privacy": declaration.privacy,
-            }
-        )
+        declaration_document: dict[str, Any] = {
+            "entity_type": declaration.entity_type,
+            "fields": {
+                name: {
+                    **specification,
+                    **(
+                        {"description": field_descriptions[name]}
+                        if field_descriptions[name] is not None
+                        else {}
+                    ),
+                }
+                for name, specification in fields.items()
+            },
+            "privacy": declaration.privacy,
+        }
+        if entity_description is not None:
+            declaration_document["description"] = entity_description
+        declaration_hash = sha256_json(declaration_document)
         recorded_at = _now()
         with self._write_connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -533,10 +660,12 @@ class SqlMemoryStore(MemoryStore):
                         )
             if existing is not None:
                 connection.execute(
-                    "UPDATE entity_declaration SET privacy_class = ?, fields_json = ?, "
-                    "declaration_hash = ?, source_id = ?, fragment_id = ?, "
+                    "UPDATE entity_declaration SET description = ?, "
+                    "privacy_class = ?, fields_json = ?, declaration_hash = ?, "
+                    "source_id = ?, fragment_id = ?, "
                     "recorded_at = ? WHERE entity_type = ?",
                     (
+                        entity_description,
                         declaration.privacy,
                         fields_json,
                         declaration_hash,
@@ -549,11 +678,12 @@ class SqlMemoryStore(MemoryStore):
             else:
                 connection.execute(
                     "INSERT INTO entity_declaration "
-                    "(entity_type, privacy_class, fields_json, declaration_hash, "
-                    "source_id, fragment_id, recorded_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "(entity_type, description, privacy_class, fields_json, "
+                    "declaration_hash, source_id, fragment_id, recorded_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         declaration.entity_type,
+                        entity_description,
                         declaration.privacy,
                         fields_json,
                         declaration_hash,
@@ -567,7 +697,8 @@ class SqlMemoryStore(MemoryStore):
                 field_parameters = [declaration.entity_type, *omitted_fields]
                 connection.execute(
                     "UPDATE observed_field SET declared = 0, required = 0, "
-                    "nullable = 1, searchable = 0 WHERE entity_type = ? "
+                    "nullable = 1, searchable = 0, description = NULL "
+                    "WHERE entity_type = ? "
                     f"AND field_name IN ({placeholders})",
                     field_parameters,
                 )
@@ -616,10 +747,11 @@ class SqlMemoryStore(MemoryStore):
                 requested_type = specification["type"] or "unresolved"
                 connection.execute(
                     "INSERT INTO observed_field "
-                    "(entity_type, field_name, json_type, privacy_class, required, "
-                    "nullable, searchable, declared, first_batch_id, last_batch_id) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, 1, NULL, NULL) "
+                    "(entity_type, field_name, description, json_type, privacy_class, "
+                    "required, nullable, searchable, declared, first_batch_id, "
+                    "last_batch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, NULL) "
                     "ON CONFLICT(entity_type, field_name) DO UPDATE SET "
+                    "description = excluded.description, "
                     "json_type = CASE WHEN observed_field.json_type = 'unresolved' "
                     "THEN excluded.json_type ELSE observed_field.json_type END, "
                     "privacy_class = CASE WHEN "
@@ -630,6 +762,7 @@ class SqlMemoryStore(MemoryStore):
                     (
                         declaration.entity_type,
                         name,
+                        field_descriptions[name],
                         requested_type,
                         specification["privacy"],
                         int(specification["required"]),
@@ -860,21 +993,40 @@ class SqlMemoryStore(MemoryStore):
             updated_nodes = 0
             attributes_written = 0
             for line_number, record in iter_jsonl(scan.spool_path):
-                conditions = []
-                parameters: list[Any] = [namespace, node_type]
-                for selector in request.key:
-                    conditions.append(
-                        "EXISTS (SELECT 1 FROM node_attribute AS key_attribute "
-                        "WHERE key_attribute.node_id = node.id "
-                        "AND key_attribute.attribute_name = ? "
-                        "AND key_attribute.value_json = ?)"
+                key_selector, *remaining_selectors = request.key
+                parameters: list[Any] = [
+                    namespace,
+                    node_type,
+                    key_selector.field,
+                    normalize_declared_type(key_selector.type),
+                    canonical_json(record[key_selector.field]),
+                ]
+                lookup = (
+                    "SELECT key_attribute.node_id AS id "
+                    "FROM node_attribute AS key_attribute "
+                    "JOIN node ON node.id = key_attribute.node_id "
+                    "WHERE node.namespace = ? AND node.type = ? "
+                    "AND key_attribute.attribute_name = ? "
+                    "AND key_attribute.json_type = ? "
+                    "AND key_attribute.value_json = ?"
+                )
+                for selector in remaining_selectors:
+                    lookup += (
+                        " AND EXISTS (SELECT 1 FROM node_attribute AS other_key "
+                        "WHERE other_key.node_id = key_attribute.node_id "
+                        "AND other_key.attribute_name = ? "
+                        "AND other_key.json_type = ? "
+                        "AND other_key.value_json = ?)"
                     )
                     parameters.extend(
-                        [selector.field, canonical_json(record[selector.field])]
+                        [
+                            selector.field,
+                            normalize_declared_type(selector.type),
+                            canonical_json(record[selector.field]),
+                        ]
                     )
                 matches = connection.execute(
-                    "SELECT node.id FROM node WHERE node.namespace = ? "
-                    "AND node.type = ? AND " + " AND ".join(conditions) + " LIMIT 2",
+                    lookup + " LIMIT 2",
                     parameters,
                 ).fetchall()
                 if len(matches) > 1:
@@ -1267,6 +1419,11 @@ class SqlMemoryStore(MemoryStore):
     ) -> dict[str, Any]:
         if not request.name or not request.relation:
             raise JoinConflictError("join name and relation must not be empty")
+        if request.description is not None and not request.description.strip():
+            raise JoinConflictError("join description must not be empty")
+        description = (
+            None if request.description is None else request.description.strip()
+        )
         if not request.from_.fields or len(request.from_.fields) != len(
             request.to.fields
         ):
@@ -1280,9 +1437,13 @@ class SqlMemoryStore(MemoryStore):
             "to": {"fields": list(request.to.fields), "type": request.to.type},
         }
         definition_hash = sha256_json(definition)
+        request_document = dict(definition)
+        if description is not None:
+            request_document["description"] = description
+        request_hash = sha256_json(request_document)
         idempotency_key = request.idempotency_key or str(uuid.uuid4())
         batch_id = stable_uuid("ingestion_batch", "join", idempotency_key)
-        source_id = stable_uuid("source", "join-declaration", definition_hash)
+        source_id = stable_uuid("source", "join-declaration", request_hash)
         run_id = stable_uuid("analytical_run", "join", idempotency_key)
         recorded_at = _now()
         from_namespace, from_type = split_entity_type(request.from_.type)
@@ -1295,7 +1456,7 @@ class SqlMemoryStore(MemoryStore):
                 (idempotency_key,),
             ).fetchone()
             if replay is not None:
-                if str(replay["input_hash"]) != definition_hash:
+                if str(replay["input_hash"]) != request_hash:
                     raise JoinConflictError("join idempotency key conflict")
                 result = json.loads(str(replay["result_json"]))
                 if not isinstance(result, dict):
@@ -1339,16 +1500,16 @@ class SqlMemoryStore(MemoryStore):
                 (
                     batch_id,
                     idempotency_key,
-                    definition_hash,
+                    request_hash,
                     request.contract_fingerprint,
-                    canonical_json(definition),
+                    canonical_json(request_document),
                     recorded_at,
                 ),
             )
             self._upsert_provenance_entities(
                 connection,
                 source_id=source_id,
-                source_natural_key=f"join-declaration:{definition_hash}",
+                source_natural_key=f"join-declaration:{request_hash}",
                 source_kind="join-declaration",
                 source_locator=f"evidence:sha256:{evidence.object.digest}",
                 source_privacy="public",
@@ -1378,12 +1539,13 @@ class SqlMemoryStore(MemoryStore):
             if existing_declaration is None:
                 connection.execute(
                     "INSERT INTO ontology_declaration "
-                    "(name, kind, relation_type, from_entity, from_fields_json, "
-                    "to_entity, to_fields_json, definition_hash, enabled, source_id, "
-                    "fragment_id, recorded_at) "
-                    "VALUES (?, 'join', ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
+                    "(name, kind, description, relation_type, from_entity, "
+                    "from_fields_json, to_entity, to_fields_json, definition_hash, "
+                    "enabled, source_id, fragment_id, recorded_at) "
+                    "VALUES (?, 'join', ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
                     (
                         request.name,
+                        description,
                         request.relation,
                         request.from_.type,
                         canonical_json(list(request.from_.fields)),
@@ -1393,6 +1555,18 @@ class SqlMemoryStore(MemoryStore):
                         source_id,
                         evidence.fragment.id,
                         recorded_at,
+                    ),
+                )
+            else:
+                connection.execute(
+                    "UPDATE ontology_declaration SET description = ?, source_id = ?, "
+                    "fragment_id = ?, recorded_at = ? WHERE name = ?",
+                    (
+                        description,
+                        source_id,
+                        evidence.fragment.id,
+                        recorded_at,
+                        request.name,
                     ),
                 )
             source_nodes = connection.execute(

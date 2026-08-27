@@ -122,9 +122,10 @@ materialized relations are counted without duplication. Reusing a join name
 with the same canonical definition reruns it; reusing that name with a different
 definition is an error.
 
-The ontology fingerprint includes namespaces, entity types, top-level field
+The ontology fingerprint includes namespaces and their descriptions, entity
+types and descriptions, top-level field names and descriptions,
 names, effective types, declared required and nullable constraints, search
-eligibility, and active relation declarations. Import key selectors, observed
+eligibility, and active relation declarations and descriptions. Import key selectors, observed
 presence, counts, ratios, samples, and link coverage are excluded. Materializing
 additional edges under an unchanged declaration does not change it.
 

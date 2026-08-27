@@ -1,6 +1,6 @@
 {
   "backend_profile": "postgresql",
-  "schema_version": 8,
+  "schema_version": 9,
   "migrations": [
     {
       "version": 6,
@@ -19,6 +19,12 @@
       "file": "008_retention_release.sql",
       "checksum": "07ad20587069735be7597ce488c744725305b840aa816c98eabcbbe8a038c1f2",
       "target_fingerprint": "0acf188864c209905b2022dd91cb7deed9077800c4b67b43877c23d89cbe1cc8"
+    },
+    {
+      "version": 9,
+      "file": "009_ontology_descriptions.sql",
+      "checksum": "15fcbb24c4faf4555fc4b45ddbca75555bcb57996fbc3060d00a74bece8df806",
+      "target_fingerprint": "3176355e7b7637b312c768bef5a11f299d2cb144cff8645dc0d5c306eb099b39"
     }
   ]
 }

@@ -65,11 +65,16 @@ def _parser() -> argparse.ArgumentParser:
     ontology_describe.add_argument("--namespace")
     ontology_declare = ontology_commands.add_parser("declare-entity")
     ontology_declare.add_argument("entity_type")
+    ontology_declare.add_argument("--description")
     ontology_declare.add_argument(
         "--privacy", choices=("public", "private"), default="public"
     )
     ontology_declare.add_argument("--fields", default="{}")
     ontology_declare.add_argument("--contract-fingerprint", required=True)
+    ontology_namespace = ontology_commands.add_parser("declare-namespace")
+    ontology_namespace.add_argument("namespace")
+    ontology_namespace.add_argument("--description", required=True)
+    ontology_namespace.add_argument("--contract-fingerprint", required=True)
 
     query = subcommands.add_parser("query")
     query.add_argument(
@@ -274,6 +279,12 @@ def _execute(arguments: argparse.Namespace) -> dict[str, Any]:
     if arguments.command == "ontology":
         if arguments.ontology_command == "describe":
             return api.ontology(arguments.namespace).model_dump(mode="json")
+        if arguments.ontology_command == "declare-namespace":
+            return api.declare_namespace(
+                arguments.namespace,
+                arguments.description,
+                arguments.contract_fingerprint,
+            ).model_dump(mode="json")
         fields = strict_json_loads(arguments.fields)
         if not isinstance(fields, dict):
             raise ValueError("--fields must be a JSON object")
@@ -282,6 +293,7 @@ def _execute(arguments: argparse.Namespace) -> dict[str, Any]:
             arguments.privacy,
             fields,
             arguments.contract_fingerprint,
+            arguments.description,
         ).model_dump(mode="json")
     if arguments.command == "query":
         if arguments.query_name == "execute":
@@ -314,6 +326,7 @@ def _execute(arguments: argparse.Namespace) -> dict[str, Any]:
             definition["to"],
             arguments.contract_fingerprint,
             arguments.idempotency_key,
+            definition.get("description"),
         ).model_dump(mode="json")
     if arguments.command == "relation":
         return api.deactivate_relation(arguments.relation_id).model_dump(mode="json")
