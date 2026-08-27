@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -15,10 +16,13 @@ from analytical_memory.domain import (
     EmbeddingProviderInfo,
 )
 from analytical_memory.errors import BatchValidationError
-from analytical_memory.migrations import default_migrations_directory
 from analytical_memory.ports import EmbeddingProvider, MemoryStore
+from analytical_memory.postgresql_migrations import (
+    default_postgresql_migrations_directory,
+)
 from analytical_memory.resources import resource_path
 from analytical_memory.schema_contract import load_schema
+from analytical_memory.sqlite_migrations import default_sqlite_migrations_directory
 
 
 class FixtureEmbeddingProvider(EmbeddingProvider):
@@ -203,7 +207,9 @@ def test_postgresql_exact_vector_engine_matches_sqlite(
 
 def test_backend_manifests_target_the_same_logical_schema() -> None:
     sqlite = json.loads(
-        (default_migrations_directory() / "manifest.json").read_text(encoding="utf-8")
+        (default_sqlite_migrations_directory() / "manifest.json").read_text(
+            encoding="utf-8"
+        )
     )
     postgresql = json.loads(
         resource_path("migrations", "postgresql", "manifest.json").read_text(
@@ -222,6 +228,123 @@ def test_backend_manifests_target_the_same_logical_schema() -> None:
         )
         == migration["checksum"]
     )
+
+
+def test_postgresql_applies_each_manifest_migration(
+    postgres_store: MemoryStore, tmp_path: Path
+) -> None:
+    from analytical_memory.adapters.postgresql import PostgresMemoryStore
+
+    assert isinstance(postgres_store, PostgresMemoryStore)
+    migrations = tmp_path / "postgresql-migrations"
+    shutil.copytree(default_postgresql_migrations_directory(), migrations)
+    ninth = migrations / "009_probe.sql"
+    ninth.write_text(
+        "CREATE TABLE migration_probe (id INTEGER PRIMARY KEY);\n",
+        encoding="utf-8",
+    )
+    manifest_path = migrations / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["schema_version"] = 9
+    manifest["migrations"].append(
+        {
+            "version": 9,
+            "file": ninth.name,
+            "checksum": sha256_bytes(ninth.read_bytes()),
+            "target_fingerprint": load_schema().fingerprint,
+        }
+    )
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    store = PostgresMemoryStore(
+        postgres_store.dsn,
+        schema=postgres_store.schema,
+        migrations_directory=migrations,
+    )
+
+    store.initialize()
+    store.initialize()
+
+    assert store.status().schema_version == 9
+    assert [row["version"] for row in store.integrity()["migrations"]] == [
+        6,
+        7,
+        8,
+        9,
+    ]
+    with store._connect() as connection:
+        relation = connection.execute(
+            "SELECT to_regclass('migration_probe') AS relation"
+        ).fetchone()
+    assert relation is not None
+    assert relation["relation"] is not None
+
+
+def test_postgresql_integrity_reports_checks_without_claiming_physical_check(
+    postgres_store: MemoryStore,
+) -> None:
+    postgres_store.initialize()
+    assert not hasattr(postgres_store, "database")
+
+    integrity = postgres_store.integrity()
+
+    assert integrity["ok"] is True
+    assert integrity["physical_check"] == "unsupported"
+    assert all(check["ok"] for check in integrity["checks"].values())
+
+
+def test_postgresql_integrity_detects_missing_table_and_tampered_ledger(
+    postgres_store: MemoryStore,
+) -> None:
+    postgres_store.initialize()
+    connection = postgres_store._connect()  # type: ignore[attr-defined]
+    with connection:
+        connection.execute("DROP TABLE embedding_record")
+        connection.execute(
+            "UPDATE schema_migration SET checksum = 'tampered' "
+            "WHERE backend_profile = 'postgresql' AND version = 8"
+        )
+
+    integrity = postgres_store.integrity()
+
+    assert integrity["ok"] is False
+    assert integrity["checks"]["tables"]["missing"] == ["embedding_record"]
+    assert integrity["checks"]["migration_ledger"]["ok"] is False
+
+
+def test_postgresql_integrity_reports_missing_search_index_table(
+    postgres_store: MemoryStore,
+) -> None:
+    postgres_store.initialize()
+    connection = postgres_store._connect()  # type: ignore[attr-defined]
+    with connection:
+        connection.execute("DROP TABLE search_document_fts")
+
+    integrity = postgres_store.integrity()
+
+    assert integrity["ok"] is False
+    assert integrity["checks"]["tables"]["missing"] == ["search_document_fts"]
+    assert integrity["checks"]["search_index"]["unavailable_tables"] == [
+        "search_document_fts"
+    ]
+
+
+def test_postgresql_integrity_detects_unvalidated_constraint(
+    postgres_store: MemoryStore,
+) -> None:
+    postgres_store.initialize()
+    connection = postgres_store._connect()  # type: ignore[attr-defined]
+    with connection:
+        connection.execute(
+            "ALTER TABLE source ADD CONSTRAINT source_id_not_empty "
+            "CHECK (id <> '') NOT VALID"
+        )
+
+    integrity = postgres_store.integrity()
+
+    assert integrity["ok"] is False
+    assert integrity["checks"]["validated_constraints"]["invalid"] == [
+        {"constraint": "source_id_not_empty", "table": "source"}
+    ]
 
 
 def test_failed_postgresql_transfer_rolls_back_without_changing_source(

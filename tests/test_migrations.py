@@ -10,8 +10,8 @@ import pytest
 from analytical_memory.adapters.sqlite import SqliteMemoryStore
 from analytical_memory.canonical import sha256_bytes
 from analytical_memory.errors import StoreNotInitializedError
-from analytical_memory.migrations import default_migrations_directory
 from analytical_memory.schema_contract import default_schema_path
+from analytical_memory.sqlite_migrations import default_sqlite_migrations_directory
 
 
 def test_fresh_database_reaches_m51_schema(tmp_path: Path) -> None:
@@ -22,8 +22,17 @@ def test_fresh_database_reaches_m51_schema(tmp_path: Path) -> None:
 
     integrity = store.integrity()
     assert store.status().initialized is True
-    assert integrity["schema_version"] == 6
-    assert [item["version"] for item in integrity["migrations"]] == [1, 2, 3, 4, 5, 6]
+    assert integrity["schema_version"] == 8
+    assert [item["version"] for item in integrity["migrations"]] == [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+    ]
     with sqlite3.connect(database) as connection:
         tables = {
             row[0]
@@ -38,7 +47,7 @@ def test_fresh_database_reaches_m51_schema(tmp_path: Path) -> None:
 
 def test_m5_clean_break_reinitializes_legacy_current_tables(tmp_path: Path) -> None:
     database = tmp_path / "legacy.db"
-    migrations = default_migrations_directory()
+    migrations = default_sqlite_migrations_directory()
     with sqlite3.connect(database) as connection:
         for version in range(1, 5):
             name = next(migrations.glob(f"{version:03d}_*.sql"))
@@ -59,13 +68,13 @@ def test_m5_clean_break_reinitializes_legacy_current_tables(tmp_path: Path) -> N
     SqliteMemoryStore(database).initialize()
 
     with sqlite3.connect(database) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 8
         assert connection.execute("SELECT COUNT(*) FROM node").fetchone()[0] == 0
 
 
 def test_version_five_rows_receive_portable_sort_keys(tmp_path: Path) -> None:
     database = tmp_path / "version-five.db"
-    migrations = default_migrations_directory()
+    migrations = default_sqlite_migrations_directory()
     with sqlite3.connect(database) as connection:
         for version in range(1, 6):
             name = next(migrations.glob(f"{version:03d}_*.sql"))
@@ -119,7 +128,7 @@ def test_version_five_rows_receive_portable_sort_keys(tmp_path: Path) -> None:
 
 
 def test_changed_migration_is_rejected_before_initialization(tmp_path: Path) -> None:
-    source = default_migrations_directory()
+    source = default_sqlite_migrations_directory()
     migrations = tmp_path / "migrations"
     shutil.copytree(source, migrations)
     initial = migrations / "001_initial.sql"
@@ -131,17 +140,51 @@ def test_changed_migration_is_rejected_before_initialization(tmp_path: Path) -> 
 
 def test_manifest_targets_current_logical_fingerprint() -> None:
     manifest = json.loads(
-        (default_migrations_directory() / "manifest.json").read_text(encoding="utf-8")
+        (default_sqlite_migrations_directory() / "manifest.json").read_text(
+            encoding="utf-8"
+        )
     )
     schema = json.loads(default_schema_path().read_text(encoding="utf-8"))
     assert (
         manifest["migrations"][-1]["target_fingerprint"] == schema["schema_fingerprint"]
     )
+    assert (
+        manifest["migrations"][-2]["target_fingerprint"]
+        != manifest["migrations"][-1]["target_fingerprint"]
+    )
+    assert schema["schema_document_version"] == "7"
+
+
+def test_sqlite_integrity_reports_missing_tables_and_tampered_ledger(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "damaged.db"
+    store = SqliteMemoryStore(database)
+    store.initialize()
+    with sqlite3.connect(database) as connection:
+        connection.execute("DROP TABLE embedding_record")
+        connection.execute("DROP TABLE search_document_fts")
+        connection.execute(
+            "UPDATE schema_migration SET checksum = 'tampered' "
+            "WHERE backend_profile = 'sqlite' AND version = 8"
+        )
+
+    integrity = store.integrity()
+
+    assert integrity["ok"] is False
+    assert integrity["checks"]["tables"]["missing"] == [
+        "embedding_record",
+        "search_document_fts",
+    ]
+    assert integrity["checks"]["migration_ledger"]["ok"] is False
+    assert integrity["checks"]["search_index"]["unavailable_tables"] == [
+        "search_document_fts"
+    ]
 
 
 def test_failed_migration_rolls_back_its_partial_schema(tmp_path: Path) -> None:
     database = tmp_path / "version-one.db"
-    source = default_migrations_directory()
+    source = default_sqlite_migrations_directory()
     migrations = tmp_path / "migrations"
     shutil.copytree(source, migrations)
     with sqlite3.connect(database) as connection:

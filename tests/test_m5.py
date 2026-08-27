@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 from mcp import Client, StdioServerParameters
 from mcp.types import TextContent
+from pydantic import ValidationError
 
 from analytical_memory.adapters.filesystem import FileEvidenceStore
 from analytical_memory.adapters.sqlite import SqliteMemoryStore
@@ -28,6 +29,7 @@ from analytical_memory.errors import (
     OntologyConflictError,
     ProhibitedContentError,
     QueryValidationError,
+    RetentionBlockedError,
     SchemaChangedError,
     error_code_registry,
 )
@@ -215,7 +217,25 @@ def test_import_key_validation_reports_line(
         _import(application, source, "calls.Session")
 
 
-def test_ambiguous_import_rolls_back_and_compensates_evidence(
+@pytest.mark.parametrize(
+    "raw",
+    [
+        '{"id":"first","id":"second"}\n',
+        '{"id":"s1","score":NaN}\n',
+        '{"id":"s1","score":Infinity}\n',
+    ],
+)
+def test_jsonl_rejects_duplicate_keys_and_non_finite_numbers(
+    m5: tuple[Any, ...], tmp_path: Path, raw: str
+) -> None:
+    application, _, _ = m5
+    source = tmp_path / "strict.jsonl"
+    source.write_text(raw, encoding="utf-8")
+    with pytest.raises(ImportValidationError, match="line 1: invalid JSON"):
+        _import(application, source, "calls.Session")
+
+
+def test_ambiguous_import_rolls_back_and_reports_orphan_evidence(
     m5: tuple[Any, ...], tmp_path: Path
 ) -> None:
     application, database, evidence_root = m5
@@ -249,7 +269,10 @@ def test_ambiguous_import_rolls_back_and_compensates_evidence(
     )
     assert after == before
     object_path = evidence_root / "objects" / "sha256" / digest[:2] / digest
-    assert not object_path.exists()
+    assert object_path.is_file()
+    assert digest in {
+        item["digest"] for item in application.evidence_audit()["orphans"]
+    }
 
     application.evidence_store.put(
         conflicting,
@@ -299,6 +322,286 @@ def test_declaration_tightens_privacy_and_rejects_loosening(
         )
 
 
+def test_reused_evidence_privacy_only_tightens(
+    m5: tuple[Any, ...], tmp_path: Path
+) -> None:
+    application, _, _ = m5
+    source = _write(tmp_path / "shared.jsonl", [{"id": "s1", "status": "ok"}])
+    public_import = _import(application, source, "public.Session")
+    application.declare_entity(
+        "private.Session",
+        privacy="private",
+        contract_fingerprint=application.schema.fingerprint,
+    )
+    _import(application, source, "private.Session")
+    _import(application, source, "another.Session")
+
+    catalog, truncated = application.memory_store.evidence_catalog(
+        1, public_import["evidence_digest"]
+    )
+    assert truncated is False
+    assert catalog[0]["effective_privacy"] == "private"
+    assert catalog[0]["object"]["privacy_class"] == "private"
+    assert {item["privacy_class"] for item in catalog[0]["fragments"]} == {
+        "private"
+    }
+    assert {item["privacy_class"] for item in catalog[0]["acquisitions"]} == {
+        "public",
+        "private",
+    }
+    assert (
+        application.evidence_status(public_import["evidence_digest"])[
+            "effective_privacy"
+        ]
+        == "private"
+    )
+
+
+def test_import_replay_repairs_missing_evidence_location(
+    m5: tuple[Any, ...], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    application, _, _ = m5
+    source = _write(tmp_path / "repair.jsonl", [{"id": "s1"}])
+    original = application.memory_store.record_evidence_check
+    failed = False
+
+    def fail_once(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        nonlocal failed
+        if not failed:
+            failed = True
+            raise RuntimeError("forced location-recording failure")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(application.memory_store, "record_evidence_check", fail_once)
+    with pytest.raises(RuntimeError, match="forced location-recording failure"):
+        _import(application, source, "calls.Session")
+
+    replay = _import(application, source, "calls.Session")
+    assert replay["replayed"] is True
+    catalog, _ = application.memory_store.evidence_catalog(
+        1, replay["evidence_digest"]
+    )
+    assert catalog[0]["locations"][0]["availability"] == "present"
+
+
+def test_retention_release_plan_and_retire_are_explicit_and_audited(
+    m5: tuple[Any, ...], tmp_path: Path
+) -> None:
+    application, _, _ = m5
+    imported = _import(
+        application,
+        _write(tmp_path / "retained.jsonl", [{"id": "s1"}]),
+        "calls.Session",
+    )
+    digest = imported["evidence_digest"]
+    before = application.retention_plan(
+        tmp_path / "before-release.json",
+        digests=[digest],
+        created_at="2026-01-01T00:00:00Z",
+    )
+    assert before["objects"] == []
+    with pytest.raises(ValueError, match="confirmation"):
+        application.retention_release(
+            digest,
+            confirmation="wrong",
+            reason="reviewed",
+            released_at="2026-01-02T00:00:00Z",
+        )
+
+    released = application.retention_release(
+        digest,
+        confirmation=digest,
+        reason="reviewed for retirement",
+        released_at="2026-01-02T00:00:00Z",
+    )
+    assert released["retention_state"] == "expired"
+    assert released["acquisition_ids"]
+    acquisition = next(
+        item
+        for item in application.memory_store.snapshot_records()[
+            "evidence_acquisition"
+        ]
+        if item["evidence_object_id"]
+        == application.memory_store.evidence_catalog(1, digest)[0][0]["object"]["id"]
+    )
+    assert acquisition["retention_required"] == 0
+    assert acquisition["released_at"] == "2026-01-02T00:00:00Z"
+    assert acquisition["release_reason"] == "reviewed for retirement"
+
+    plan_path = tmp_path / "after-release.json"
+    plan = application.retention_plan(
+        plan_path,
+        digests=[digest],
+        created_at="2026-01-03T00:00:00Z",
+    )
+    assert [item["digest"] for item in plan["objects"]] == [digest]
+    retired = application.retention_retire(
+        plan_path,
+        confirmation=plan["plan_id"],
+        retired_at="2026-01-04T00:00:00Z",
+    )
+    assert retired["retired_digests"] == [digest]
+    assert application.evidence_status(digest)["retired"] is True
+    assert application.evidence_status(digest)["availability"] == "missing"
+    with pytest.raises(RetentionBlockedError, match="already retired"):
+        application.retention_release(
+            digest,
+            confirmation=digest,
+            reason="too late",
+            released_at="2026-01-05T00:00:00Z",
+        )
+
+
+def test_retention_release_is_idempotent_and_preserves_retain_until(
+    m5: tuple[Any, ...], tmp_path: Path
+) -> None:
+    application, _, _ = m5
+    imported = _import(
+        application,
+        _write(tmp_path / "retained-until.jsonl", [{"id": "s1"}]),
+        "calls.Session",
+    )
+    digest = imported["evidence_digest"]
+    connection = application.memory_store._connect()  # type: ignore[attr-defined]
+    with connection:
+        connection.execute(
+            "UPDATE evidence_acquisition SET retention_required = 0, "
+            "retain_until = ?",
+            ("2026-01-02T00:00:00Z",),
+        )
+
+    with pytest.raises(ValueError, match="must not be empty"):
+        application.retention_release(
+            digest,
+            confirmation=digest,
+            reason="   ",
+            released_at="2026-01-01T00:00:00Z",
+        )
+    first = application.retention_release(
+        digest,
+        confirmation=digest,
+        reason="first review",
+        released_at="2026-01-01T00:00:00Z",
+    )
+    assert first["retention_state"] == "active"
+    assert first["acquisition_ids"]
+    report = application.retention_report(as_of="2026-01-02T01:00:00+02:00")
+    assert report["as_of"] == "2026-01-01T23:00:00Z"
+    assert report["objects"][0]["retention_state"] == "active"
+    assert report["objects"][0]["releases"] == first["releases"]
+
+    second = application.retention_release(
+        digest,
+        confirmation=digest,
+        reason="must not replace the first audit",
+        released_at="2026-01-03T00:00:00Z",
+    )
+    assert second["acquisition_ids"] == []
+    assert second["released_at"] == "2026-01-01T00:00:00Z"
+    assert second["reason"] == "first review"
+    assert second["releases"] == first["releases"]
+    persisted = application.memory_store.snapshot_records()[
+        "evidence_acquisition"
+    ][0]
+    assert persisted["retain_until"] == "2026-01-02T00:00:00Z"
+
+
+def test_retention_release_reports_the_new_audit_for_a_reacquired_object(
+    m5: tuple[Any, ...], tmp_path: Path
+) -> None:
+    application, _, _ = m5
+    source = _write(tmp_path / "reacquired.jsonl", [{"id": "s1"}])
+    first_import = _import(application, source, "calls.FirstSession")
+    digest = first_import["evidence_digest"]
+    application.retention_release(
+        digest,
+        confirmation=digest,
+        reason="first review",
+        released_at="2026-01-01T00:00:00Z",
+    )
+    second_import = _import(application, source, "calls.SecondSession")
+    assert second_import["evidence_digest"] == digest
+
+    second_release = application.retention_release(
+        digest,
+        confirmation=digest,
+        reason="second review",
+        released_at="2026-01-02T00:00:00Z",
+    )
+
+    assert second_release["acquisition_ids"]
+    assert second_release["released_at"] == "2026-01-02T00:00:00Z"
+    assert second_release["reason"] == "second review"
+    assert len(second_release["releases"]) == 2
+
+
+def test_failed_retirement_does_not_claim_the_store_copy_is_missing(
+    m5: tuple[Any, ...], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    application, _, _ = m5
+    imported = _import(
+        application,
+        _write(tmp_path / "retire-failure.jsonl", [{"id": "s1"}]),
+        "calls.Session",
+    )
+    digest = imported["evidence_digest"]
+    application.retention_release(
+        digest,
+        confirmation=digest,
+        reason="reviewed",
+        released_at="2026-01-01T00:00:00Z",
+    )
+    plan_path = tmp_path / "retire-failure-plan.json"
+    plan = application.retention_plan(
+        plan_path,
+        digests=[digest],
+        created_at="2026-01-02T00:00:00Z",
+    )
+    original_retire = application.evidence_store.retire
+
+    def fail_retire(_: str) -> bool:
+        raise OSError("forced removal failure")
+
+    monkeypatch.setattr(application.evidence_store, "retire", fail_retire)
+    failed = application.retention_retire(
+        plan_path,
+        confirmation=plan["plan_id"],
+        retired_at="2026-01-03T00:00:00Z",
+    )
+    assert failed["outcomes"][0]["store_copy"] == "removal_failed"
+    assert application.evidence_status(digest)["retired"] is True
+    assert application.evidence_status(digest)["availability"] == "present"
+
+    monkeypatch.setattr(application.evidence_store, "retire", original_retire)
+    retried = application.retention_retire(
+        plan_path,
+        confirmation=plan["plan_id"],
+        retired_at="2026-01-04T00:00:00Z",
+    )
+    assert retried["outcomes"][0]["store_copy"] == "removed"
+    assert application.evidence_status(digest)["availability"] == "missing"
+
+
+def test_integrity_detects_search_index_drift(m5: tuple[Any, ...]) -> None:
+    application, _, _ = m5
+    connection = application.memory_store._connect()  # type: ignore[attr-defined]
+    with connection:
+        connection.execute(
+            "INSERT INTO search_document_fts(document_id, content) VALUES (?, ?)",
+            ("orphan", "orphan content"),
+        )
+
+    integrity = application.memory_store.integrity()
+
+    assert integrity["ok"] is False
+    assert integrity["checks"]["search_index"]["extra_rows"] == 1
+    assert set(integrity["checks"]["foreign_keys"]) == {
+        "errors",
+        "ok",
+        "orphan_counts",
+    }
+
+
 def test_declaration_conflicts_leave_current_ontology_unchanged(
     m5: tuple[Any, ...], tmp_path: Path
 ) -> None:
@@ -322,7 +625,216 @@ def test_declaration_conflicts_leave_current_ontology_unchanged(
             contract_fingerprint=application.schema.fingerprint,
         )
     assert application.ontology()["ontology_fingerprint"] == before
-    assert set((evidence_root / "objects" / "sha256").glob("*/*")) == objects_before
+    objects_after = set((evidence_root / "objects" / "sha256").glob("*/*"))
+    assert objects_before < objects_after
+    orphan_digests = {
+        item["digest"] for item in application.evidence_audit()["orphans"]
+    }
+    assert {path.name for path in objects_after - objects_before} == orphan_digests
+
+
+def test_redeclaration_resets_omitted_field_constraints_and_search(
+    m5: tuple[Any, ...], tmp_path: Path
+) -> None:
+    application, _, _ = m5
+    application.declare_entity(
+        "calls.Session",
+        fields={
+            "id": {"type": "string", "required": True, "nullable": False},
+            "status": {
+                "type": "string",
+                "required": True,
+                "nullable": False,
+                "searchable": True,
+            },
+        },
+        contract_fingerprint=application.schema.fingerprint,
+    )
+    _import(
+        application,
+        _write(tmp_path / "searchable.jsonl", [{"id": "s1", "status": "failed"}]),
+        "calls.Session",
+    )
+    assert application.search_text("failed", 10)["results"]
+
+    application.declare_entity(
+        "calls.Session",
+        fields={"id": {"type": "string", "required": True, "nullable": False}},
+        contract_fingerprint=application.schema.fingerprint,
+    )
+
+    entity = application.ontology()["document"]["entities"][0]
+    assert entity["fields"]["status"] == {
+        "declared": False,
+        "nullable": True,
+        "privacy": "public",
+        "required": False,
+        "searchable": False,
+        "type": "string",
+    }
+    assert application.search_text("failed", 10)["coverage"] == {
+        "complete": True,
+        "eligible_count": 0,
+        "indexed_count": 0,
+    }
+    records = application.memory_store.snapshot_records()
+    status_attribute = next(
+        item
+        for item in records["node_attribute"]
+        if item["attribute_name"] == "status"
+    )
+    assert status_attribute["searchable"] == 0
+    status_document = next(
+        item
+        for item in records["search_document"]
+        if item["target_id"] == status_attribute["id"]
+    )
+    assert status_document["lifecycle"] == "stale"
+
+    application.declare_entity(
+        "calls.Session",
+        fields={
+            "id": {"type": "string", "required": True, "nullable": False},
+            "status": {"type": "string", "searchable": True},
+        },
+        contract_fingerprint=application.schema.fingerprint,
+    )
+    restored = application.search_text("failed", 10)
+    assert restored["results"][0]["value"] == "failed"
+    assert restored["coverage"] == {
+        "complete": True,
+        "eligible_count": 1,
+        "indexed_count": 1,
+    }
+
+
+def test_withdrawn_unobserved_declaration_does_not_pin_type(
+    m5: tuple[Any, ...]
+) -> None:
+    application, _, _ = m5
+    application.declare_entity(
+        "calls.Session",
+        fields={"future": {"type": "number", "privacy": "private"}},
+        contract_fingerprint=application.schema.fingerprint,
+    )
+    application.declare_entity(
+        "calls.Session",
+        contract_fingerprint=application.schema.fingerprint,
+    )
+    withdrawn = application.ontology()["document"]["entities"][0]["fields"][
+        "future"
+    ]
+    assert withdrawn["type"] == "unresolved"
+    assert withdrawn["privacy"] == "private"
+
+    application.declare_entity(
+        "calls.Session",
+        fields={"future": {"type": "string", "privacy": "private"}},
+        contract_fingerprint=application.schema.fingerprint,
+    )
+    restored = application.ontology()["document"]["entities"][0]["fields"][
+        "future"
+    ]
+    assert restored["type"] == "string"
+    assert restored["declared"] is True
+
+
+def test_bidirectional_traversal_does_not_lose_visited_edges_to_limit(
+    m5: tuple[Any, ...], tmp_path: Path
+) -> None:
+    application, _, _ = m5
+    _import(
+        application,
+        _write(
+            tmp_path / "nodes.jsonl",
+            [
+                {"id": "A", "parent": None},
+                {"id": "B", "parent": "A"},
+                {"id": "C", "parent": "B"},
+                {"id": "D", "parent": "C"},
+            ],
+        ),
+        "graph.Node",
+    )
+    application.materialize_join(
+        name="parent",
+        relation="parent",
+        from_={"type": "graph.Node", "fields": ["parent"]},
+        to={"type": "graph.Node", "fields": ["id"]},
+        contract_fingerprint=application.schema.fingerprint,
+    )
+    reordered_edges = application.execute_query(
+        {
+            "query_ir_version": "1",
+            "match": {
+                "nodes": [
+                    {"type": "graph.Node", "as": "a"},
+                    {"type": "graph.Node", "as": "b"},
+                    {"type": "graph.Node", "as": "c"},
+                ],
+                "edges": [
+                    {"type": "parent", "from": "c", "to": "b"},
+                    {"type": "parent", "from": "b", "to": "a"},
+                ],
+            },
+            "where": [
+                {
+                    "left": {"field": "a.id"},
+                    "op": "eq",
+                    "right": {"value": "A"},
+                }
+            ],
+            "return": [{"count": True}],
+        }
+    )
+    assert reordered_edges["count"] == 1
+    start = application.execute_query(
+        {
+            "query_ir_version": "1",
+            "match": {"nodes": [{"type": "graph.Node", "as": "node"}]},
+            "where": [
+                {
+                    "left": {"field": "node.id"},
+                    "op": "eq",
+                    "right": {"value": "A"},
+                }
+            ],
+            "return": [{"field": "node.id"}],
+        }
+    )["rows"][0]["bindings"]["node"]
+
+    traversal = application.traverse_relations(
+        start, direction="both", max_depth=3, limit=3
+    )
+    assert len(traversal["edges"]) == 3
+    assert len({item["relation_id"] for item in traversal["edges"]}) == 3
+    assert {item["depth"] for item in traversal["edges"]} == {1, 2, 3}
+    assert traversal["truncated"] is False
+
+    exact_limit = application.traverse_relations(
+        start, direction="both", max_depth=4, limit=3
+    )
+    assert len(exact_limit["edges"]) == 3
+    assert exact_limit["truncated"] is False
+
+    _import(
+        application,
+        _write(tmp_path / "more-nodes.jsonl", [{"id": "E", "parent": "D"}]),
+        "graph.Node",
+    )
+    application.materialize_join(
+        name="parent",
+        relation="parent",
+        from_={"type": "graph.Node", "fields": ["parent"]},
+        to={"type": "graph.Node", "fields": ["id"]},
+        contract_fingerprint=application.schema.fingerprint,
+        idempotency_key="parent-with-e",
+    )
+    depth_capped = application.traverse_relations(
+        start, direction="both", max_depth=3, limit=10
+    )
+    assert len(depth_capped["edges"]) == 3
+    assert depth_capped["truncated"] is True
 
 
 def test_join_query_rerun_correction_and_cascade(
@@ -383,6 +895,27 @@ def test_join_query_rerun_correction_and_cascade(
         }
     )
     assert query["rows"][0]["projections"][0]["value"] == "bye"
+    keyed_count = application.execute_query(
+        {
+            "query_ir_version": "1",
+            "match": {
+                "nodes": [
+                    {"type": "calls.Session", "as": "session"},
+                    {"type": "calls.SessionMessage", "as": "message"},
+                ],
+                "edges": [
+                    {
+                        "type": "session",
+                        "from": "message",
+                        "to": "session",
+                        "logical_key": "message_to_session",
+                    }
+                ],
+            },
+            "return": [{"count": True}],
+        }
+    )
+    assert keyed_count["count"] == 2
     with pytest.raises(QueryValidationError, match="conflicts"):
         application.execute_query(
             {
@@ -679,7 +1212,25 @@ def test_m5_cli_import_ontology_and_query(tmp_path: Path, capsys: Any) -> None:
         )
         == 0
     )
-    capsys.readouterr()
+    imported = json.loads(capsys.readouterr().out)
+    digest = imported["evidence_digest"]
+    assert (
+        main(
+            [
+                *shared,
+                "retention",
+                "release",
+                digest,
+                "--confirm",
+                digest,
+                "--reason",
+                "CLI review",
+            ]
+        )
+        == 0
+    )
+    released = json.loads(capsys.readouterr().out)
+    assert released["acquisition_ids"]
     assert main([*shared, "ontology", "describe"]) == 0
     ontology = json.loads(capsys.readouterr().out)
     assert ontology["document"]["entities"][0]["type"] == "calls.Session"
@@ -883,6 +1434,9 @@ async def test_real_m5_flow_through_mcp(m5: tuple[Any, ...], tmp_path: Path) -> 
             if "mcp_tool" in operation
         }
         assert declared_tools == tool_names
+        retention_capability = capabilities["operations"]["retention"]
+        assert retention_capability["interfaces"] == ["python", "cli"]
+        assert "mcp_tool" not in retention_capability
     assert query_result["rows"][0]["projections"][0]["value"] == "hello"
     assert _tool_json(explained_metric)["metric"]["value"] == 1
 
@@ -918,6 +1472,106 @@ def test_query_ir_contract_and_error_registry_are_self_describing(
     codes = [item["code"] for item in error_code_registry()]
     assert len(codes) == len(set(codes))
     assert {"invalid_request", "io_error"} <= set(codes)
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        {
+            "query_ir_version": "1",
+            "match": {"nodes": [{"type": "calls.Session", "alias": "session"}]},
+            "return": [{"count": True}],
+        },
+        {
+            "query_ir_version": "1",
+            "match": {"nodes": [{"type": "calls.Session", "as": "session"}]},
+            "return_": [{"count": True}],
+        },
+        {
+            "query_ir_version": "1",
+            "match": {"nodes": [{"type": "x", "as": ""}]},
+            "return": [{"count": True}],
+        },
+        {
+            "query_ir_version": "1",
+            "match": {
+                "nodes": [
+                    {"type": "calls.Session", "as": "session"},
+                    {"type": "calls.Message", "as": "message"},
+                ],
+                "edges": [
+                    {
+                        "type": "session",
+                        "from_": "message",
+                        "to": "session",
+                    }
+                ],
+            },
+            "return": [{"count": True}],
+        },
+    ],
+)
+def test_query_ir_model_and_parser_reject_the_same_wire_shape(
+    document: dict[str, Any],
+) -> None:
+    with pytest.raises(ValidationError):
+        QueryIRDocument.model_validate(document)
+    with pytest.raises(QueryValidationError, match="invalid Query IR"):
+        parse_query_ir(document)
+
+
+def test_query_ir_rejects_disconnected_patterns_and_preserves_optional_edge_key(
+) -> None:
+    disconnected = {
+        "query_ir_version": "1",
+        "match": {
+            "nodes": [
+                {"type": "calls.Session", "as": "session"},
+                {"type": "calls.Message", "as": "message"},
+            ]
+        },
+        "return": [{"count": True}],
+    }
+    QueryIRDocument.model_validate(disconnected)
+    with pytest.raises(QueryValidationError, match="disconnected"):
+        parse_query_ir(disconnected)
+
+    disconnected_cycle = {
+        "query_ir_version": "1",
+        "match": {
+            "nodes": [
+                {"type": "graph.A", "as": "a"},
+                {"type": "graph.B", "as": "b"},
+                {"type": "graph.C", "as": "c"},
+            ],
+            "edges": [
+                {"type": "link", "from": "b", "to": "c"},
+                {"type": "link", "from": "c", "to": "b"},
+            ],
+        },
+        "return": [{"count": True}],
+    }
+    with pytest.raises(QueryValidationError, match="unreachable aliases"):
+        parse_query_ir(disconnected_cycle)
+
+    connected = {
+        **disconnected,
+        "match": {
+            **disconnected["match"],
+            "edges": [
+                {
+                    "type": "session",
+                    "from": "message",
+                    "to": "session",
+                    "logical_key": None,
+                }
+            ],
+        },
+    }
+    plan = parse_query_ir(connected)
+    assert plan.edges == (
+        {"type": "session", "from": "message", "to": "session"},
+    )
 
 
 @pytest.mark.parametrize("resolver", ["import", "declaration", "analysis"])

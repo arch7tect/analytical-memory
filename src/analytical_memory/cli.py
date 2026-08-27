@@ -9,6 +9,7 @@ from typing import Any
 
 from analytical_memory.api import MemoryAPI
 from analytical_memory.application import MemoryApplication
+from analytical_memory.canonical import strict_json_loads
 from analytical_memory.configuration import (
     build_application,
     environment_backend,
@@ -195,6 +196,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     retention_report = retention_commands.add_parser("report")
     retention_report.add_argument("--as-of")
+    retention_release = retention_commands.add_parser("release")
+    retention_release.add_argument("digest")
+    retention_release.add_argument("--confirm", required=True)
+    retention_release.add_argument("--reason", required=True)
+    retention_release.add_argument("--released-at")
     retention_plan = retention_commands.add_parser("plan")
     retention_plan.add_argument("output", type=Path)
     retention_plan.add_argument("--digest", action="append", dest="digests")
@@ -256,7 +262,7 @@ def _execute(arguments: argparse.Namespace) -> dict[str, Any]:
     if arguments.command == "capabilities":
         return application.capabilities()
     if arguments.command == "jsonl":
-        key = json.loads(arguments.key)
+        key = strict_json_loads(arguments.key)
         if not isinstance(key, list):
             raise ValueError("--key must be a JSON array")
         return api.jsonl_import(
@@ -268,7 +274,7 @@ def _execute(arguments: argparse.Namespace) -> dict[str, Any]:
     if arguments.command == "ontology":
         if arguments.ontology_command == "describe":
             return api.ontology(arguments.namespace).model_dump(mode="json")
-        fields = json.loads(arguments.fields)
+        fields = strict_json_loads(arguments.fields)
         if not isinstance(fields, dict):
             raise ValueError("--fields must be a JSON object")
         return api.declare_entity(
@@ -281,20 +287,24 @@ def _execute(arguments: argparse.Namespace) -> dict[str, Any]:
         if arguments.query_name == "execute":
             if arguments.document is None:
                 raise ValueError("--document is required for query execute")
-            document = json.loads(arguments.document.read_text(encoding="utf-8"))
+            document = strict_json_loads(
+                arguments.document.read_text(encoding="utf-8")
+            )
             if not isinstance(document, dict):
                 raise ValueError("query document must be a JSON object")
             return api.execute_query(document).model_dump(mode="json")
         if arguments.definition_version is None:
             raise ValueError("--definition-version is required for current-metric")
-        dimensions = json.loads(arguments.dimensions)
+        dimensions = strict_json_loads(arguments.dimensions)
         if not isinstance(dimensions, dict):
             raise ValueError("--dimensions must be a JSON object")
         return api.query_current_metric(
             arguments.definition_version, dimensions
         ).model_dump(mode="json")
     if arguments.command == "join":
-        definition = json.loads(arguments.definition.read_text(encoding="utf-8"))
+        definition = strict_json_loads(
+            arguments.definition.read_text(encoding="utf-8")
+        )
         if not isinstance(definition, dict):
             raise ValueError("join definition must be a JSON object")
         return api.materialize_join(
@@ -313,18 +323,18 @@ def _execute(arguments: argparse.Namespace) -> dict[str, Any]:
         return api.write_analytical_attribute(
             arguments.node_id,
             arguments.attribute_name,
-            json.loads(arguments.value),
+            strict_json_loads(arguments.value),
             arguments.method,
             arguments.contract_fingerprint,
         ).model_dump(mode="json")
     if arguments.command == "metric":
-        dimensions = json.loads(arguments.dimensions)
-        coverage = json.loads(arguments.coverage)
+        dimensions = strict_json_loads(arguments.dimensions)
+        coverage = strict_json_loads(arguments.coverage)
         if not isinstance(dimensions, dict) or not isinstance(coverage, dict):
             raise ValueError("--dimensions and --coverage must be JSON objects")
         return api.write_analytical_metric(
             arguments.definition_version,
-            json.loads(arguments.value),
+            strict_json_loads(arguments.value),
             dimensions,
             arguments.method,
             arguments.method_version,
@@ -402,6 +412,13 @@ def _execute(arguments: argparse.Namespace) -> dict[str, Any]:
     if arguments.command == "retention":
         if arguments.retention_command == "report":
             return application.retention_report(as_of=arguments.as_of)
+        if arguments.retention_command == "release":
+            return application.retention_release(
+                arguments.digest,
+                confirmation=arguments.confirm,
+                reason=arguments.reason,
+                released_at=arguments.released_at,
+            )
         if arguments.retention_command == "plan":
             return application.retention_plan(
                 arguments.output,

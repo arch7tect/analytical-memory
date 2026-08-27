@@ -28,6 +28,11 @@ recommended when a database is shared. Connection URLs belong in the ignored
 Capabilities report `sqlite` or `postgresql` under `storage.backend`. Query IR,
 ontology, provenance, error, and MCP contracts are otherwise identical.
 
+Each backend has its own ordered SQL migration sequence. Initialization validates
+the shared manifest contract and migration checksums, requires the recorded
+ledger to be an exact prefix of the packaged sequence, and applies every pending
+migration in one transaction.
+
 ## Local PostgreSQL conformance
 
 The included Compose service exposes PostgreSQL 17 on local port 54329:

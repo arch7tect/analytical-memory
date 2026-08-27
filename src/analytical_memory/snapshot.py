@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import tempfile
 import zipfile
@@ -8,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from analytical_memory.canonical import canonical_json, sha256_bytes
+from analytical_memory.canonical import canonical_json, sha256_bytes, strict_json_loads
 from analytical_memory.domain import EvidenceObjectRecord
 from analytical_memory.errors import SnapshotError
 from analytical_memory.limits import MAX_SNAPSHOT_BYTES, MAX_SNAPSHOT_MEMBERS
@@ -168,7 +167,7 @@ def load_snapshot(source: Path, expected_fingerprint: str) -> SnapshotPayload:
                 )
             if sum(info.file_size for info in infos) > MAX_SNAPSHOT_BYTES:
                 raise SnapshotError("snapshot exceeds the uncompressed size limit")
-            manifest = json.loads(archive.read("manifest.json"))
+            manifest = strict_json_loads(archive.read("manifest.json"))
             if not isinstance(manifest, dict):
                 raise SnapshotError("snapshot manifest must be an object")
             if manifest.get("artifact_kind") != SNAPSHOT_KIND:
@@ -198,15 +197,15 @@ def load_snapshot(source: Path, expected_fingerprint: str) -> SnapshotPayload:
                 ) != expected.get("sha256"):
                     raise SnapshotError(f"snapshot member failed verification: {name}")
                 member_bytes[name] = data
-    except (OSError, zipfile.BadZipFile, KeyError, json.JSONDecodeError) as exc:
+    except (OSError, zipfile.BadZipFile, KeyError, ValueError) as exc:
         if isinstance(exc, SnapshotError):
             raise
         raise SnapshotError(f"cannot read snapshot: {source}") from exc
 
     try:
-        records = json.loads(member_bytes["records.json"])
-        schema_document = json.loads(member_bytes["schema.json"])
-    except (KeyError, json.JSONDecodeError) as exc:
+        records = strict_json_loads(member_bytes["records.json"])
+        schema_document = strict_json_loads(member_bytes["schema.json"])
+    except (KeyError, ValueError) as exc:
         raise SnapshotError("snapshot canonical records are invalid") from exc
     if not isinstance(records, dict) or not all(
         isinstance(table, str) and isinstance(rows, list)

@@ -36,6 +36,18 @@
       "file": "006_portable_sort_keys.sql",
       "target_fingerprint": "882802d6f0ffd1970e2c1c75f99e38199696dfaa998a108e7306deb8c10380b2",
       "version": 6
+    },
+    {
+      "checksum": "06939aab2384235218b0916153c5801e0ab539dd357150d361da07d37fb578ac",
+      "file": "007_connected_query_ir.sql",
+      "target_fingerprint": "aa877b1f4db82108d8568c0d29bf0160d77ff00021aa34c003e0af42767a7e4b",
+      "version": 7
+    },
+    {
+      "checksum": "f89055892d47de7567e3fa36c2a877f61c73e64f150b686a0553c622a2c8de0d",
+      "file": "008_retention_release.sql",
+      "target_fingerprint": "0acf188864c209905b2022dd91cb7deed9077800c4b67b43877c23d89cbe1cc8",
+      "version": 8
     }
   ]
 }

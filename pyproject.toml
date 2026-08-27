@@ -36,6 +36,9 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/analytical_memory"]
 
+[tool.hatch.build.targets.sdist]
+exclude = ["/.kimi-code", "**/.DS_Store"]
+
 [tool.hatch.version]
 path = "src/analytical_memory/version.py"
 

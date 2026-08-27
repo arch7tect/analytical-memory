@@ -38,5 +38,5 @@
     "directions": ["outbound", "inbound", "both"],
     "properties_allowed": false
   },
-  "schema_document_version": "6"
+  "schema_document_version": "7"
 }

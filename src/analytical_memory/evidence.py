@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -8,6 +7,7 @@ from analytical_memory.canonical import (
     canonical_json,
     normalize_timestamp,
     sha256_bytes,
+    strict_json_loads,
 )
 from analytical_memory.errors import BatchValidationError
 
@@ -76,10 +76,12 @@ def _json_input(data: bytes, input_format: str) -> Any:
     try:
         text = data.decode("utf-8")
         if input_format in {"json", "canonical-json"}:
-            return json.loads(text)
+            return strict_json_loads(text)
         if input_format in {"jsonl", "canonical-jsonl"}:
-            return [json.loads(line) for line in text.splitlines() if line.strip()]
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            return [
+                strict_json_loads(line) for line in text.splitlines() if line.strip()
+            ]
+    except (UnicodeDecodeError, ValueError) as exc:
         raise BatchValidationError("evidence is not valid UTF-8 JSON") from exc
     raise BatchValidationError("fragment.input_format is not supported")
 

@@ -196,7 +196,6 @@ class JoinRequest:
 
 @dataclass(frozen=True, slots=True)
 class QueryPlan:
-    document: dict[str, Any]
     node_aliases: tuple[tuple[str, str], ...]
     edges: tuple[dict[str, str], ...]
     predicates: tuple[dict[str, Any], ...]

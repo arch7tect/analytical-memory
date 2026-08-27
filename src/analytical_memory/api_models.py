@@ -15,6 +15,12 @@ class APIModel(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
+class WireModel(APIModel):
+    model_config = ConfigDict(
+        extra="forbid", validate_by_alias=True, validate_by_name=False
+    )
+
+
 JsonType = Literal["unresolved", "string", "number", "boolean", "object", "array"]
 DeclaredJsonType = Literal["string", "number", "boolean", "object", "array"]
 PrivacyClass = Literal["public", "private"]
@@ -106,16 +112,16 @@ class OntologyResponse(APIModel):
     ontology_fingerprint: str
 
 
-class QueryNodePattern(APIModel):
+class QueryNodePattern(WireModel):
     type: str = Field(min_length=3)
     alias: str = Field(alias="as", min_length=1)
 
 
-class QueryEdgePattern(APIModel):
-    type: str
-    from_: str = Field(alias="from")
-    to: str
-    logical_key: str | None = None
+class QueryEdgePattern(WireModel):
+    type: str = Field(min_length=1)
+    from_: str = Field(alias="from", min_length=1)
+    to: str = Field(min_length=1)
+    logical_key: str | None = Field(default=None, min_length=1)
 
 
 class QueryMatch(APIModel):
@@ -128,7 +134,7 @@ class QueryMatch(APIModel):
 
 
 class QueryFieldOperand(APIModel):
-    field: str
+    field: str = Field(min_length=3)
 
 
 class QueryValueOperand(APIModel):
@@ -160,7 +166,7 @@ QueryPredicate = QueryComparisonPredicate | QueryInPredicate | QueryExistsPredic
 
 
 class QueryFieldProjection(APIModel):
-    field: str
+    field: str = Field(min_length=3)
 
 
 class QueryCountProjection(APIModel):
@@ -171,11 +177,11 @@ QueryProjection = QueryFieldProjection | QueryCountProjection
 
 
 class QueryOrderBy(APIModel):
-    field: str
+    field: str = Field(min_length=3)
     direction: Literal["asc", "desc"] = "asc"
 
 
-class QueryIRDocument(APIModel):
+class QueryIRDocument(WireModel):
     query_ir_version: Literal["1"]
     match: QueryMatch
     where: list[QueryPredicate] = Field(default_factory=list)
@@ -190,7 +196,9 @@ class JsonlImportResponse(APIModel):
     batch_id: str
     contract_fingerprint: str
     created_nodes: int
+    evidence_availability: Literal["present", "missing"]
     evidence_digest: str
+    evidence_verification: Literal["unverified", "verified", "corrupt"]
     fragment_id: str
     idempotency_key: str
     ontology_delta: dict[str, list[str]]

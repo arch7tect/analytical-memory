@@ -100,12 +100,14 @@
         "additionalProperties": false,
         "properties": {
           "from": {
+            "minLength": 1,
             "title": "From",
             "type": "string"
           },
           "logical_key": {
             "anyOf": [
               {
+                "minLength": 1,
                 "type": "string"
               },
               {
@@ -116,10 +118,12 @@
             "title": "Logical Key"
           },
           "to": {
+            "minLength": 1,
             "title": "To",
             "type": "string"
           },
           "type": {
+            "minLength": 1,
             "title": "Type",
             "type": "string"
           }
@@ -155,6 +159,7 @@
         "additionalProperties": false,
         "properties": {
           "field": {
+            "minLength": 3,
             "title": "Field",
             "type": "string"
           }
@@ -169,6 +174,7 @@
         "additionalProperties": false,
         "properties": {
           "field": {
+            "minLength": 3,
             "title": "Field",
             "type": "string"
           }
@@ -263,6 +269,7 @@
             "type": "string"
           },
           "field": {
+            "minLength": 3,
             "title": "Field",
             "type": "string"
           }
@@ -604,12 +611,12 @@
     "title": "QueryIRResponse",
     "type": "object"
   },
-  "schema_fingerprint": "882802d6f0ffd1970e2c1c75f99e38199696dfaa998a108e7306deb8c10380b2",
+  "schema_fingerprint": "0acf188864c209905b2022dd91cb7deed9077800c4b67b43877c23d89cbe1cc8",
   "semantics": {
     "bindings": "every non-count row maps each node alias to its Node ID",
     "comparison": "literals must match the field effective JSON type; strings and numbers are never coerced",
     "count": "count cannot be combined with field projections",
-    "disconnected_patterns": "node patterns not connected by edges form a Cartesian product",
+    "disconnected_patterns": "multi-node patterns must form one connected component",
     "edges": "directed active relations only",
     "exists": "tests attribute-row presence, so explicit null exists",
     "field_reference": "<node-alias>.<attribute-name>",

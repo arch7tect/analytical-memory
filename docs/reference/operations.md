@@ -68,11 +68,13 @@ Start with a report at an explicit time when reproducibility matters:
 
 ```console
 uv run memory retention report --as-of 2026-08-27T00:00:00Z
+uv run memory retention release <sha256> --confirm <sha256> --reason "reviewed"
 uv run memory retention plan retirement-plan.json
 ```
 
-Review the immutable plan. Retirement requires its exact `plan_id` as explicit
-confirmation:
+Release is CLI-only, keeps any independent `retain_until` block, and requires
+the exact digest plus a non-empty audit reason. Review the immutable plan.
+Retirement requires its exact `plan_id` as explicit confirmation:
 
 ```console
 uv run memory retention retire retirement-plan.json --confirm <plan-id>

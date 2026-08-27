@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from analytical_memory.canonical import sha256_json
+from analytical_memory.canonical import sha256_json, strict_json_loads
 from analytical_memory.resources import resource_path
 
 
@@ -26,8 +25,8 @@ def default_schema_path() -> Path:
 def load_schema(path: Path | None = None) -> SchemaContract:
     schema_path = path or default_schema_path()
     try:
-        document = json.loads(schema_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        document = strict_json_loads(schema_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
         raise SchemaContractError(f"cannot load schema: {schema_path}") from exc
     if not isinstance(document, dict):
         raise SchemaContractError("schema document must be an object")

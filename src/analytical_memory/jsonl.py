@@ -9,7 +9,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from analytical_memory.canonical import sha256_json
+from analytical_memory.canonical import sha256_json, strict_json_loads
 from analytical_memory.domain import JsonlImportRequest, JsonlScan
 from analytical_memory.errors import ImportValidationError, ProhibitedContentError
 from analytical_memory.limits import MAX_EVIDENCE_INGEST_BYTES, MAX_JSONL_LINE_BYTES
@@ -67,8 +67,8 @@ def iter_jsonl(path: Path) -> Iterator[tuple[int, dict[str, Any]]]:
             if line_number == 1 and raw.startswith(b"\xef\xbb\xbf"):
                 raise ImportValidationError("line 1: UTF-8 BOM is not allowed")
             try:
-                value = json.loads(raw)
-            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                value = strict_json_loads(raw)
+            except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
                 raise ImportValidationError(
                     f"line {line_number}: invalid JSON"
                 ) from exc

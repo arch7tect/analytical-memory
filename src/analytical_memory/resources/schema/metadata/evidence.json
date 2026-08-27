@@ -12,6 +12,10 @@
       "sample_interval"
     ],
     "privacy_propagation": "strictest_acquisition_wins",
+    "retention_release_audit": {
+      "fields": ["released_at", "release_reason"],
+      "semantics": "first_release_per_acquisition_wins"
+    },
     "retention_states": ["active", "expired", "retired"],
     "verification_states": ["unverified", "verified", "corrupt"]
   },

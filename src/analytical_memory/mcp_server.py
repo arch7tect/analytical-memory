@@ -303,10 +303,9 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
     )
     def execute_query(document: QueryIRDocument) -> QueryIRResponse:
         try:
-            query = document.model_dump(mode="json", by_alias=True)
-            for edge in query["match"]["edges"]:
-                if edge["logical_key"] is None:
-                    edge.pop("logical_key")
+            query = document.model_dump(
+                mode="json", by_alias=True, exclude_unset=True
+            )
             return api.execute_query(query)
         except (MemoryErrorBase, OSError, ValueError) as exc:
             raise _tool_error(exc) from exc

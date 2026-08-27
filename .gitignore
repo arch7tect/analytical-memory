@@ -181,6 +181,8 @@ dmypy.json
 
 # Local IDE state
 .idea/
+.kimi-code/
+.DS_Store
 
 # Cython debug symbols
 cython_debug/

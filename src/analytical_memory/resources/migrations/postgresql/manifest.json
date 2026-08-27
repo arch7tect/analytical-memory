@@ -1,12 +1,24 @@
 {
   "backend_profile": "postgresql",
-  "schema_version": 6,
+  "schema_version": 8,
   "migrations": [
     {
       "version": 6,
       "file": "006_initial.sql",
       "checksum": "f43ed8c0bc73c78f1b56fbb8f46523e8b0786d6195c3747b2ed973e14c9aa8c2",
       "target_fingerprint": "882802d6f0ffd1970e2c1c75f99e38199696dfaa998a108e7306deb8c10380b2"
+    },
+    {
+      "version": 7,
+      "file": "007_connected_query_ir.sql",
+      "checksum": "402a31f18ec924e240bed0f3740e487fea9de7d1a216cb389f9c31ff5c404405",
+      "target_fingerprint": "aa877b1f4db82108d8568c0d29bf0160d77ff00021aa34c003e0af42767a7e4b"
+    },
+    {
+      "version": 8,
+      "file": "008_retention_release.sql",
+      "checksum": "07ad20587069735be7597ce488c744725305b840aa816c98eabcbbe8a038c1f2",
+      "target_fingerprint": "0acf188864c209905b2022dd91cb7deed9077800c4b67b43877c23d89cbe1cc8"
     }
   ]
 }

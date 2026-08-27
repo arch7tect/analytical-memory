@@ -242,6 +242,12 @@ class MemoryStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def release_retention(
+        self, digest: str, *, released_at: str, reason: str
+    ) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
     def record_retirement(
         self, digest: str, *, plan_id: str, reason: str, retired_at: str
     ) -> None:

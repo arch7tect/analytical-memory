@@ -28,7 +28,7 @@
       "search_document": 0,
       "source": 3
     },
-    "schema_fingerprint": "882802d6f0ffd1970e2c1c75f99e38199696dfaa998a108e7306deb8c10380b2"
+    "schema_fingerprint": "0acf188864c209905b2022dd91cb7deed9077800c4b67b43877c23d89cbe1cc8"
   },
   "observed": {
     "backend": "sqlite",

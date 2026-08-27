@@ -73,8 +73,10 @@ Aliases must be unique. A query accepts 1 to 8 nodes.
 
 Each edge matches a directed, active relation. `type` is the relation type;
 `from` and `to` reference node aliases. Optional `logical_key` restricts the
-match to one relation key. Edge aliases and inactive-relation matching are not
-supported. A query accepts at most 8 edges.
+match to one non-empty relation key. A missing or `null` `logical_key` applies
+no key restriction. Edge aliases and inactive-relation matching are not
+supported. A query accepts at most 8 edges. Every multi-node pattern must form
+one connected component through its edges; disconnected patterns are rejected.
 
 ### Field references
 
@@ -123,10 +125,8 @@ All node IDs, in alias order, are appended as deterministic tie-breakers.
 0. `truncated` is computed with a limit-plus-one probe. Cursor pagination is
 not part of v1.
 
-Node patterns that are not connected by an edge form a Cartesian product.
-This is sometimes useful, but can make a query expensive even when `limit` is
-small; agents should normally connect multi-node patterns with declared
-relations.
+JSON inputs use strict decoding. Duplicate object keys and non-finite numbers
+such as `NaN` and `Infinity` are rejected.
 
 ## Result contract
 

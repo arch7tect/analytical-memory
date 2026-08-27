@@ -762,6 +762,7 @@ not claim conformance with any complete textual language.
 The initial IR supports:
 
 - node and edge patterns;
+- connected multi-node patterns without implicit Cartesian products;
 - `eq`, `ne`, `lt`, `lte`, `gt`, `gte`, `in`, and `exists` predicates;
 - projection with direct provenance, deterministic ordering, limit, and offset;
 - `count`;

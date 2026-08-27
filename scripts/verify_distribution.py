@@ -12,6 +12,8 @@ from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_WHEEL_SUFFIXES = (
+    "analytical_memory/sqlite_migrations.py",
+    "analytical_memory/postgresql_migrations.py",
     "analytical_memory/resources/schema/current.json",
     "analytical_memory/resources/schema/query-ir-contract.json",
     "analytical_memory/resources/migrations/sqlite/manifest.json",

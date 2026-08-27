@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from analytical_memory.canonical import canonical_json, sha256_bytes
+from analytical_memory.canonical import canonical_json, sha256_bytes, strict_json_loads
 from analytical_memory.errors import TransferError
 from analytical_memory.limits import MAX_SNAPSHOT_BYTES
 from analytical_memory.ports import MemoryStore
@@ -70,8 +70,8 @@ def load_transfer(source: Path, expected_fingerprint: str) -> dict[str, Any]:
     try:
         if source.stat().st_size > MAX_SNAPSHOT_BYTES:
             raise TransferError("transfer exceeds the size limit")
-        document = json.loads(source.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        document = strict_json_loads(source.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
         raise TransferError(f"cannot read transfer: {source}") from exc
     if not isinstance(document, dict):
         raise TransferError("transfer document must be an object")

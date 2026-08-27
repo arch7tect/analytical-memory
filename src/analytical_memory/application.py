@@ -10,9 +10,11 @@ from typing import Any
 
 from analytical_memory.canonical import (
     canonical_json,
+    normalize_timestamp,
     sha256_bytes,
     sha256_json,
     stable_uuid,
+    strict_json_loads,
 )
 from analytical_memory.domain import (
     AnalyticalAttributeRequest,
@@ -22,6 +24,7 @@ from analytical_memory.domain import (
     EntityDeclaration,
     EvidenceFragmentRecord,
     EvidenceObjectRecord,
+    EvidenceStatus,
     FieldDeclaration,
     ImportEvidence,
     JoinEndpoint,
@@ -102,6 +105,24 @@ class MemoryApplication:
     def _check_contract(self, supplied: str) -> None:
         if supplied != self.schema.fingerprint:
             raise SchemaChangedError(supplied, self.schema.fingerprint)
+
+    def _record_evidence_status(
+        self,
+        digest: str,
+        *,
+        checked_at: str,
+        method: str,
+        status: EvidenceStatus | None = None,
+    ) -> dict[str, Any]:
+        current = status or self.evidence_store.stat(digest)
+        return self.memory_store.record_evidence_check(
+            digest,
+            availability=current.availability,
+            verification=current.verification,
+            byte_size=current.byte_size,
+            checked_at=checked_at,
+            method=method,
+        )
 
     @staticmethod
     def _whole_object_evidence(
@@ -193,23 +214,16 @@ class MemoryApplication:
             put_result = self.evidence_store.put_tracked(
                 Path(temporary.name), evidence_object
             )
-            try:
-                document = self.memory_store.put_entity_declaration(
-                    declaration,
-                    contract_fingerprint,
-                    ImportEvidence(evidence_object, fragment, put_result.created),
-                )
-            except Exception:
-                if put_result.created:
-                    self.evidence_store.remove(digest)
-                raise
-            self.memory_store.record_evidence_check(
+            document = self.memory_store.put_entity_declaration(
+                declaration,
+                contract_fingerprint,
+                ImportEvidence(evidence_object, fragment, put_result.created),
+            )
+            self._record_evidence_status(
                 digest,
-                availability=put_result.status.availability,
-                verification=put_result.status.verification,
-                byte_size=put_result.status.byte_size,
                 checked_at=recorded_at,
                 method="entity-declaration-v1",
+                status=put_result.status,
             )
         return {
             "contract_fingerprint": self.schema.fingerprint,
@@ -249,7 +263,17 @@ class MemoryApplication:
                     raise IdempotencyConflictError(
                         "idempotency key already exists with different input"
                     )
-                return {**existing.result, "replayed": True}
+                evidence_status = self._record_evidence_status(
+                    scan.content_hash,
+                    checked_at=_now(),
+                    method="jsonl-import-replay-v1",
+                )
+                return {
+                    **existing.result,
+                    "evidence_availability": evidence_status["availability"],
+                    "evidence_verification": evidence_status["verification"],
+                    "replayed": True,
+                }
             ontology = self.memory_store.ontology_snapshot()
             entity = next(
                 (item for item in ontology["entities"] if item["type"] == entity_type),
@@ -274,20 +298,15 @@ class MemoryApplication:
                 fragment=fragment,
                 created=put_result.created,
             )
-            try:
-                result = self.memory_store.import_jsonl(request, scan, evidence)
-            except Exception:
-                if put_result.created:
-                    self.evidence_store.remove(scan.content_hash)
-                raise
-            self.memory_store.record_evidence_check(
+            result = self.memory_store.import_jsonl(request, scan, evidence)
+            evidence_status = self._record_evidence_status(
                 scan.content_hash,
-                availability=put_result.status.availability,
-                verification=put_result.status.verification,
-                byte_size=put_result.status.byte_size,
                 checked_at=recorded_at,
                 method="jsonl-import-v1",
+                status=put_result.status,
             )
+            result["evidence_availability"] = evidence_status["availability"]
+            result["evidence_verification"] = evidence_status["verification"]
             result["contract_fingerprint"] = self.schema.fingerprint
             return result
         finally:
@@ -343,19 +362,12 @@ class MemoryApplication:
                 fragment=fragment,
                 created=put_result.created,
             )
-            try:
-                result = self.memory_store.materialize_join(request, evidence)
-            except Exception:
-                if put_result.created:
-                    self.evidence_store.remove(digest)
-                raise
-            self.memory_store.record_evidence_check(
+            result = self.memory_store.materialize_join(request, evidence)
+            self._record_evidence_status(
                 digest,
-                availability=put_result.status.availability,
-                verification=put_result.status.verification,
-                byte_size=put_result.status.byte_size,
                 checked_at=recorded_at,
                 method="join-materialization-v1",
+                status=put_result.status,
             )
         result["contract_fingerprint"] = self.schema.fingerprint
         return result
@@ -424,22 +436,15 @@ class MemoryApplication:
                 contract_fingerprint=contract_fingerprint,
                 idempotency_key=idempotency_key,
             )
-            try:
-                result = self.memory_store.write_analytical_attribute(
-                    request,
-                    ImportEvidence(evidence_object, fragment, put_result.created),
-                )
-            except Exception:
-                if put_result.created:
-                    self.evidence_store.remove(digest)
-                raise
-            self.memory_store.record_evidence_check(
+            result = self.memory_store.write_analytical_attribute(
+                request,
+                ImportEvidence(evidence_object, fragment, put_result.created),
+            )
+            self._record_evidence_status(
                 digest,
-                availability=put_result.status.availability,
-                verification=put_result.status.verification,
-                byte_size=put_result.status.byte_size,
                 checked_at=recorded_at,
                 method=method,
+                status=put_result.status,
             )
         result["contract_fingerprint"] = self.schema.fingerprint
         return result
@@ -538,22 +543,15 @@ class MemoryApplication:
             put_result = self.evidence_store.put_tracked(
                 Path(temporary.name), evidence_object
             )
-            try:
-                result = self.memory_store.write_analytical_metric(
-                    request,
-                    ImportEvidence(evidence_object, fragment, put_result.created),
-                )
-            except Exception:
-                if put_result.created:
-                    self.evidence_store.remove(digest)
-                raise
-            self.memory_store.record_evidence_check(
+            result = self.memory_store.write_analytical_metric(
+                request,
+                ImportEvidence(evidence_object, fragment, put_result.created),
+            )
+            self._record_evidence_status(
                 digest,
-                availability=put_result.status.availability,
-                verification=put_result.status.verification,
-                byte_size=put_result.status.byte_size,
                 checked_at=recorded_at,
                 method=method,
+                status=put_result.status,
             )
         result["contract_fingerprint"] = self.schema.fingerprint
         return result
@@ -929,7 +927,7 @@ class MemoryApplication:
             "availability": status.availability,
             "byte_size": status.byte_size,
             "digest": digest,
-            "effective_privacy": catalog[0]["object"]["privacy_class"],
+            "effective_privacy": catalog[0]["effective_privacy"],
             "retired": catalog[0]["retirement"] is not None,
             "verification": status.verification,
         }
@@ -1068,10 +1066,54 @@ class MemoryApplication:
         }
 
     def retention_report(self, *, as_of: str | None = None) -> dict[str, Any]:
-        timestamp = as_of or _now()
+        timestamp = normalize_timestamp(as_of or _now(), "as_of")
         return {
             "as_of": timestamp,
             "objects": self.memory_store.retention_report(timestamp),
+        }
+
+    def retention_release(
+        self,
+        digest: str,
+        *,
+        confirmation: str,
+        reason: str,
+        released_at: str | None = None,
+    ) -> dict[str, Any]:
+        if confirmation != digest:
+            raise ValueError("retention release confirmation must match the digest")
+        reason = reason.strip()
+        if not reason:
+            raise ValueError("retention release reason must not be empty")
+        timestamp = normalize_timestamp(released_at or _now(), "released_at")
+        release = self.memory_store.release_retention(
+            digest,
+            released_at=timestamp,
+            reason=reason,
+        )
+        state = release["retention"]
+        release_pairs = {
+            (item["released_at"], item["release_reason"])
+            for item in state["releases"]
+        }
+        changed_ids = set(release["acquisition_ids"])
+        changed_pairs = {
+            (item["released_at"], item["release_reason"])
+            for item in state["releases"]
+            if item["acquisition_id"] in changed_ids
+        }
+        persisted_at: str | None = None
+        persisted_reason: str | None = None
+        reported_pairs = changed_pairs or release_pairs
+        if len(reported_pairs) == 1:
+            persisted_at, persisted_reason = next(iter(reported_pairs))
+        return {
+            "acquisition_ids": release["acquisition_ids"],
+            "digest": digest,
+            "reason": persisted_reason,
+            "released_at": persisted_at,
+            "releases": state["releases"],
+            "retention_state": state["retention_state"],
         }
 
     def retention_plan(
@@ -1083,7 +1125,7 @@ class MemoryApplication:
     ) -> dict[str, Any]:
         if destination.exists():
             raise FileExistsError(destination)
-        timestamp = created_at or _now()
+        timestamp = normalize_timestamp(created_at or _now(), "created_at")
         report = self.memory_store.retention_report(timestamp)
         requested = None if digests is None else set(digests)
         if requested is not None:
@@ -1130,7 +1172,7 @@ class MemoryApplication:
     def retention_retire(
         self, plan_path: Path, *, confirmation: str, retired_at: str | None = None
     ) -> dict[str, Any]:
-        document = json.loads(plan_path.read_text(encoding="utf-8"))
+        document = strict_json_loads(plan_path.read_text(encoding="utf-8"))
         if not isinstance(document, dict):
             raise ValueError("retention plan must be an object")
         plan_id = document.get("plan_id")
@@ -1140,7 +1182,7 @@ class MemoryApplication:
             raise ValueError("retention plan identity or confirmation does not match")
         if document.get("schema_fingerprint") != self.schema.fingerprint:
             raise ValueError("retention plan schema fingerprint does not match")
-        timestamp = retired_at or _now()
+        timestamp = normalize_timestamp(retired_at or _now(), "retired_at")
         current = {
             str(item["digest"]): item
             for item in self.memory_store.retention_report(timestamp)
@@ -1177,6 +1219,13 @@ class MemoryApplication:
         for digest in digests:
             try:
                 removed = self.evidence_store.retire(digest)
+                status = self.evidence_store.stat(digest)
+                self._record_evidence_status(
+                    digest,
+                    checked_at=timestamp,
+                    method="retention-retire",
+                    status=status,
+                )
                 outcomes.append(
                     {
                         "digest": digest,

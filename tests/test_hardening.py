@@ -56,8 +56,11 @@ def test_interrupted_import_is_atomic_and_orphan_is_only_reported(
         yield next(iterator)
         raise RuntimeError("forced interruption")
 
-    monkeypatch.setattr("analytical_memory.adapters.sqlite.iter_jsonl", interrupted)
-    monkeypatch.setattr(application.evidence_store, "remove", lambda _digest: False)
+    def unexpected_remove(_digest: str) -> bool:
+        raise AssertionError("handled rollback must not remove immutable evidence")
+
+    monkeypatch.setattr("analytical_memory.adapters.sql_store.iter_jsonl", interrupted)
+    monkeypatch.setattr(application.evidence_store, "remove", unexpected_remove)
 
     with pytest.raises(RuntimeError, match="forced interruption"):
         _import(application, source)
@@ -154,7 +157,7 @@ def test_unknown_sqlite_schema_version_is_rejected(tmp_path: Path) -> None:
     store = SqliteMemoryStore(database)
     store.initialize()
     with sqlite3.connect(database) as connection:
-        connection.execute("PRAGMA user_version = 7")
+        connection.execute("PRAGMA user_version = 9")
 
     with pytest.raises(StoreNotInitializedError, match="unsupported SQLite"):
         store.initialize()
@@ -169,7 +172,7 @@ def test_unknown_postgresql_schema_version_is_rejected(
         connection.execute(
             "INSERT INTO schema_migration "
             "(backend_profile, version, checksum, target_fingerprint, "
-            "applied_at, tool_version) VALUES (?, 7, 'future', 'future', "
+            "applied_at, tool_version) VALUES (?, 9, 'future', 'future', "
             "'2026-01-01T00:00:00Z', 'future')",
             ("postgresql",),
         )

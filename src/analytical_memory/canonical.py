@@ -9,6 +9,25 @@ from typing import Any
 UUID_NAMESPACE = uuid.UUID("e586f762-61e8-5df7-a6a5-8443ff7ac9fb")
 
 
+def strict_json_loads(value: str | bytes | bytearray) -> Any:
+    def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, item in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON object key: {key}")
+            result[key] = item
+        return result
+
+    def reject_constant(constant: str) -> Any:
+        raise ValueError(f"non-finite JSON number: {constant}")
+
+    return json.loads(
+        value,
+        object_pairs_hook=reject_duplicates,
+        parse_constant=reject_constant,
+    )
+
+
 def canonical_json(value: Any) -> str:
     return json.dumps(
         value,

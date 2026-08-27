@@ -38,12 +38,16 @@ requires its exact ID as confirmation:
 
 ```console
 uv run memory retention report
+uv run memory retention release <sha256> --confirm <sha256> --reason "reviewed"
 uv run memory retention plan retirement-plan.json --digest <sha256>
 uv run memory retention retire retirement-plan.json --confirm <plan-id>
 ```
 
-Planning includes only present objects without an active acquisition
-requirement. Retirement revalidates every planned digest and size, removes only
+New acquisitions require retention by default. The CLI-only release command
+records when and why all acquisitions for one digest stopped requiring it; an
+independent future `retain_until` still blocks retirement. Planning includes
+only present objects without an active acquisition requirement. Retirement
+revalidates every planned digest and size, removes only
 the content-addressed store copy, and records a tombstone. It never mutates or
 deletes the original acquisition source. A required or unexpired acquisition
 blocks retirement.
