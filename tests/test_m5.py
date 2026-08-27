@@ -101,7 +101,9 @@ def _import(
 
 def _tool_json(result: Any) -> dict[str, Any]:
     if result.structured_content is not None:
-        return dict(result.structured_content)
+        value = dict(result.structured_content)
+        nested = value.get("result")
+        return dict(nested) if isinstance(nested, dict) else value
     blocks = [block.text for block in result.content if hasattr(block, "text")]
     value = json.loads("".join(blocks))
     if not isinstance(value, dict):
@@ -1483,28 +1485,34 @@ async def test_real_m5_flow_through_mcp(m5: tuple[Any, ...], tmp_path: Path) -> 
         assert query_contract["input_schema"]["properties"]["match"]
         assert query_contract["semantics"]["bindings"]
         namespace_declaration = await client.call_tool(
-            "memory_ontology_declare_namespace",
+            "memory_ontology_manage",
             {
-                "namespace": "calls",
-                "description": "Call records.",
-                "contract_fingerprint": fingerprint,
+                "action": "declare_namespace",
+                "payload": {
+                    "namespace": "calls",
+                    "description": "Call records.",
+                    "contract_fingerprint": fingerprint,
+                },
             },
         )
         namespace_document = _tool_json(namespace_declaration)["document"]
         assert namespace_document["namespaces"][0]["description"] == "Call records."
         declaration = await client.call_tool(
-            "memory_ontology_declare_entity",
+            "memory_ontology_manage",
             {
-                "entity_type": "calls.Session",
-                "contract_fingerprint": fingerprint,
-                "description": "One call session.",
-                "fields": {
-                    "id": {
-                        "description": "Session identifier.",
-                        "type": "string",
-                        "required": True,
+                "action": "declare_entity",
+                "payload": {
+                    "entity_type": "calls.Session",
+                    "contract_fingerprint": fingerprint,
+                    "description": "One call session.",
+                    "fields": {
+                        "id": {
+                            "description": "Session identifier.",
+                            "type": "string",
+                            "required": True,
+                        },
+                        "note": {"type": "string"},
                     },
-                    "note": {"type": "string"},
                 },
             },
         )
@@ -1514,124 +1522,163 @@ async def test_real_m5_flow_through_mcp(m5: tuple[Any, ...], tmp_path: Path) -> 
             (messages, "calls.SessionMessage"),
         ):
             imported = await client.call_tool(
-                "memory_jsonl_import",
+                "memory_ingest_manage",
                 {
-                    "source_path": str(path),
-                    "entity_type": entity_type,
-                    "key": [{"field": "id", "type": "string"}],
-                    "contract_fingerprint": fingerprint,
+                    "action": "jsonl_import",
+                    "payload": {
+                        "source_path": str(path),
+                        "entity_type": entity_type,
+                        "key": [{"field": "id", "type": "string"}],
+                        "contract_fingerprint": fingerprint,
+                    },
                 },
             )
             assert imported.is_error is False
         session_query = await client.call_tool(
-            "memory_query_execute",
+            "memory_query_manage",
             {
-                "document": {
-                    "query_ir_version": "1",
-                    "match": {"nodes": [{"type": "calls.Session", "as": "session"}]},
-                    "return": [{"field": "session.id"}],
-                }
+                "action": "execute",
+                "payload": {
+                    "document": {
+                        "query_ir_version": "1",
+                        "match": {
+                            "nodes": [{"type": "calls.Session", "as": "session"}]
+                        },
+                        "return": [{"field": "session.id"}],
+                    }
+                },
             },
         )
         session_node_id = _tool_json(session_query)["rows"][0]["bindings"]["session"]
         null_query = await client.call_tool(
-            "memory_query_execute",
+            "memory_query_manage",
             {
-                "document": {
-                    "query_ir_version": "1",
-                    "match": {"nodes": [{"type": "calls.Session", "as": "session"}]},
-                    "where": [
-                        {
-                            "left": {"field": "session.note"},
-                            "op": "eq",
-                            "right": {"value": None},
-                        }
-                    ],
-                    "return": [{"field": "session.note"}],
-                }
+                "action": "execute",
+                "payload": {
+                    "document": {
+                        "query_ir_version": "1",
+                        "match": {
+                            "nodes": [{"type": "calls.Session", "as": "session"}]
+                        },
+                        "where": [
+                            {
+                                "left": {"field": "session.note"},
+                                "op": "eq",
+                                "right": {"value": None},
+                            }
+                        ],
+                        "return": [{"field": "session.note"}],
+                    }
+                },
             },
         )
         assert len(_tool_json(null_query)["rows"]) == 1
         written = await client.call_tool(
-            "memory_attribute_write_analysis",
+            "memory_ingest_manage",
             {
-                "node_id": session_node_id,
-                "attribute_name": "classification",
-                "value": "excellent",
-                "method": "mcp-test-v1",
-                "contract_fingerprint": fingerprint,
+                "action": "analytical_attribute",
+                "payload": {
+                    "node_id": session_node_id,
+                    "attribute_name": "classification",
+                    "value": "excellent",
+                    "method": "mcp-test-v1",
+                    "contract_fingerprint": fingerprint,
+                },
             },
         )
         assert _tool_json(written)["attribute_id"]
         joined = await client.call_tool(
-            "memory_join_materialize",
+            "memory_relation_manage",
             {
-                "name": "message_to_session",
-                "relation": "session",
-                "from_": {"type": "calls.SessionMessage", "fields": ["session_id"]},
-                "to": {"type": "calls.Session", "fields": ["id"]},
-                "contract_fingerprint": fingerprint,
-                "idempotency_key": "mcp-join",
+                "action": "materialize",
+                "payload": {
+                    "name": "message_to_session",
+                    "relation": "session",
+                    "from": {
+                        "type": "calls.SessionMessage",
+                        "fields": ["session_id"],
+                    },
+                    "to": {"type": "calls.Session", "fields": ["id"]},
+                    "contract_fingerprint": fingerprint,
+                    "idempotency_key": "mcp-join",
+                },
             },
         )
         assert _tool_json(joined)["created_relations"] == 1
         queried = await client.call_tool(
-            "memory_query_execute",
+            "memory_query_manage",
             {
-                "document": {
-                    "query_ir_version": "1",
-                    "match": {
-                        "nodes": [
-                            {"type": "calls.Session", "as": "session"},
-                            {"type": "calls.SessionMessage", "as": "message"},
-                        ],
-                        "edges": [
-                            {
-                                "type": "session",
-                                "from": "message",
-                                "to": "session",
-                            }
-                        ],
-                    },
-                    "return": [{"field": "message.message"}],
-                }
+                "action": "execute",
+                "payload": {
+                    "document": {
+                        "query_ir_version": "1",
+                        "match": {
+                            "nodes": [
+                                {"type": "calls.Session", "as": "session"},
+                                {"type": "calls.SessionMessage", "as": "message"},
+                            ],
+                            "edges": [
+                                {
+                                    "type": "session",
+                                    "from": "message",
+                                    "to": "session",
+                                }
+                            ],
+                        },
+                        "return": [{"field": "message.message"}],
+                    }
+                },
             },
         )
         query_result = _tool_json(queried)
         message_node_id = query_result["rows"][0]["bindings"]["message"]
         traversed = await client.call_tool(
-            "memory_traverse_relations",
-            {"start_node_id": message_node_id, "direction": "outbound"},
+            "memory_query_manage",
+            {
+                "action": "traverse",
+                "payload": {
+                    "start_node_id": message_node_id,
+                    "direction": "outbound",
+                },
+            },
         )
         relation_id = _tool_json(traversed)["edges"][0]["relation_id"]
         corrected = await client.call_tool(
-            "memory_relation_deactivate", {"relation_id": relation_id}
+            "memory_relation_manage",
+            {"action": "deactivate", "payload": {"relation_id": relation_id}},
         )
         assert _tool_json(corrected)["active"] is False
         metric = await client.call_tool(
-            "memory_metric_write_analysis",
+            "memory_ingest_manage",
             {
-                "definition_version": "message-count-v1",
-                "value": 1,
-                "dimensions": {"entity": "SessionMessage"},
-                "method": "count-v1",
-                "method_version": "1",
-                "contract_fingerprint": fingerprint,
+                "action": "analytical_metric",
+                "payload": {
+                    "definition_version": "message-count-v1",
+                    "value": 1,
+                    "dimensions": {"entity": "SessionMessage"},
+                    "method": "count-v1",
+                    "method_version": "1",
+                    "contract_fingerprint": fingerprint,
+                },
             },
         )
         metric_id = _tool_json(metric)["metric_id"]
         explained_metric = await client.call_tool(
-            "memory_explain_metric", {"metric_id": metric_id}
+            "memory_explain_manage",
+            {"action": "metric", "payload": {"metric_id": metric_id}},
         )
         deleted = await client.call_tool(
             "memory_node_delete", {"node_id": message_node_id}
         )
         assert _tool_json(deleted)["nodes"] == 1
         stale = await client.call_tool(
-            "memory_ontology_declare_entity",
+            "memory_ontology_manage",
             {
-                "entity_type": "calls.Other",
-                "contract_fingerprint": "stale",
+                "action": "declare_entity",
+                "payload": {
+                    "entity_type": "calls.Other",
+                    "contract_fingerprint": "stale",
+                },
             },
         )
         assert stale.is_error is True

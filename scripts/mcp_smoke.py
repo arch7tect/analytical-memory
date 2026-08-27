@@ -21,7 +21,8 @@ SCHEMA = default_schema_path()
 def structured(result: Any) -> dict[str, Any]:
     if result.is_error or not isinstance(result.structured_content, dict):
         raise RuntimeError("MCP tool failed or returned no structured content")
-    return result.structured_content
+    nested = result.structured_content.get("result")
+    return dict(nested) if isinstance(nested, dict) else result.structured_content
 
 
 async def run_smoke() -> dict[str, Any]:
@@ -53,31 +54,40 @@ async def run_smoke() -> dict[str, Any]:
             ):
                 structured(
                     await client.call_tool(
-                        "memory_jsonl_import",
+                        "memory_ingest_manage",
                         {
-                            "source_path": str(EXAMPLES / filename),
-                            "entity_type": entity_type,
-                            "key": [{"field": "id", "type": "string"}],
-                            "contract_fingerprint": fingerprint,
+                            "action": "jsonl_import",
+                            "payload": {
+                                "source_path": str(EXAMPLES / filename),
+                                "entity_type": entity_type,
+                                "key": [{"field": "id", "type": "string"}],
+                                "contract_fingerprint": fingerprint,
+                            },
                         },
                     )
                 )
             definition = json.loads((EXAMPLES / "join.json").read_text())
             joined = structured(
                 await client.call_tool(
-                    "memory_join_materialize",
+                    "memory_relation_manage",
                     {
-                        "name": definition["name"],
-                        "relation": definition["relation"],
-                        "from_": definition["from"],
-                        "to": definition["to"],
-                        "contract_fingerprint": fingerprint,
+                        "action": "materialize",
+                        "payload": {
+                            "name": definition["name"],
+                            "relation": definition["relation"],
+                            "from": definition["from"],
+                            "to": definition["to"],
+                            "contract_fingerprint": fingerprint,
+                        },
                     },
                 )
             )
             query = json.loads((EXAMPLES / "query.json").read_text())
             queried = structured(
-                await client.call_tool("memory_query_execute", {"document": query})
+                await client.call_tool(
+                    "memory_query_manage",
+                    {"action": "execute", "payload": {"document": query}},
+                )
             )
         return {
             "created_relations": joined["created_relations"],

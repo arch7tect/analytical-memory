@@ -55,9 +55,11 @@
         "additionalProperties": false,
         "properties": {
           "left": {
-            "$ref": "#/$defs/QueryFieldOperand"
+            "$ref": "#/$defs/QueryFieldOperand",
+            "description": "Attribute field to compare."
           },
           "op": {
+            "description": "Typed comparison operator.",
             "enum": [
               "eq",
               "ne",
@@ -70,7 +72,8 @@
             "type": "string"
           },
           "right": {
-            "$ref": "#/$defs/QueryValueOperand"
+            "$ref": "#/$defs/QueryValueOperand",
+            "description": "Single exact typed comparison value."
           }
         },
         "required": [
@@ -86,6 +89,7 @@
         "properties": {
           "count": {
             "const": true,
+            "description": "Request a row count; cannot be mixed with field projections.",
             "title": "Count",
             "type": "boolean"
           }
@@ -100,6 +104,7 @@
         "additionalProperties": false,
         "properties": {
           "from": {
+            "description": "Source node alias; relation direction is source to target.",
             "minLength": 1,
             "title": "From",
             "type": "string"
@@ -115,14 +120,17 @@
               }
             ],
             "default": null,
+            "description": "Optional exact relation logical-key filter.",
             "title": "Logical Key"
           },
           "to": {
+            "description": "Target node alias for the directed relation.",
             "minLength": 1,
             "title": "To",
             "type": "string"
           },
           "type": {
+            "description": "Exact active relation type from the selected ontology.",
             "minLength": 1,
             "title": "Type",
             "type": "string"
@@ -140,10 +148,12 @@
         "additionalProperties": false,
         "properties": {
           "left": {
-            "$ref": "#/$defs/QueryFieldOperand"
+            "$ref": "#/$defs/QueryFieldOperand",
+            "description": "Attribute whose row presence is tested."
           },
           "op": {
             "const": "exists",
+            "description": "Presence operator; explicit null exists, missing does not.",
             "title": "Op",
             "type": "string"
           }
@@ -159,6 +169,7 @@
         "additionalProperties": false,
         "properties": {
           "field": {
+            "description": "Field reference in '<node-alias>.<attribute-name>' form.",
             "minLength": 3,
             "title": "Field",
             "type": "string"
@@ -174,6 +185,7 @@
         "additionalProperties": false,
         "properties": {
           "field": {
+            "description": "Projected '<node-alias>.<attribute-name>' field with provenance.",
             "minLength": 3,
             "title": "Field",
             "type": "string"
@@ -189,15 +201,18 @@
         "additionalProperties": false,
         "properties": {
           "left": {
-            "$ref": "#/$defs/QueryFieldOperand"
+            "$ref": "#/$defs/QueryFieldOperand",
+            "description": "Attribute field to test for membership."
           },
           "op": {
             "const": "in",
+            "description": "Membership operator; must be 'in'.",
             "title": "Op",
             "type": "string"
           },
           "right": {
-            "$ref": "#/$defs/QueryValuesOperand"
+            "$ref": "#/$defs/QueryValuesOperand",
+            "description": "Accepted exact typed values."
           }
         },
         "required": [
@@ -212,6 +227,7 @@
         "additionalProperties": false,
         "properties": {
           "edges": {
+            "description": "Directed active-relation patterns connecting node aliases.",
             "items": {
               "$ref": "#/$defs/QueryEdgePattern"
             },
@@ -220,6 +236,7 @@
             "type": "array"
           },
           "nodes": {
+            "description": "Connected node patterns participating in the query.",
             "items": {
               "$ref": "#/$defs/QueryNodePattern"
             },
@@ -239,11 +256,13 @@
         "additionalProperties": false,
         "properties": {
           "as": {
+            "description": "Unique query-local alias used by edges and field references.",
             "minLength": 1,
             "title": "As",
             "type": "string"
           },
           "type": {
+            "description": "Exact namespaced entity type from the selected ontology.",
             "minLength": 3,
             "title": "Type",
             "type": "string"
@@ -261,6 +280,7 @@
         "properties": {
           "direction": {
             "default": "asc",
+            "description": "Ascending or descending value order.",
             "enum": [
               "asc",
               "desc"
@@ -269,6 +289,7 @@
             "type": "string"
           },
           "field": {
+            "description": "Ordering field in '<node-alias>.<attribute-name>' form.",
             "minLength": 3,
             "title": "Field",
             "type": "string"
@@ -284,6 +305,7 @@
         "additionalProperties": false,
         "properties": {
           "value": {
+            "description": "Exact typed JSON literal; values are never implicitly coerced.",
             "title": "Value"
           }
         },
@@ -297,6 +319,7 @@
         "additionalProperties": false,
         "properties": {
           "values": {
+            "description": "Non-empty exact typed JSON literals for the in operator.",
             "items": {},
             "minItems": 1,
             "title": "Values",
@@ -314,21 +337,25 @@
     "properties": {
       "limit": {
         "default": 100,
+        "description": "Maximum result rows before truncation reporting.",
         "maximum": 1000,
         "minimum": 1,
         "title": "Limit",
         "type": "integer"
       },
       "match": {
-        "$ref": "#/$defs/QueryMatch"
+        "$ref": "#/$defs/QueryMatch",
+        "description": "Connected node and directed-edge pattern."
       },
       "offset": {
         "default": 0,
+        "description": "Zero-based result-row offset.",
         "minimum": 0,
         "title": "Offset",
         "type": "integer"
       },
       "order_by": {
+        "description": "Explicit ordering fields before deterministic Node-ID tie-breakers.",
         "items": {
           "$ref": "#/$defs/QueryOrderBy"
         },
@@ -337,10 +364,12 @@
       },
       "query_ir_version": {
         "const": "1",
+        "description": "Query language version; V1 requires the string '1'.",
         "title": "Query Ir Version",
         "type": "string"
       },
       "return": {
+        "description": "Field projections or one count projection.",
         "items": {
           "anyOf": [
             {
@@ -356,6 +385,7 @@
         "type": "array"
       },
       "where": {
+        "description": "Predicates combined by implicit AND; OR is not supported.",
         "items": {
           "anyOf": [
             {
@@ -388,6 +418,7 @@
         "additionalProperties": false,
         "properties": {
           "direction": {
+            "description": "Direction applied by traversal or ordering.",
             "enum": [
               "asc",
               "desc"
@@ -405,6 +436,7 @@
               }
             ],
             "default": null,
+            "description": "Field expression or attribute name used by this result item.",
             "title": "Field"
           },
           "tie_breaker": {
@@ -417,6 +449,7 @@
               }
             ],
             "default": null,
+            "description": "Deterministic secondary ordering used for equal values.",
             "title": "Tie Breaker"
           }
         },
@@ -438,9 +471,11 @@
                 "type": "null"
               }
             ],
+            "description": "Canonical identifier of the ingestion or mutation batch.",
             "title": "Batch Id"
           },
           "field": {
+            "description": "Field expression or attribute name used by this result item.",
             "title": "Field",
             "type": "string"
           },
@@ -453,9 +488,11 @@
                 "type": "null"
               }
             ],
+            "description": "Canonical provenance fragment identifier.",
             "title": "Fragment Id"
           },
           "json_type": {
+            "description": "Canonical JSON value type used for typed comparison.",
             "enum": [
               "unresolved",
               "string",
@@ -468,6 +505,7 @@
             "type": "string"
           },
           "node_id": {
+            "description": "Canonical identifier of the Node owning this value.",
             "title": "Node Id",
             "type": "string"
           },
@@ -480,6 +518,7 @@
                 "type": "null"
               }
             ],
+            "description": "Canonical identifier of the source record for this value.",
             "title": "Record Id"
           },
           "run_id": {
@@ -491,6 +530,7 @@
                 "type": "null"
               }
             ],
+            "description": "Canonical identifier of the provenance or analytical run.",
             "title": "Run Id"
           },
           "source_id": {
@@ -502,6 +542,7 @@
                 "type": "null"
               }
             ],
+            "description": "Canonical identifier of the provenance source.",
             "title": "Source Id"
           },
           "updated_at": {
@@ -513,9 +554,11 @@
                 "type": "null"
               }
             ],
+            "description": "UTC timestamp of the current record version.",
             "title": "Updated At"
           },
           "value": {
+            "description": "Canonical JSON value carried by this result item.",
             "title": "Value"
           }
         },
@@ -541,10 +584,12 @@
             "additionalProperties": {
               "type": "string"
             },
+            "description": "Mapping from query aliases to canonical Node IDs.",
             "title": "Bindings",
             "type": "object"
           },
           "projections": {
+            "description": "Requested projected values with direct provenance.",
             "items": {
               "$ref": "#/$defs/QueryProjectionResult"
             },
@@ -563,6 +608,7 @@
     "additionalProperties": false,
     "properties": {
       "contract_fingerprint": {
+        "description": "Structural contract fingerprint used by the operation.",
         "title": "Contract Fingerprint",
         "type": "string"
       },
@@ -576,13 +622,16 @@
           }
         ],
         "default": null,
+        "description": "Aggregate row count for a count query; absent for row queries.",
         "title": "Count"
       },
       "ontology_fingerprint": {
+        "description": "Fingerprint of the selected memory's current ontology.",
         "title": "Ontology Fingerprint",
         "type": "string"
       },
       "ordering": {
+        "description": "Effective deterministic ordering applied to query rows.",
         "items": {
           "$ref": "#/$defs/QueryEffectiveOrdering"
         },
@@ -590,6 +639,7 @@
         "type": "array"
       },
       "rows": {
+        "description": "Ordered Query IR rows; absent for count queries.",
         "items": {
           "$ref": "#/$defs/QueryRow"
         },
@@ -597,6 +647,7 @@
         "type": "array"
       },
       "truncated": {
+        "description": "Whether a configured result bound omitted additional items.",
         "title": "Truncated",
         "type": "boolean"
       }

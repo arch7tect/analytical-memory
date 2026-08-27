@@ -660,6 +660,43 @@ Status: implemented.
 No package registry publication is required for v1 acceptance; local wheel and
 source-distribution verification is authoritative.
 
+## Milestone 8: Named memory routing
+
+Status: implemented.
+
+### Deliver
+
+- preserve the existing environment-selected store as an implicit `default`;
+- add a per-user, non-secret, atomically replaced `memories.json` address book;
+- add one `memory_configure` lifecycle operation with explicit `create` and
+  read-only `attach` actions;
+- route every MCP data tool through an optional memory name without shared
+  active-selection state;
+- expose a catalog resource and named capabilities and ontology resources;
+- expose a source-code-independent guide, operation descriptions, discovery
+  links, and complete tool-input descriptions;
+- expose compact manager/action tools plus lazy, exact operation payload and
+  result schemas to bound the always-loaded MCP catalog;
+- mirror catalog management and optional selection in the CLI;
+- reject duplicate backend targets and equal or nested evidence roots.
+
+### Acceptance
+
+- omitted memory remains backward compatible and creates no catalog;
+- explicit unknown or unavailable memory never falls back to default;
+- create initializes only a new or empty target;
+- attach does not change target bytes and rejects an incompatible migration
+  ledger or evidence store;
+- successful tool results and expected errors identify the selected or
+  requested memory;
+- named SQLite memories remain isolated while sharing the packaged structural
+  schema and Query IR contract;
+- catalog contents never include PostgreSQL URLs or other credentials.
+- a real stdio client can discover every required input meaning and workflow
+  without source-code access; no tool input property has a missing description.
+- serialized `tools/list` remains at or below 25,000 bytes while every callable
+  operation resolves to one discoverable specification and route.
+
 ## Cross-cutting verification
 
 Tests are added with the milestone that introduces the behavior:

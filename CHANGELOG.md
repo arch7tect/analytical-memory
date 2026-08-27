@@ -2,6 +2,19 @@
 
 All notable changes to Analytical Memory are documented here.
 
+## 0.3.0 - 2026-08-27
+
+- Added one implicit default memory and stateless optional named-memory routing
+  across MCP data tools and the CLI.
+- Added an atomic per-user non-secret catalog plus one create-or-attach
+  lifecycle operation.
+- Added named capabilities and ontology discovery with strict target and
+  evidence-root isolation.
+- Added an MCP agent guide, per-memory discovery links, operation semantics, and
+  complete input descriptions for source-code-independent clients.
+- Replaced atomic MCP tools with compact manager/action tools and lazy exact
+  operation specifications, reducing the serialized tool catalog by over 80%.
+
 ## 0.2.1 - 2026-08-27
 
 - Added a read-only skill for inspecting readiness and the current ontology.

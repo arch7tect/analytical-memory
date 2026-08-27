@@ -20,49 +20,85 @@ Discovery remains available while a store is uninitialized.
 | `ANALYTICAL_MEMORY_POSTGRES_SCHEMA` | `public` | PostgreSQL schema |
 | `ANALYTICAL_MEMORY_EVIDENCE_ROOT` | `.local/evidence` | Local evidence store |
 | `ANALYTICAL_MEMORY_SCHEMA` | packaged `schema/current.json` | Structural contract |
+| `ANALYTICAL_MEMORY_DATA_ROOT` | per-user platform data directory | Base for the named-memory catalog |
+| `ANALYTICAL_MEMORY_CATALOG` | `<data-root>/memories.json` | Explicit catalog override |
 | `OPENAI_API_KEY` | unset | Commercial embedding API credential |
 
-Runtime paths and secrets are never included in discovery resources.
+Secrets are never included in discovery resources. The local catalog resource
+does include configured database and evidence paths so a local agent can explain
+which target it will use.
+
+## Named memories
+
+The existing environment-selected store is always named `default`. It is not
+written to the catalog and remains selected when a data tool omits `memory`.
+An explicit unknown or unavailable name fails and never falls back to default.
+
+`memory_configure` is the single lifecycle tool in v1:
+
+- `create` accepts a new or empty target and initializes it;
+- `attach` accepts an existing initialized target and performs read-only
+  migration-ledger, physical-integrity, and evidence-store readiness checks;
+- SQLite uses absolute `database` and `evidence_root` paths;
+- PostgreSQL uses `connection_env`, `schema`, and an absolute `evidence_root`.
+
+PostgreSQL connection environment names must match
+`ANALYTICAL_MEMORY_*_POSTGRES_URL`. The URL itself belongs in the per-user
+`.env`; `memories.json` stores only the environment-variable name. Catalog
+writes are locked and atomically replaced. SQLite database paths must be unique,
+and evidence roots may neither match nor contain one another. PostgreSQL targets
+using the same environment-variable name and schema are rejected. Different
+variables containing the same available URL and schema are also rejected. If a
+URL is unavailable while the catalog is read, unresolved aliasing remains an
+operator responsibility.
+
+The CLI mirrors the same model:
+
+```console
+uv run memory memories configure create research \
+  --backend sqlite \
+  --database /absolute/path/research.db \
+  --evidence-root /absolute/path/research-evidence
+uv run memory memories list
+uv run memory --memory research ontology describe
+```
 
 ## Discovery resources
 
 | URI | Contents |
 | --- | --- |
+| `memory://guide` | Source-code-independent selection, discovery, operation, result, safety, and error workflow |
 | `memory://schema/current` | Structural contract and fingerprint |
 | `memory://schema/ontology/current` | Current derived ontology and fingerprint |
 | `memory://schema/ontology/{namespace}` | Namespace-filtered ontology |
 | `memory://schema/query-ir/current` | Complete Query IR input/result JSON Schemas, semantics, defaults, limits, and examples |
+| `memory://operations` | Concrete manager/action index and operation effects |
+| `memory://operations/{operation}` | Exact lazy payload/result schemas, preconditions, errors, and example |
 | `memory://schema/queries` | Convenience query contracts |
 | `memory://capabilities/current` | Backend, limits, operations, and readiness |
+| `memory://catalog` | Default and configured named-memory targets, without secrets |
+| `memory://memories/{memory}/capabilities/current` | Capabilities for one memory |
+| `memory://memories/{memory}/schema/ontology/current` | Current ontology for one memory |
+| `memory://memories/{memory}/schema/ontology/{namespace}` | Namespace-filtered ontology for one memory |
 
 The structural fingerprint gates writes. The ontology fingerprint changes when
 queryable shape or its descriptions change, but not when only row counts change.
 
-## M5 tools
+## MCP tools
 
-| Tool | Mutating | Result |
+| Tool | Actions | Behavior |
 | --- | --- | --- |
-| `memory_ontology_declare_namespace` | Yes | Namespace description and new ontology |
-| `memory_ontology_declare_entity` | Yes | Optional constraints and new ontology |
-| `memory_jsonl_import` | Yes | Atomic patch/upsert and ontology delta |
-| `memory_attribute_write_analysis` | Yes | Current attribute with run provenance |
-| `memory_metric_write_analysis` | Yes | Immutable metric with run provenance |
-| `memory_join_materialize` | Yes | Join declaration, counts, and relation writes |
-| `memory_query_execute` | No | Ordered Query IR rows with node bindings and direct provenance |
-| `memory_relation_deactivate` | Yes | Explicit current relation correction |
-| `memory_node_delete` | Yes | Cascaded current graph deletion counts |
-| `memory_traverse_relations` | No | Bounded active-relation traversal |
-| `memory_search_text` | No | Local FTS results with direct provenance |
-| `memory_embedding_status` | No | Profile coverage and provider readiness |
-| `memory_search_semantic` | No | Exact local ranking after remote query embedding |
-| `memory_explain` | No | Current attribute and direct evidence provenance |
-| `memory_explain_relation` | No | Current relation and direct evidence provenance |
-| `memory_query_current_metric` | No | Deterministic current metric selection |
-| `memory_explain_metric` | No | Metric run and evidence provenance |
-| `memory_evidence_status` | No | Current provider and privacy state |
-| `memory_evidence_read` | No | Bounded base64 evidence byte range |
-| `memory_evidence_verify` | Yes | Appended verification history |
-| `memory_evidence_audit` | Yes | Bounded evidence audit |
+| `memory_configure` | `create`, `attach` | Typed named-memory lifecycle |
+| `memory_ontology_manage` | `declare_entity`, `declare_namespace` | Optional descriptions and validation metadata |
+| `memory_ingest_manage` | `jsonl_import`, `analytical_attribute`, `analytical_metric` | Atomic source and analysis ingestion |
+| `memory_relation_manage` | `materialize`, `deactivate` | Relation creation and explicit correction |
+| `memory_query_manage` | `execute`, `current_metric`, `traverse` | Bounded local relational and graph reads |
+| `memory_search_manage` | `text` | Local full-text search |
+| `memory_semantic_manage` | `search`, `embedding_status` | Semantic search and provider readiness |
+| `memory_explain_manage` | `attribute`, `relation`, `metric` | Direct provenance explanations |
+| `memory_evidence_read_manage` | `status`, `read` | Read-only evidence inspection |
+| `memory_evidence_manage` | `verify`, `audit` | Verification-history writes; never deletion |
+| `memory_node_delete` | — | Isolated destructive current-graph deletion |
 
 JSONL import accepts a server-local `source_path`, a namespaced entity type, an
 ordered typed key selector, and the current structural fingerprint. The key is
@@ -73,25 +109,38 @@ namespace declaration requires a non-empty description.
 They should describe meaning, not contain PII, credentials, or example records.
 Redeclaration replaces them; omitted optional descriptions are cleared.
 
+Every data tool accepts optional `memory`. A manager receives `action`, a
+`payload` conforming to that operation's lazy specification, and `memory`.
+It returns `{action, memory, result}`. Payload validation errors link back to
+the exact specification. Successful results and expected errors echo the
+resolved or requested memory name.
+
 The only raw-evidence surface is the bounded read tool. Ordinary query,
 ontology, search, and explanation responses never contain evidence bytes. The
 MCP surface exposes no arbitrary SQL, migration, snapshot, retention, or network
 transport operation. Snapshot, retention, export, and billable embedding rebuild
 remain explicit CLI workflows.
 
-`memory_search_semantic` is the only MCP query tool that calls an external
-service. Both indexed content and query policy are public-only.
+`memory_semantic_manage` is the only data-query tool with an external-call
+boundary. Its `search` action sends public query text to the configured
+embedding service; indexed content and query policy remain public-only.
+`memory_configure` may also contact a PostgreSQL target while creating or
+attaching a named memory.
 
 ## Agent contract and errors
 
 Tool inputs and outputs are strict typed objects; unknown members are rejected.
-An agent should discover tools from `memory://capabilities/current`, queryable
-shape from `memory://schema/ontology/current`, and exact Query IR syntax from
-`memory://schema/query-ir/current`. The latter resource is authoritative; the
-shorter `memory://schema/queries` resource only describes saved convenience
-queries.
+An agent should begin at `memory://guide`, choose a name from
+`memory://catalog`, resolve an operation through `memory://operations`, and read
+its exact specification before calling the routed manager. Manager schemas stay
+compact; operation resources carry complete payload/result descriptions and
+examples. Exact general-query syntax remains authoritative at
+`memory://schema/query-ir/current`; the shorter `memory://schema/queries`
+resource only describes saved convenience queries.
 
 Expected failures use a JSON envelope with `code`, `message`, `details`, and
 `retryable`. The stdio MCP transport prepends an error description to this JSON,
 so consumers should parse from the first `{`. Error codes and retryability are
-discoverable under `errors` in `memory://capabilities/current`.
+discoverable under `errors` in `memory://capabilities/current`. Parameterized
+resources return the same envelope as their JSON document for an unknown or
+unavailable memory.

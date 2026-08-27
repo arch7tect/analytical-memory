@@ -1484,67 +1484,56 @@ class MemoryApplication:
                 "delete_node": {
                     "enabled": True,
                     "interfaces": ["python", "cli", "mcp"],
-                    "mcp_tool": "memory_node_delete",
                     "mutating": True,
                 },
                 "entity_declaration": {
                     "enabled": True,
                     "interfaces": ["python", "cli", "mcp"],
-                    "mcp_tool": "memory_ontology_declare_entity",
                     "mutating": True,
                 },
                 "namespace_declaration": {
                     "enabled": True,
                     "interfaces": ["python", "cli", "mcp"],
-                    "mcp_tool": "memory_ontology_declare_namespace",
                     "mutating": True,
                 },
                 "evidence_audit": {
                     "enabled": True,
                     "interfaces": ["python", "cli", "mcp"],
-                    "mcp_tool": "memory_evidence_audit",
                     "mutating": True,
                 },
                 "evidence_read": {
                     "enabled": True,
                     "interfaces": ["python", "cli", "mcp"],
-                    "mcp_tool": "memory_evidence_read",
                     "mutating": False,
                 },
                 "evidence_status": {
                     "enabled": True,
                     "interfaces": ["python", "cli", "mcp"],
-                    "mcp_tool": "memory_evidence_status",
                     "mutating": False,
                 },
                 "evidence_verify": {
                     "enabled": True,
                     "interfaces": ["python", "cli", "mcp"],
-                    "mcp_tool": "memory_evidence_verify",
                     "mutating": True,
                 },
                 "jsonl_import": {
                     "enabled": True,
                     "interfaces": ["python", "cli", "mcp"],
-                    "mcp_tool": "memory_jsonl_import",
                     "mutating": True,
                 },
                 "analytical_attribute_write": {
                     "enabled": True,
                     "interfaces": ["python", "cli", "mcp"],
-                    "mcp_tool": "memory_attribute_write_analysis",
                     "mutating": True,
                 },
                 "analytical_metric_write": {
                     "enabled": True,
                     "interfaces": ["python", "cli", "mcp"],
-                    "mcp_tool": "memory_metric_write_analysis",
                     "mutating": True,
                 },
                 "join_materialize": {
                     "enabled": True,
                     "interfaces": ["python", "cli", "mcp"],
-                    "mcp_tool": "memory_join_materialize",
                     "mutating": True,
                 },
                 "ontology": {
@@ -1555,55 +1544,46 @@ class MemoryApplication:
                 "embedding_status": {
                     "enabled": True,
                     "interfaces": ["python", "cli", "mcp"],
-                    "mcp_tool": "memory_embedding_status",
                     "mutating": False,
                 },
                 "explain_attribute": {
                     "enabled": True,
                     "interfaces": ["python", "cli", "mcp"],
-                    "mcp_tool": "memory_explain",
                     "mutating": False,
                 },
                 "explain_metric": {
                     "enabled": True,
                     "interfaces": ["python", "cli", "mcp"],
-                    "mcp_tool": "memory_explain_metric",
                     "mutating": False,
                 },
                 "explain_relation": {
                     "enabled": True,
                     "interfaces": ["python", "cli", "mcp"],
-                    "mcp_tool": "memory_explain_relation",
                     "mutating": False,
                 },
                 "query_execute": {
                     "enabled": True,
                     "interfaces": ["python", "cli", "mcp"],
-                    "mcp_tool": "memory_query_execute",
                     "mutating": False,
                 },
                 "query_current_metric": {
                     "enabled": True,
                     "interfaces": ["python", "cli", "mcp"],
-                    "mcp_tool": "memory_query_current_metric",
                     "mutating": False,
                 },
                 "relation_deactivate": {
                     "enabled": True,
                     "interfaces": ["python", "cli", "mcp"],
-                    "mcp_tool": "memory_relation_deactivate",
                     "mutating": True,
                 },
                 "search_text": {
                     "enabled": True,
                     "interfaces": ["python", "cli", "mcp"],
-                    "mcp_tool": "memory_search_text",
                     "mutating": False,
                 },
                 "search_semantic": {
                     "enabled": True,
                     "interfaces": ["python", "cli", "mcp"],
-                    "mcp_tool": "memory_search_semantic",
                     "mutating": False,
                 },
                 "embedding_rebuild": {
@@ -1614,7 +1594,6 @@ class MemoryApplication:
                 "traverse_relations": {
                     "enabled": True,
                     "interfaces": ["python", "cli", "mcp"],
-                    "mcp_tool": "memory_traverse_relations",
                     "mutating": False,
                 },
                 "retention": {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -41,6 +42,31 @@ def environment_evidence_root() -> Path:
 def environment_schema() -> Path | None:
     value = os.environ.get("ANALYTICAL_MEMORY_SCHEMA")
     return None if value is None else Path(value)
+
+
+def user_data_root() -> Path:
+    configured = os.environ.get("ANALYTICAL_MEMORY_DATA_ROOT")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "analytical-memory"
+    if os.name == "nt":
+        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+        return base / "analytical-memory"
+    base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+    return base / "analytical-memory"
+
+
+load_dotenv(user_data_root() / ".env")
+
+
+def environment_memory_catalog() -> Path:
+    configured = os.environ.get("ANALYTICAL_MEMORY_CATALOG")
+    return (
+        Path(configured).expanduser().resolve()
+        if configured
+        else user_data_root() / "memories.json"
+    )
 
 
 def environment_embedding_privacy() -> str:

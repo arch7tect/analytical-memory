@@ -99,6 +99,18 @@ class InputOutputError(MemoryErrorBase):
     code = "io_error"
 
 
+class MemoryCatalogError(MemoryErrorBase):
+    code = "memory_catalog"
+
+
+class MemoryNotFoundError(MemoryErrorBase):
+    code = "memory_not_found"
+
+
+class MemoryUnavailableError(MemoryErrorBase):
+    code = "memory_unavailable"
+
+
 class TransferError(MemoryErrorBase):
     code = "transfer_error"
 

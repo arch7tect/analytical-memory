@@ -954,28 +954,66 @@ without a prior preview.
 V1 exposes a local stdio adapter with normative discovery resources:
 
 ```text
+memory://guide
+memory://catalog
 memory://schema/current
 memory://schema/ontology/current
 memory://schema/ontology/{namespace}
 memory://schema/query-ir/current
 memory://capabilities/current
 memory://schema/queries
+memory://operations
+memory://operations/{operation}
 ```
 
 `memory://schema/current` remains the stable structural contract and
 compatibility fingerprint. Ontology and Query IR resources change independently
 and carry their own versions or fingerprints.
 
-Saved queries and typed traversal, search, metric, and explanation tools remain
-versioned convenience operations. They are not a second general query language.
+Saved queries and manager actions for traversal, search, metrics, and
+explanation remain versioned convenience operations. They are not a second
+general query language.
 
-Structured tools cover capabilities, contract and ontology discovery,
-entity declaration, streaming atomic JSONL import, Query IR execution, one-step
-join materialization, explicit relation deactivation and Node deletion, search,
-explanation,
-and bounded evidence operations. The MCP
-adapter calls the same application services as the Python API and CLI. No tool
-infers or silently applies a relation.
+Compact manager tools accept an action, an operation-specific payload, and an
+optional memory. Exact payload and result schemas are loaded lazily from the
+operation resources, while configuration and destructive Node deletion remain
+isolated tools. The MCP adapter calls the same application services as the
+Python API and CLI. No tool infers or silently applies a relation.
+
+### Named memory routing
+
+One process may address multiple independent memories without process-local
+selection state. Every data operation accepts an optional memory name; omission
+resolves to the existing environment-configured `default` memory. An explicit
+unknown or unavailable name is an error and never falls back.
+
+Named targets are recorded in a per-user `memories.json` catalog. The catalog
+contains only backend coordinates: an absolute SQLite database path or a
+PostgreSQL connection-environment name and schema, plus an absolute evidence
+root. Secrets remain in the per-user `.env`. Default is reserved, synthesized
+from existing configuration, and never stored in the catalog.
+
+One lifecycle operation supports `create` and `attach`. Create requires a new
+or empty target and initializes it. Attach requires an existing target and
+validates its exact packaged migration ledger, physical integrity, and evidence
+store readiness without scanning evidence contents, creating, or migrating
+anything. Catalog replacement is atomic and serialized with a portable file
+lock.
+
+SQLite database paths are unique. PostgreSQL connection-environment and schema
+pairs are unique. Evidence roots are also disjoint: equality and nesting are
+rejected because evidence audit and retention operate across the complete root.
+Different environment names that resolve to the same available PostgreSQL URL
+and schema are rejected. Aliases whose connection values are unavailable while
+the catalog is read remain an explicit operator risk.
+
+The router caches only successfully resolved applications in a bounded cache.
+It never records an active name, so concurrent stdio clients cannot change one
+another's target. Structural schema and Query IR remain shared package
+contracts; capabilities and data-derived ontology have named resource forms.
+The guide is the stable entry point for a source-code-blind client. Capabilities
+route every callable operation to a manager/action pair and its exact lazy
+specification. Operation payload and result schemas describe every field.
 
 ## Python and repository organization
 

@@ -9,15 +9,23 @@ from analytical_memory.limits import (
     MAX_QUERY_PATTERN_NODES,
     MAX_QUERY_RESULTS,
 )
+from analytical_memory.mcp_schema import describe_known_response_properties
 
 
 class APIModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+        json_schema_extra=describe_known_response_properties,
+    )
 
 
 class WireModel(APIModel):
     model_config = ConfigDict(
-        extra="forbid", validate_by_alias=True, validate_by_name=False
+        extra="forbid",
+        validate_by_alias=True,
+        validate_by_name=False,
+        json_schema_extra=describe_known_response_properties,
     )
 
 
@@ -37,22 +45,52 @@ QUERY_OPERATORS = frozenset(
 
 
 class FieldDeclarationInput(APIModel):
-    description: str | None = Field(default=None, min_length=1)
-    type: DeclaredJsonType | None = None
-    required: bool = False
-    nullable: bool = True
-    privacy: PrivacyClass | None = None
-    searchable: bool = False
+    description: str | None = Field(
+        default=None, min_length=1, description="Human-readable field meaning."
+    )
+    type: DeclaredJsonType | None = Field(
+        default=None,
+        description="Optional enforced JSON type; omit to keep the field dynamic.",
+    )
+    required: bool = Field(
+        default=False, description="Require the field on every imported record."
+    )
+    nullable: bool = Field(
+        default=True, description="Allow an explicitly present JSON null value."
+    )
+    privacy: PrivacyClass | None = Field(
+        default=None,
+        description=(
+            "Optional field privacy override; otherwise inherit entity privacy."
+        ),
+    )
+    searchable: bool = Field(
+        default=False,
+        description="Index public string values for memory_search_manage action=text.",
+    )
 
 
 class KeyFieldInput(APIModel):
-    field: str = Field(min_length=1)
-    type: Literal["string", "number", "boolean"]
+    field: str = Field(
+        min_length=1, description="JSON object field used in the ordered import key."
+    )
+    type: Literal["string", "number", "boolean"] = Field(
+        description="Exact scalar JSON type required for this key component."
+    )
 
 
 class JoinEndpointInput(APIModel):
-    type: str = Field(min_length=3)
-    fields: list[str] = Field(min_length=1)
+    type: str = Field(
+        min_length=3,
+        description="Exact namespaced entity type from the selected ontology.",
+    )
+    fields: list[str] = Field(
+        min_length=1,
+        description=(
+            "Ordered attribute names forming the equality tuple; both endpoints must "
+            "have the same number of compatible typed fields."
+        ),
+    )
 
 
 class OntologyProvenance(APIModel):
@@ -125,82 +163,149 @@ class OntologyResponse(APIModel):
 
 
 class QueryNodePattern(WireModel):
-    type: str = Field(min_length=3)
-    alias: str = Field(alias="as", min_length=1)
+    type: str = Field(
+        min_length=3,
+        description="Exact namespaced entity type from the selected ontology.",
+    )
+    alias: str = Field(
+        alias="as",
+        min_length=1,
+        description="Unique query-local alias used by edges and field references.",
+    )
 
 
 class QueryEdgePattern(WireModel):
-    type: str = Field(min_length=1)
-    from_: str = Field(alias="from", min_length=1)
-    to: str = Field(min_length=1)
-    logical_key: str | None = Field(default=None, min_length=1)
+    type: str = Field(
+        min_length=1,
+        description="Exact active relation type from the selected ontology.",
+    )
+    from_: str = Field(
+        alias="from",
+        min_length=1,
+        description="Source node alias; relation direction is source to target.",
+    )
+    to: str = Field(
+        min_length=1, description="Target node alias for the directed relation."
+    )
+    logical_key: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Optional exact relation logical-key filter.",
+    )
 
 
 class QueryMatch(APIModel):
     nodes: list[QueryNodePattern] = Field(
-        min_length=1, max_length=MAX_QUERY_PATTERN_NODES
+        min_length=1,
+        max_length=MAX_QUERY_PATTERN_NODES,
+        description="Connected node patterns participating in the query.",
     )
     edges: list[QueryEdgePattern] = Field(
-        default_factory=list, max_length=MAX_QUERY_PATTERN_EDGES
+        default_factory=list,
+        max_length=MAX_QUERY_PATTERN_EDGES,
+        description="Directed active-relation patterns connecting node aliases.",
     )
 
 
 class QueryFieldOperand(APIModel):
-    field: str = Field(min_length=3)
+    field: str = Field(
+        min_length=3,
+        description="Field reference in '<node-alias>.<attribute-name>' form.",
+    )
 
 
 class QueryValueOperand(APIModel):
-    value: Any
+    value: Any = Field(
+        description="Exact typed JSON literal; values are never implicitly coerced."
+    )
 
 
 class QueryValuesOperand(APIModel):
-    values: list[Any] = Field(min_length=1)
+    values: list[Any] = Field(
+        min_length=1,
+        description="Non-empty exact typed JSON literals for the in operator.",
+    )
 
 
 class QueryComparisonPredicate(APIModel):
-    left: QueryFieldOperand
-    op: QueryComparisonOperator
-    right: QueryValueOperand
+    left: QueryFieldOperand = Field(description="Attribute field to compare.")
+    op: QueryComparisonOperator = Field(description="Typed comparison operator.")
+    right: QueryValueOperand = Field(description="Single exact typed comparison value.")
 
 
 class QueryInPredicate(APIModel):
-    left: QueryFieldOperand
-    op: QueryInOperator
-    right: QueryValuesOperand
+    left: QueryFieldOperand = Field(
+        description="Attribute field to test for membership."
+    )
+    op: QueryInOperator = Field(description="Membership operator; must be 'in'.")
+    right: QueryValuesOperand = Field(description="Accepted exact typed values.")
 
 
 class QueryExistsPredicate(APIModel):
-    left: QueryFieldOperand
-    op: QueryExistsOperator
+    left: QueryFieldOperand = Field(
+        description="Attribute whose row presence is tested."
+    )
+    op: QueryExistsOperator = Field(
+        description="Presence operator; explicit null exists, missing does not."
+    )
 
 
 QueryPredicate = QueryComparisonPredicate | QueryInPredicate | QueryExistsPredicate
 
 
 class QueryFieldProjection(APIModel):
-    field: str = Field(min_length=3)
+    field: str = Field(
+        min_length=3,
+        description="Projected '<node-alias>.<attribute-name>' field with provenance.",
+    )
 
 
 class QueryCountProjection(APIModel):
-    count: Literal[True]
+    count: Literal[True] = Field(
+        description="Request a row count; cannot be mixed with field projections."
+    )
 
 
 QueryProjection = QueryFieldProjection | QueryCountProjection
 
 
 class QueryOrderBy(APIModel):
-    field: str = Field(min_length=3)
-    direction: Literal["asc", "desc"] = "asc"
+    field: str = Field(
+        min_length=3,
+        description="Ordering field in '<node-alias>.<attribute-name>' form.",
+    )
+    direction: Literal["asc", "desc"] = Field(
+        default="asc", description="Ascending or descending value order."
+    )
 
 
 class QueryIRDocument(WireModel):
-    query_ir_version: Literal["1"]
-    match: QueryMatch
-    where: list[QueryPredicate] = Field(default_factory=list)
-    return_: list[QueryProjection] = Field(alias="return", min_length=1)
-    order_by: list[QueryOrderBy] = Field(default_factory=list)
-    limit: int = Field(default=100, ge=1, le=MAX_QUERY_RESULTS)
-    offset: int = Field(default=0, ge=0)
+    query_ir_version: Literal["1"] = Field(
+        description="Query language version; V1 requires the string '1'."
+    )
+    match: QueryMatch = Field(description="Connected node and directed-edge pattern.")
+    where: list[QueryPredicate] = Field(
+        default_factory=list,
+        description="Predicates combined by implicit AND; OR is not supported.",
+    )
+    return_: list[QueryProjection] = Field(
+        alias="return",
+        min_length=1,
+        description="Field projections or one count projection.",
+    )
+    order_by: list[QueryOrderBy] = Field(
+        default_factory=list,
+        description=(
+            "Explicit ordering fields before deterministic Node-ID tie-breakers."
+        ),
+    )
+    limit: int = Field(
+        default=100,
+        ge=1,
+        le=MAX_QUERY_RESULTS,
+        description="Maximum result rows before truncation reporting.",
+    )
+    offset: int = Field(default=0, ge=0, description="Zero-based result-row offset.")
 
 
 class JsonlImportResponse(APIModel):

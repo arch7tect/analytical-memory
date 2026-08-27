@@ -9,13 +9,14 @@ can discover the complete machine-readable contract at
 
 Use this sequence for every new or refreshed connection:
 
-1. Read `memory://capabilities/current` and confirm that
-   `memory_query_execute` is available.
+1. Read `memory://capabilities/current` and confirm that `query_execute` is
+   routed to `memory_query_manage` with action `execute`.
 2. Read `memory://schema/ontology/current` to discover entity types, fields,
    exact effective JSON types, explicit relations, and statistics.
 3. Read `memory://schema/query-ir/current` for the authoritative input and
    result JSON Schemas, semantic rules, limits, defaults, and examples.
-4. Build a Query IR document and call `memory_query_execute`.
+4. Read `memory://operations/query_execute`, build a Query IR document, and call
+   `memory_query_manage` with action `execute` and payload `{document: ...}`.
 5. Re-read the ontology if a response carries an unfamiliar ontology
    fingerprint. Re-read `memory://schema/current` and retry a write if it fails
    with `schema_changed`.
@@ -139,9 +140,10 @@ A non-count result contains:
 - `truncated`, the structural and ontology fingerprints.
 
 The binding is how an agent carries an entity discovered by one query into
-`memory_traverse_relations`, `memory_explain`, analytical writes, relation
-corrections, or deletion. Edge IDs are intentionally not bound; use traversal
-or relation explanation when a relation identity is needed.
+traversal, explanation, analytical ingestion, relation correction, or deletion.
+Edge IDs are intentionally not bound; use `memory_query_manage` action
+`traverse` or `memory_explain_manage` action `relation` when a relation identity
+is needed.
 
 ```json
 {

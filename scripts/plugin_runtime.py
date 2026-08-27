@@ -22,6 +22,18 @@ def _data_root() -> Path:
     return base / APP_NAME
 
 
+def _configure_environment(data_root: Path) -> None:
+    defaults = {
+        "ANALYTICAL_MEMORY_DATA_ROOT": data_root,
+        "ANALYTICAL_MEMORY_CATALOG": data_root / "memories.json",
+        "ANALYTICAL_MEMORY_DB": data_root / "memory.db",
+        "ANALYTICAL_MEMORY_EVIDENCE_ROOT": data_root / "evidence",
+    }
+    for name, value in defaults.items():
+        if not os.environ.get(name):
+            os.environ[name] = str(value)
+
+
 def main() -> int:
     if sys.argv[1:] != ["serve"]:
         print("usage: plugin_runtime.py serve", file=sys.stderr)
@@ -30,17 +42,19 @@ def main() -> int:
     data_root = _data_root()
     data_root.mkdir(parents=True, exist_ok=True)
     load_dotenv(data_root / ".env")
-    os.environ.setdefault("ANALYTICAL_MEMORY_DB", str(data_root / "memory.db"))
-    os.environ.setdefault(
-        "ANALYTICAL_MEMORY_EVIDENCE_ROOT", str(data_root / "evidence")
-    )
+    _configure_environment(data_root)
 
-    from analytical_memory.configuration import build_application
+    from analytical_memory.configuration import (
+        build_application,
+        environment_memory_catalog,
+    )
     from analytical_memory.mcp_server import create_mcp_server
+    from analytical_memory.memories import MemoryRouter
 
     application = build_application()
     application.initialize()
-    create_mcp_server(application).run()
+    router = MemoryRouter(application, environment_memory_catalog())
+    create_mcp_server(application, router).run()
     return 0
 
 

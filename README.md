@@ -18,6 +18,7 @@ Milestones 0 through 7 are implemented. The working v1 includes:
 - optional namespace and entity descriptions, declarations, and a data-derived
   current ontology;
 - explicit one-step joins between independently loaded datasets;
+- one implicit default memory plus explicitly configured named memories;
 - read-only JSON Query IR v1;
 - one current `NodeAttribute` or `Relation` with direct provenance;
 - analytical values written through the same attribute shape;
@@ -77,11 +78,15 @@ uv run memory init
 uv run memory-mcp
 ```
 
-An MCP client should first read `memory://schema/current`,
-`memory://schema/ontology/current`, and `memory://schema/query-ir/current`.
-It can then import JSONL files, declare optional constraints, materialize joins,
-write analytical attributes, and execute Query IR without direct database
-access. See the [MCP reference](docs/reference/mcp.md).
+An MCP client should start with `memory://guide`, `memory://catalog`, and
+`memory://operations`, then read the selected operation specification and
+memory discovery links. Compact manager tools can import, declare, connect,
+analyze, and query without direct database or source-code access. See the
+[MCP reference](docs/reference/mcp.md).
+
+Every data tool accepts an optional `memory` name. Omitting it selects the
+backward-compatible `default` memory. `memory://catalog` lists configured names;
+`memory_configure` creates a new store or attaches an already compatible one.
 
 ## Plugins
 

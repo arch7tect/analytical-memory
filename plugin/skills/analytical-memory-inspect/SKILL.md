@@ -5,18 +5,22 @@ description: Inspect Analytical Memory through MCP when the user asks what data 
 
 # Inspect Analytical Memory
 
-Read `memory://capabilities/current`, `memory://schema/current`, and
-`memory://schema/ontology/current` once.
+Read `memory://guide` and `memory://catalog`. Inspect the memory requested by the
+user; otherwise inspect `default`. Read that memory's capabilities and current
+ontology using the guide's URI, plus `memory://schema/current`, once. There is no
+active selection and an unavailable name must not fall back to default.
 
 Report only the information relevant to the request:
 
 - initialization and backend readiness;
+- resolved memory name;
 - structural and ontology fingerprints;
 - namespaces and their descriptions;
 - entity types, fields, effective JSON types, privacy, and observed coverage;
 - active relation declarations and their endpoint types.
 
-Read `memory://schema/query-ir/current` only when the user asks how to query a
+Read `memory://operations/query_execute` and
+`memory://schema/query-ir/current` only when the user asks how to query a
 specific part of the ontology. Distinguish an uninitialized store from an empty
 initialized ontology and from an unsupported capability.
 

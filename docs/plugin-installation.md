@@ -52,19 +52,26 @@ The SQLite database is initialized automatically on first start. Put optional
 configuration such as `OPENAI_API_KEY` or PostgreSQL settings in `.env` inside
 that directory. Set `ANALYTICAL_MEMORY_PLUGIN_DATA` to use another directory.
 
+The same directory contains `memories.json` after the first named memory is
+configured. This file is only a local address book: it maps a short memory name
+to a SQLite path or to a PostgreSQL connection-environment name and schema, plus
+its evidence root. It contains no database URL, password, records, ontology, or
+active-memory state. Omitting `memory` in any tool continues to use the single
+default `memory.db` and `evidence/` pair.
+
 ## Release Build
 
 Build the Python wheel, source distribution, three host archives, and their
 SHA-256 file locally:
 
 ```console
-uv run python scripts/build_release.py --tag v0.2.1
+uv run python scripts/build_release.py --tag v0.3.0
 ```
 
 Artifacts are written to `dist/release/`. In GitHub Actions, every pull request
 and main-branch push builds both the unpacked plugin bundles and a complete
 release candidate. Pushing a tag that matches the project version, such as
-`v0.2.1`, rebuilds the same artifacts and publishes them to a GitHub Release.
+`v0.3.0`, rebuilds the same artifacts and publishes them to a GitHub Release.
 
 For the normal publishing path, open the `Release` workflow in GitHub Actions,
 select `Run workflow` on `main`, and start it. The workflow reads

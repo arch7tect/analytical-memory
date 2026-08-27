@@ -15,10 +15,12 @@ from analytical_memory.configuration import (
     environment_backend,
     environment_database,
     environment_evidence_root,
+    environment_memory_catalog,
     environment_postgres_schema,
     environment_postgres_url,
 )
 from analytical_memory.errors import MemoryErrorBase
+from analytical_memory.memories import MemoryRouter, contextual_capabilities
 from analytical_memory.schema_compiler import (
     compile_schema,
     schema_is_current,
@@ -44,12 +46,33 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--postgres-url", default=environment_postgres_url())
     parser.add_argument("--postgres-schema", default=environment_postgres_schema())
     parser.add_argument("--schema", type=Path)
+    parser.add_argument("--memory")
+    parser.add_argument("--catalog", type=Path, default=environment_memory_catalog())
     subcommands = parser.add_subparsers(dest="command", required=True)
 
     subcommands.add_parser("init")
     subcommands.add_parser("status")
     subcommands.add_parser("validate")
     subcommands.add_parser("capabilities")
+
+    memories = subcommands.add_parser("memories")
+    memories_commands = memories.add_subparsers(dest="memories_command", required=True)
+    memories_commands.add_parser("list")
+    configure = memories_commands.add_parser("configure")
+    configure.add_argument("action", choices=("create", "attach"))
+    configure.add_argument("name")
+    configure.add_argument(
+        "--backend",
+        dest="target_backend",
+        choices=("sqlite", "postgresql"),
+        required=True,
+    )
+    configure.add_argument("--database", dest="target_database", type=Path)
+    configure.add_argument("--connection-env")
+    configure.add_argument("--postgres-schema", dest="target_postgres_schema")
+    configure.add_argument(
+        "--evidence-root", dest="target_evidence_root", type=Path, required=True
+    )
 
     jsonl_command = subcommands.add_parser("jsonl")
     jsonl_commands = jsonl_command.add_subparsers(dest="jsonl_command", required=True)
@@ -245,7 +268,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _application(arguments: argparse.Namespace) -> MemoryApplication:
-    return build_application(
+    default = build_application(
         database=arguments.database,
         evidence_root=arguments.evidence_root,
         schema_path=arguments.schema,
@@ -253,19 +276,47 @@ def _application(arguments: argparse.Namespace) -> MemoryApplication:
         postgres_url=arguments.postgres_url,
         postgres_schema=arguments.postgres_schema,
     )
+    if arguments.memory is None or arguments.memory == "default":
+        return default
+    return MemoryRouter(default, arguments.catalog).resolve(arguments.memory)[1]
 
 
 def _execute(arguments: argparse.Namespace) -> dict[str, Any]:
+    if arguments.command == "memories":
+        default = build_application(
+            database=arguments.database,
+            evidence_root=arguments.evidence_root,
+            schema_path=arguments.schema,
+            backend=arguments.backend,
+            postgres_url=arguments.postgres_url,
+            postgres_schema=arguments.postgres_schema,
+        )
+        router = MemoryRouter(default, arguments.catalog)
+        if arguments.memories_command == "list":
+            return router.catalog()
+        return router.configure(
+            action=arguments.action,
+            name=arguments.name,
+            backend=arguments.target_backend,
+            evidence_root=arguments.target_evidence_root,
+            database=arguments.target_database,
+            connection_env=arguments.connection_env,
+            postgres_schema=arguments.target_postgres_schema,
+        )
     application = _application(arguments)
     api = MemoryAPI(application)
     if arguments.command == "init":
         return application.initialize()
     if arguments.command == "status":
-        return application.status()
+        result = application.status()
+        result["runtime_fingerprint"] = contextual_capabilities(
+            application, arguments.memory or "default"
+        )["runtime_fingerprint"]
+        return result
     if arguments.command == "validate":
         return application.validate()
     if arguments.command == "capabilities":
-        return application.capabilities()
+        return contextual_capabilities(application, arguments.memory or "default")
     if arguments.command == "jsonl":
         key = strict_json_loads(arguments.key)
         if not isinstance(key, list):
@@ -467,14 +518,31 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         result = _execute(arguments)
     except (MemoryErrorBase, ValueError, OSError) as exc:
+        memory = (
+            arguments.name
+            if arguments.command == "memories"
+            and arguments.memories_command == "configure"
+            else arguments.memory or "default"
+        )
+        if isinstance(exc, MemoryErrorBase):
+            error = exc.envelope()
+            error["details"] = {**error["details"], "memory": memory}
+        else:
+            error = {
+                "error": type(exc).__name__,
+                "memory": memory,
+                "message": str(exc),
+            }
         json.dump(
-            {"error": type(exc).__name__, "message": str(exc)},
+            error,
             sys.stderr,
             ensure_ascii=False,
             sort_keys=True,
         )
         sys.stderr.write("\n")
         return 2
+    if arguments.command not in {"memories", "schema"}:
+        result["memory"] = arguments.memory or "default"
     json.dump(result, sys.stdout, ensure_ascii=False, indent=2, sort_keys=True)
     sys.stdout.write("\n")
     if arguments.command == "validate" and not result["ok"]:
