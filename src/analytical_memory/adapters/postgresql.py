@@ -230,8 +230,7 @@ class PostgresMemoryStore(SqlMemoryStore):
                 if (
                     int(row["version"]) != definition.version
                     or str(row["checksum"]) != definition.checksum
-                    or str(row["target_fingerprint"])
-                    != definition.target_fingerprint
+                    or str(row["target_fingerprint"]) != definition.target_fingerprint
                 ):
                     ledger_issues.append(
                         f"migration ledger mismatch at version {definition.version}"
@@ -347,9 +346,7 @@ class PostgresMemoryStore(SqlMemoryStore):
                     "search_document.lifecycle = 'active' "
                     "WHERE search_document.id IS NULL"
                 ).fetchone()
-                fts_missing = (
-                    0 if missing_row is None else int(missing_row["count"])
-                )
+                fts_missing = 0 if missing_row is None else int(missing_row["count"])
                 fts_extra = 0 if extra_row is None else int(extra_row["count"])
         finally:
             connection.close()
@@ -371,9 +368,7 @@ class PostgresMemoryStore(SqlMemoryStore):
                 "extra_rows": fts_extra,
                 "missing_rows": fts_missing,
                 "ok": (
-                    not unavailable_search_tables
-                    and not fts_extra
-                    and not fts_missing
+                    not unavailable_search_tables and not fts_extra and not fts_missing
                 ),
                 "unavailable_tables": unavailable_search_tables,
             },

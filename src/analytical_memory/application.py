@@ -1175,8 +1175,7 @@ class MemoryApplication:
         )
         state = release["retention"]
         release_pairs = {
-            (item["released_at"], item["release_reason"])
-            for item in state["releases"]
+            (item["released_at"], item["release_reason"]) for item in state["releases"]
         }
         changed_ids = set(release["acquisition_ids"])
         changed_pairs = {

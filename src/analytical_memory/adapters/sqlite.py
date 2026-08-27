@@ -130,13 +130,9 @@ class SqliteMemoryStore(SqlMemoryStore):
                     "batch_id": (
                         None if row["batch_id"] is None else str(row["batch_id"])
                     ),
-                    "run_id": (
-                        None if row["run_id"] is None else str(row["run_id"])
-                    ),
+                    "run_id": (None if row["run_id"] is None else str(row["run_id"])),
                     "fragment_id": (
-                        None
-                        if row["fragment_id"] is None
-                        else str(row["fragment_id"])
+                        None if row["fragment_id"] is None else str(row["fragment_id"])
                     ),
                     "updated_at": str(row["updated_at"]),
                 }
@@ -254,9 +250,7 @@ class SqliteMemoryStore(SqlMemoryStore):
         ledger_issues: list[str] = []
         if len(migration_rows) != len(manifest.migrations):
             ledger_issues.append("migration ledger length does not match")
-        for row, definition in zip(
-            migration_rows, manifest.migrations, strict=False
-        ):
+        for row, definition in zip(migration_rows, manifest.migrations, strict=False):
             if (
                 int(row["version"]) != definition.version
                 or str(row["checksum"]) != definition.checksum
@@ -277,9 +271,7 @@ class SqliteMemoryStore(SqlMemoryStore):
                 "extra_rows": fts_extra,
                 "missing_rows": fts_missing,
                 "ok": (
-                    not unavailable_search_tables
-                    and not fts_extra
-                    and not fts_missing
+                    not unavailable_search_tables and not fts_extra and not fts_missing
                 ),
                 "unavailable_tables": unavailable_search_tables,
             },

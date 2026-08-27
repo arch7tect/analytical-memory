@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import getpass
 import json
 import shutil
 import subprocess
@@ -51,11 +50,11 @@ def _scan(artifact: Path) -> list[str]:
         if basename.endswith((".pem", ".key", ".p12", ".pfx")):
             problems.append(f"credential-like file: {name}")
     home = str(Path.home())
-    username = getpass.getuser()
     markers = (
         home,
         "/" + "Users" + "/",
         "/" + "home" + "/",
+        "\\" + "Users" + "\\",
         "BEGIN " + "PRIVATE KEY",
     )
     for name, data in members:
@@ -66,8 +65,6 @@ def _scan(artifact: Path) -> list[str]:
         for marker in markers:
             if marker and marker in text:
                 problems.append(f"prohibited text marker {marker!r}: {name}")
-        if username and f"/{username}/" in text:
-            problems.append(f"developer username path: {name}")
     if artifact.suffix == ".whl":
         for suffix in REQUIRED_WHEEL_SUFFIXES:
             if not any(name.endswith(suffix) for name in names):

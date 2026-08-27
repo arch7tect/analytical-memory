@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: analytical-memory-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - name: Require main for a manual release
+        if: github.event_name == 'workflow_dispatch'
+        run: test "$GITHUB_REF" = "refs/heads/main"
+      - name: Resolve release tag
+        id: release
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            VERSION="$(uv run --locked python -c 'from scripts.build_plugin_bundles import project_version; print(project_version())')"
+            TAG="v${VERSION}"
+          else
+            TAG="$GITHUB_REF_NAME"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+      - name: Require a new manual release
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          ! git show-ref --verify --quiet "refs/tags/${TAG}"
+          ! gh release view "${TAG}" >/dev/null 2>&1
+      - name: Build release
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: uv run --locked python scripts/build_release.py --tag "$TAG"
+      - name: Publish GitHub release from existing tag
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: gh release create "$TAG" --verify-tag --generate-notes dist/release/*
+      - name: Create tag and publish GitHub release
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: >-
+          gh release create "$TAG" --target "$GITHUB_SHA"
+          --generate-notes dist/release/*

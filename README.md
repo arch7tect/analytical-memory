@@ -83,6 +83,22 @@ It can then import JSONL files, declare optional constraints, materialize joins,
 write analytical attributes, and execute Query IR without direct database
 access. See the [MCP reference](docs/reference/mcp.md).
 
+## Plugins
+
+Build local plugin bundles for Claude Code, Kimi Code, and Codex in one pass:
+
+```console
+uv run python scripts/build_plugin_bundles.py
+```
+
+Each bundle contains the same MCP runtime and a short workflow for importing
+JSONL, connecting datasets, reading the evolving ontology, and querying it.
+See the [plugin installation guide](docs/plugin-installation.md).
+
+Version tags matching `v<project-version>` trigger a GitHub Release containing
+the Claude, Kimi, and Codex archives, the Python wheel and source distribution,
+and SHA-256 checksums.
+
 ## Semantic retrieval
 
 Copy `.env.template` to the ignored `.env` and set `OPENAI_API_KEY`. Only public

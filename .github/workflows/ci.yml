@@ -43,3 +43,22 @@ jobs:
       - run: uv run memory-quickstart
       - run: uv run python scripts/mcp_smoke.py
       - run: uv run python scripts/verify_distribution.py
+
+  plugin-bundles:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv run --locked python scripts/build_release.py
+      - uses: actions/upload-artifact@v7
+        with:
+          name: analytical-memory-plugin-bundles
+          path: dist/plugins
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        with:
+          name: analytical-memory-release-candidate
+          path: dist/release/*
+          if-no-files-found: error

@@ -5,7 +5,7 @@ import os
 import sys
 from hashlib import sha256
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from mcp import Client, StdioServerParameters
@@ -197,9 +197,7 @@ def test_ontology_namespaces_and_descriptions_are_replaceable(
     assert first["definition_hash"] == second["definition_hash"]
     assert second["created_relations"] == 0
     parent_view = application.ontology("calls")["document"]
-    assert [item["type"] for item in parent_view["entities"]] == [
-        "calls.voice.Session"
-    ]
+    assert [item["type"] for item in parent_view["entities"]] == ["calls.voice.Session"]
     assert parent_view["statistics"] == {
         "active_relations": 1,
         "attributes": 2,
@@ -534,9 +532,7 @@ def test_reused_evidence_privacy_only_tightens(
     assert truncated is False
     assert catalog[0]["effective_privacy"] == "private"
     assert catalog[0]["object"]["privacy_class"] == "private"
-    assert {item["privacy_class"] for item in catalog[0]["fragments"]} == {
-        "private"
-    }
+    assert {item["privacy_class"] for item in catalog[0]["fragments"]} == {"private"}
     assert {item["privacy_class"] for item in catalog[0]["acquisitions"]} == {
         "public",
         "private",
@@ -562,7 +558,7 @@ def test_import_replay_repairs_missing_evidence_location(
         if not failed:
             failed = True
             raise RuntimeError("forced location-recording failure")
-        return original(*args, **kwargs)
+        return cast(dict[str, Any], original(*args, **kwargs))
 
     monkeypatch.setattr(application.memory_store, "record_evidence_check", fail_once)
     with pytest.raises(RuntimeError, match="forced location-recording failure"):
@@ -570,9 +566,7 @@ def test_import_replay_repairs_missing_evidence_location(
 
     replay = _import(application, source, "calls.Session")
     assert replay["replayed"] is True
-    catalog, _ = application.memory_store.evidence_catalog(
-        1, replay["evidence_digest"]
-    )
+    catalog, _ = application.memory_store.evidence_catalog(1, replay["evidence_digest"])
     assert catalog[0]["locations"][0]["availability"] == "present"
 
 
@@ -610,9 +604,7 @@ def test_retention_release_plan_and_retire_are_explicit_and_audited(
     assert released["acquisition_ids"]
     acquisition = next(
         item
-        for item in application.memory_store.snapshot_records()[
-            "evidence_acquisition"
-        ]
+        for item in application.memory_store.snapshot_records()["evidence_acquisition"]
         if item["evidence_object_id"]
         == application.memory_store.evidence_catalog(1, digest)[0][0]["object"]["id"]
     )
@@ -654,11 +646,10 @@ def test_retention_release_is_idempotent_and_preserves_retain_until(
         "calls.Session",
     )
     digest = imported["evidence_digest"]
-    connection = application.memory_store._connect()  # type: ignore[attr-defined]
+    connection = application.memory_store._connect()
     with connection:
         connection.execute(
-            "UPDATE evidence_acquisition SET retention_required = 0, "
-            "retain_until = ?",
+            "UPDATE evidence_acquisition SET retention_required = 0, retain_until = ?",
             ("2026-01-02T00:00:00Z",),
         )
 
@@ -692,9 +683,7 @@ def test_retention_release_is_idempotent_and_preserves_retain_until(
     assert second["released_at"] == "2026-01-01T00:00:00Z"
     assert second["reason"] == "first review"
     assert second["releases"] == first["releases"]
-    persisted = application.memory_store.snapshot_records()[
-        "evidence_acquisition"
-    ][0]
+    persisted = application.memory_store.snapshot_records()["evidence_acquisition"][0]
     assert persisted["retain_until"] == "2026-01-02T00:00:00Z"
 
 
@@ -776,7 +765,7 @@ def test_failed_retirement_does_not_claim_the_store_copy_is_missing(
 
 def test_integrity_detects_search_index_drift(m5: tuple[Any, ...]) -> None:
     application, _, _ = m5
-    connection = application.memory_store._connect()  # type: ignore[attr-defined]
+    connection = application.memory_store._connect()
     with connection:
         connection.execute(
             "INSERT INTO search_document_fts(document_id, content) VALUES (?, ?)",
@@ -872,9 +861,7 @@ def test_redeclaration_resets_omitted_field_constraints_and_search(
     }
     records = application.memory_store.snapshot_records()
     status_attribute = next(
-        item
-        for item in records["node_attribute"]
-        if item["attribute_name"] == "status"
+        item for item in records["node_attribute"] if item["attribute_name"] == "status"
     )
     assert status_attribute["searchable"] == 0
     status_document = next(
@@ -902,7 +889,7 @@ def test_redeclaration_resets_omitted_field_constraints_and_search(
 
 
 def test_withdrawn_unobserved_declaration_does_not_pin_type(
-    m5: tuple[Any, ...]
+    m5: tuple[Any, ...],
 ) -> None:
     application, _, _ = m5
     application.declare_entity(
@@ -914,9 +901,7 @@ def test_withdrawn_unobserved_declaration_does_not_pin_type(
         "calls.Session",
         contract_fingerprint=application.schema.fingerprint,
     )
-    withdrawn = application.ontology()["document"]["entities"][0]["fields"][
-        "future"
-    ]
+    withdrawn = application.ontology()["document"]["entities"][0]["fields"]["future"]
     assert withdrawn["type"] == "unresolved"
     assert withdrawn["privacy"] == "private"
 
@@ -925,9 +910,7 @@ def test_withdrawn_unobserved_declaration_does_not_pin_type(
         fields={"future": {"type": "string", "privacy": "private"}},
         contract_fingerprint=application.schema.fingerprint,
     )
-    restored = application.ontology()["document"]["entities"][0]["fields"][
-        "future"
-    ]
+    restored = application.ontology()["document"]["entities"][0]["fields"]["future"]
     assert restored["type"] == "string"
     assert restored["declared"] is True
 
@@ -1753,9 +1736,10 @@ def test_query_ir_model_and_parser_reject_the_same_wire_shape(
         parse_query_ir(document)
 
 
-def test_query_ir_rejects_disconnected_patterns_and_preserves_optional_edge_key(
-) -> None:
-    disconnected = {
+def test_query_ir_rejects_disconnected_patterns_and_preserves_optional_edge_key() -> (
+    None
+):
+    disconnected: dict[str, Any] = {
         "query_ir_version": "1",
         "match": {
             "nodes": [
@@ -1802,9 +1786,7 @@ def test_query_ir_rejects_disconnected_patterns_and_preserves_optional_edge_key(
         },
     }
     plan = parse_query_ir(connected)
-    assert plan.edges == (
-        {"type": "session", "from": "message", "to": "session"},
-    )
+    assert plan.edges == ({"type": "session", "from": "message", "to": "session"},)
 
 
 @pytest.mark.parametrize("resolver", ["import", "declaration", "analysis"])

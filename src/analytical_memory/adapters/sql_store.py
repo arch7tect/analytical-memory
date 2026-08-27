@@ -224,8 +224,10 @@ class SqlMemoryStore(MemoryStore):
                 (document_id,),
             )
             value = json.loads(str(row["value_json"]))
-            if searchable and str(row["json_type"]) == "string" and isinstance(
-                value, str
+            if (
+                searchable
+                and str(row["json_type"]) == "string"
+                and isinstance(value, str)
             ):
                 content_hash = sha256_bytes(value.encode("utf-8"))
                 connection.execute(
@@ -1699,9 +1701,7 @@ class SqlMemoryStore(MemoryStore):
             return result
 
     @staticmethod
-    def _field_type(
-        connection: Any, entity_type: str, field_name: str
-    ) -> str:
+    def _field_type(connection: Any, entity_type: str, field_name: str) -> str:
         row = connection.execute(
             "SELECT json_type FROM observed_field "
             "WHERE entity_type = ? AND field_name = ?",
@@ -2155,9 +2155,7 @@ class SqlMemoryStore(MemoryStore):
                 visited_clause = ""
                 if visited_edges:
                     visited_placeholders = ", ".join("?" for _ in visited_edges)
-                    visited_clause = (
-                        f" AND relation.id NOT IN ({visited_placeholders})"
-                    )
+                    visited_clause = f" AND relation.id NOT IN ({visited_placeholders})"
                     parameters.extend(sorted(visited_edges))
                 rows = connection.execute(
                     "SELECT relation.*, source.namespace AS source_namespace, "
@@ -2455,8 +2453,7 @@ class SqlMemoryStore(MemoryStore):
                     "private"
                     if str(row["privacy_class"]) == "private"
                     or any(
-                        str(item["privacy_class"]) == "private"
-                        for item in acquisitions
+                        str(item["privacy_class"]) == "private" for item in acquisitions
                     )
                     or any(
                         str(item["privacy_class"]) == "private" for item in fragments

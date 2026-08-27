@@ -299,9 +299,7 @@ def _execute(arguments: argparse.Namespace) -> dict[str, Any]:
         if arguments.query_name == "execute":
             if arguments.document is None:
                 raise ValueError("--document is required for query execute")
-            document = strict_json_loads(
-                arguments.document.read_text(encoding="utf-8")
-            )
+            document = strict_json_loads(arguments.document.read_text(encoding="utf-8"))
             if not isinstance(document, dict):
                 raise ValueError("query document must be a JSON object")
             return api.execute_query(document).model_dump(mode="json")
@@ -314,9 +312,7 @@ def _execute(arguments: argparse.Namespace) -> dict[str, Any]:
             arguments.definition_version, dimensions
         ).model_dump(mode="json")
     if arguments.command == "join":
-        definition = strict_json_loads(
-            arguments.definition.read_text(encoding="utf-8")
-        )
+        definition = strict_json_loads(arguments.definition.read_text(encoding="utf-8"))
         if not isinstance(definition, dict):
             raise ValueError("join definition must be a JSON object")
         return api.materialize_join(
