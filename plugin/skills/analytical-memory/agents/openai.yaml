@@ -1,0 +1,4 @@
+interface:
+  display_name: "Analytical Memory"
+  short_description: "Import, connect, and query evolving datasets"
+  default_prompt: "Use $analytical-memory to work with the connected memory through its current ontology."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Inspect Analytical Memory"
+  short_description: "Inspect readiness and the current ontology"
+  default_prompt: "Use $analytical-memory-inspect to show what this memory contains and how it can be queried."

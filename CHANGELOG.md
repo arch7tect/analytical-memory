@@ -2,6 +2,13 @@
 
 All notable changes to Analytical Memory are documented here.
 
+## 0.2.1 - 2026-08-27
+
+- Added a read-only skill for inspecting readiness and the current ontology.
+- Added Codex-native metadata for both bundled skills.
+- Kept Claude and Kimi bundles free of Codex-only skill sidecars and added a
+  regression test for the host-specific layouts.
+
 ## 0.2.0 - 2026-08-27
 
 - Added dynamic, incrementally discovered ontology with optional declarations.

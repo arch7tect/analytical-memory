@@ -91,8 +91,9 @@ Build local plugin bundles for Claude Code, Kimi Code, and Codex in one pass:
 uv run python scripts/build_plugin_bundles.py
 ```
 
-Each bundle contains the same MCP runtime and a short workflow for importing
-JSONL, connecting datasets, reading the evolving ontology, and querying it.
+Each bundle contains the same MCP runtime, the main workflow for importing,
+connecting, and querying data, and a read-only skill for inspecting readiness
+and the current ontology.
 See the [plugin installation guide](docs/plugin-installation.md).
 
 Version tags matching `v<project-version>` trigger a GitHub Release containing

@@ -27,7 +27,7 @@ def _write_json(path: Path, document: dict[str, Any]) -> None:
     )
 
 
-def _copy_payload(destination: Path) -> None:
+def _copy_payload(destination: Path, *, host: str) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     for name in ("pyproject.toml", "uv.lock", "README.md", "LICENSE"):
         shutil.copy2(ROOT / name, destination / name)
@@ -41,7 +41,17 @@ def _copy_payload(destination: Path) -> None:
         destination / "src" / "analytical_memory",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store"),
     )
-    shutil.copytree(ROOT / "plugin" / "skills", destination / "skills")
+
+    def ignore_host_metadata(directory: str, names: list[str]) -> set[str]:
+        if host != "openai" and Path(directory).name == "agents":
+            return {"openai.yaml"} & set(names)
+        return set()
+
+    shutil.copytree(
+        ROOT / "plugin" / "skills",
+        destination / "skills",
+        ignore=ignore_host_metadata,
+    )
 
 
 def _server(host: str) -> dict[str, Any]:
@@ -91,7 +101,7 @@ def _common_manifest(version: str) -> dict[str, Any]:
 def _build_claude(output: Path, version: str) -> None:
     root = output / "claude"
     plugin = root / PLUGIN_NAME
-    _copy_payload(plugin)
+    _copy_payload(plugin, host="claude")
     _write_json(plugin / ".claude-plugin" / "plugin.json", _common_manifest(version))
     _write_json(plugin / ".mcp.json", _server("claude"))
     _write_json(
@@ -115,7 +125,7 @@ def _build_claude(output: Path, version: str) -> None:
 def _build_kimi(output: Path, version: str) -> None:
     root = output / "kimi"
     plugin = root / PLUGIN_NAME
-    _copy_payload(plugin)
+    _copy_payload(plugin, host="kimi")
     manifest = {
         **_common_manifest(version),
         "author": "Analytical Memory contributors",
@@ -152,7 +162,7 @@ def _build_kimi(output: Path, version: str) -> None:
 def _build_openai(output: Path, version: str) -> None:
     root = output / "openai"
     plugin = root / "plugins" / PLUGIN_NAME
-    _copy_payload(plugin)
+    _copy_payload(plugin, host="openai")
     manifest = {
         **_common_manifest(version),
         "skills": "./skills/",

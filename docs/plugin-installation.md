@@ -1,7 +1,7 @@
 # Plugin Installation
 
-The plugin bundles the same local MCP server and workflow for Claude Code,
-Kimi Code, and Codex. Build all three variants from the repository root:
+The plugin bundles the same local MCP server and skills for Claude Code, Kimi
+Code, and Codex. Build all three variants from the repository root:
 
 ```console
 uv run python scripts/build_plugin_bundles.py
@@ -58,13 +58,13 @@ Build the Python wheel, source distribution, three host archives, and their
 SHA-256 file locally:
 
 ```console
-uv run python scripts/build_release.py --tag v0.2.0
+uv run python scripts/build_release.py --tag v0.2.1
 ```
 
 Artifacts are written to `dist/release/`. In GitHub Actions, every pull request
 and main-branch push builds both the unpacked plugin bundles and a complete
 release candidate. Pushing a tag that matches the project version, such as
-`v0.2.0`, rebuilds the same artifacts and publishes them to a GitHub Release.
+`v0.2.1`, rebuilds the same artifacts and publishes them to a GitHub Release.
 
 For the normal publishing path, open the `Release` workflow in GitHub Actions,
 select `Run workflow` on `main`, and start it. The workflow reads
