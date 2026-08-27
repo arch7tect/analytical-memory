@@ -6,7 +6,7 @@
     "created_nodes": 1000,
     "created_relations": 500,
     "evidence_bytes": 68580,
-    "ontology_fingerprint": "b2cf50b0612753bf2527c91788141f552dc6d36ef05fce79886dee5a340c0936",
+    "ontology_fingerprint": "0d46c47c99b090705bc3563a64256be6aed5d85b8a45177add2bf43f9a59770d",
     "record_count": 1000,
     "row_counts": {
       "analytical_run": 3,
@@ -20,6 +20,7 @@
       "evidence_verification": 3,
       "ingestion_batch": 3,
       "metric": 0,
+      "namespace_declaration": 0,
       "node": 1000,
       "node_attribute": 3500,
       "observed_field": 7,
@@ -28,7 +29,7 @@
       "search_document": 0,
       "source": 3
     },
-    "schema_fingerprint": "0acf188864c209905b2022dd91cb7deed9077800c4b67b43877c23d89cbe1cc8"
+    "schema_fingerprint": "3176355e7b7637b312c768bef5a11f299d2cb144cff8645dc0d5c306eb099b39"
   },
   "observed": {
     "backend": "sqlite",
