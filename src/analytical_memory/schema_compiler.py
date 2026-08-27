@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from analytical_memory.canonical import canonical_json, sha256_json
+from analytical_memory.resources import resource_path, source_checkout_root
 
 
 class SchemaCompilationError(ValueError):
@@ -12,11 +13,11 @@ class SchemaCompilationError(ValueError):
 
 
 def default_metadata_directory() -> Path:
-    return Path(__file__).resolve().parents[2] / "schema" / "metadata"
+    return resource_path("schema", "metadata")
 
 
 def default_output_path() -> Path:
-    return Path(__file__).resolve().parents[2] / "schema" / "current.json"
+    return resource_path("schema", "current.json")
 
 
 def _merge(target: dict[str, Any], fragment: dict[str, Any], source: Path) -> None:
@@ -65,6 +66,8 @@ def schema_is_current(
 def write_schema(
     output: Path | None = None, metadata_directory: Path | None = None
 ) -> dict[str, Any]:
+    if output is None:
+        source_checkout_root()
     target = output or default_output_path()
     compiled = compile_schema(metadata_directory)
     target.parent.mkdir(parents=True, exist_ok=True)

@@ -18,11 +18,15 @@ from analytical_memory.api_models import (
     EvidenceStatusResponse,
     EvidenceVerifyResponse,
     ExplanationResponse,
+    FieldDeclarationInput,
+    JoinEndpointInput,
     JoinMaterializationResponse,
     JsonlImportResponse,
+    KeyFieldInput,
     MetricExplanationResponse,
     NodeDeleteResponse,
     OntologyResponse,
+    QueryIRDocument,
     QueryIRResponse,
     RelationExplanationResponse,
     SearchResponse,
@@ -32,14 +36,30 @@ from analytical_memory.api_models import (
 from analytical_memory.application import MemoryApplication
 from analytical_memory.canonical import canonical_json
 from analytical_memory.configuration import build_application
-from analytical_memory.errors import MemoryErrorBase
+from analytical_memory.errors import (
+    InputOutputError,
+    InvalidRequestError,
+    MemoryErrorBase,
+)
+from analytical_memory.query_ir import query_ir_contract_document
+from analytical_memory.version import __version__
+
+
+def _tool_error(exc: MemoryErrorBase | OSError | ValueError) -> ToolError:
+    if isinstance(exc, MemoryErrorBase):
+        envelope = exc.envelope()
+    elif isinstance(exc, OSError):
+        envelope = InputOutputError(str(exc)).envelope()
+    else:
+        envelope = InvalidRequestError(str(exc)).envelope()
+    return ToolError(canonical_json(envelope))
 
 
 def create_mcp_server(application: MemoryApplication) -> MCPServer:
     api = MemoryAPI(application)
     server = MCPServer(
         "analytical-memory",
-        version="0.1.0",
+        version=__version__,
         instructions=(
             "Inspect schema and capabilities resources before calling typed tools. "
             "Raw evidence is available only through the explicit bounded read tool; "
@@ -96,11 +116,7 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
     )
     def query_ir_contract() -> str:
         return canonical_json(
-            {
-                "operators": ["eq", "ne", "lt", "lte", "gt", "gte", "in", "exists"],
-                "query_ir_version": "1",
-                "schema_fingerprint": application.schema.fingerprint,
-            }
+            query_ir_contract_document(application.schema.fingerprint)
         )
 
     @server.resource(
@@ -127,14 +143,20 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
         entity_type: str,
         contract_fingerprint: str,
         privacy: Literal["public", "private"] = "public",
-        fields: dict[str, dict[str, Any]] | None = None,
+        fields: dict[str, FieldDeclarationInput] | None = None,
     ) -> OntologyResponse:
         try:
             return api.declare_entity(
-                entity_type, privacy, fields or {}, contract_fingerprint
+                entity_type,
+                privacy,
+                {
+                    name: value.model_dump(mode="json", exclude_none=True)
+                    for name, value in (fields or {}).items()
+                },
+                contract_fingerprint,
             )
         except (MemoryErrorBase, OSError, ValueError) as exc:
-            raise ToolError(str(exc)) from exc
+            raise _tool_error(exc) from exc
 
     @server.tool(
         name="memory_jsonl_import",
@@ -150,13 +172,18 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
     def jsonl_import(
         source_path: str,
         entity_type: str,
-        key: list[dict[str, str]],
+        key: list[KeyFieldInput],
         contract_fingerprint: str,
     ) -> JsonlImportResponse:
         try:
-            return api.jsonl_import(source_path, entity_type, key, contract_fingerprint)
+            return api.jsonl_import(
+                source_path,
+                entity_type,
+                [item.model_dump(mode="json") for item in key],
+                contract_fingerprint,
+            )
         except (MemoryErrorBase, OSError, ValueError) as exc:
-            raise ToolError(str(exc)) from exc
+            raise _tool_error(exc) from exc
 
     @server.tool(
         name="memory_attribute_write_analysis",
@@ -187,7 +214,7 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
                 contract_fingerprint,
             )
         except (MemoryErrorBase, OSError, ValueError) as exc:
-            raise ToolError(str(exc)) from exc
+            raise _tool_error(exc) from exc
 
     @server.tool(
         name="memory_metric_write_analysis",
@@ -230,7 +257,7 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
                 privacy,
             )
         except (MemoryErrorBase, OSError, ValueError) as exc:
-            raise ToolError(str(exc)) from exc
+            raise _tool_error(exc) from exc
 
     @server.tool(
         name="memory_join_materialize",
@@ -246,8 +273,8 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
     def materialize_join(
         name: str,
         relation: str,
-        from_: dict[str, Any],
-        to: dict[str, Any],
+        from_: JoinEndpointInput,
+        to: JoinEndpointInput,
         contract_fingerprint: str,
         idempotency_key: str | None = None,
     ) -> JoinMaterializationResponse:
@@ -255,13 +282,13 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
             return api.materialize_join(
                 name,
                 relation,
-                from_,
-                to,
+                from_.model_dump(mode="json"),
+                to.model_dump(mode="json"),
                 contract_fingerprint,
                 idempotency_key,
             )
         except (MemoryErrorBase, OSError, ValueError) as exc:
-            raise ToolError(str(exc)) from exc
+            raise _tool_error(exc) from exc
 
     @server.tool(
         name="memory_query_execute",
@@ -274,11 +301,15 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
         ),
         structured_output=True,
     )
-    def execute_query(document: dict[str, Any]) -> QueryIRResponse:
+    def execute_query(document: QueryIRDocument) -> QueryIRResponse:
         try:
-            return api.execute_query(document)
+            query = document.model_dump(mode="json", by_alias=True)
+            for edge in query["match"]["edges"]:
+                if edge["logical_key"] is None:
+                    edge.pop("logical_key")
+            return api.execute_query(query)
         except (MemoryErrorBase, OSError, ValueError) as exc:
-            raise ToolError(str(exc)) from exc
+            raise _tool_error(exc) from exc
 
     @server.tool(
         name="memory_relation_deactivate",
@@ -295,7 +326,7 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
         try:
             return api.deactivate_relation(relation_id)
         except (MemoryErrorBase, OSError, ValueError) as exc:
-            raise ToolError(str(exc)) from exc
+            raise _tool_error(exc) from exc
 
     @server.tool(
         name="memory_node_delete",
@@ -312,7 +343,7 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
         try:
             return api.delete_node(node_id)
         except (MemoryErrorBase, OSError, ValueError) as exc:
-            raise ToolError(str(exc)) from exc
+            raise _tool_error(exc) from exc
 
     @server.tool(
         name="memory_query_current_metric",
@@ -331,7 +362,7 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
         try:
             return api.query_current_metric(definition_version, dimensions)
         except (MemoryErrorBase, OSError, ValueError) as exc:
-            raise ToolError(str(exc)) from exc
+            raise _tool_error(exc) from exc
 
     @server.tool(
         name="memory_traverse_relations",
@@ -352,7 +383,7 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
         direction: Literal["outbound", "inbound", "both"] = "outbound",
         max_depth: int = 3,
         limit: int = 100,
-        states: list[str] | None = None,
+        states: list[Literal["active"]] | None = None,
     ) -> TraversalResponse:
         try:
             return api.traverse_relations(
@@ -361,10 +392,10 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
                 direction=direction,
                 max_depth=max_depth,
                 limit=limit,
-                states=states,
+                states=None if states is None else list(states),
             )
         except (MemoryErrorBase, OSError, ValueError) as exc:
-            raise ToolError(str(exc)) from exc
+            raise _tool_error(exc) from exc
 
     @server.tool(
         name="memory_search_text",
@@ -381,7 +412,7 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
         try:
             return api.search_text(query, limit)
         except (MemoryErrorBase, OSError, ValueError) as exc:
-            raise ToolError(str(exc)) from exc
+            raise _tool_error(exc) from exc
 
     @server.tool(
         name="memory_embedding_status",
@@ -398,7 +429,7 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
         try:
             return api.embedding_profile_status(profile_id)
         except (MemoryErrorBase, OSError, ValueError) as exc:
-            raise ToolError(str(exc)) from exc
+            raise _tool_error(exc) from exc
 
     @server.tool(
         name="memory_search_semantic",
@@ -432,7 +463,7 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
                 limit=limit,
             )
         except (MemoryErrorBase, OSError, ValueError) as exc:
-            raise ToolError(str(exc)) from exc
+            raise _tool_error(exc) from exc
 
     @server.tool(
         name="memory_explain",
@@ -449,7 +480,7 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
         try:
             return api.explain(attribute_id)
         except (MemoryErrorBase, OSError, ValueError) as exc:
-            raise ToolError(str(exc)) from exc
+            raise _tool_error(exc) from exc
 
     @server.tool(
         name="memory_explain_relation",
@@ -466,7 +497,7 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
         try:
             return api.explain_relation(relation_id)
         except (MemoryErrorBase, OSError, ValueError) as exc:
-            raise ToolError(str(exc)) from exc
+            raise _tool_error(exc) from exc
 
     @server.tool(
         name="memory_explain_metric",
@@ -483,7 +514,7 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
         try:
             return api.explain_metric(metric_id)
         except (MemoryErrorBase, OSError, ValueError) as exc:
-            raise ToolError(str(exc)) from exc
+            raise _tool_error(exc) from exc
 
     @server.tool(
         name="memory_evidence_status",
@@ -500,7 +531,7 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
         try:
             return api.evidence_status(digest)
         except (MemoryErrorBase, OSError, ValueError) as exc:
-            raise ToolError(str(exc)) from exc
+            raise _tool_error(exc) from exc
 
     @server.tool(
         name="memory_evidence_read",
@@ -519,7 +550,7 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
         try:
             return api.evidence_read(digest, offset=offset, limit=limit)
         except (MemoryErrorBase, OSError, ValueError) as exc:
-            raise ToolError(str(exc)) from exc
+            raise _tool_error(exc) from exc
 
     @server.tool(
         name="memory_evidence_verify",
@@ -538,7 +569,7 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
         try:
             return api.evidence_verify(digest)
         except (MemoryErrorBase, OSError, ValueError) as exc:
-            raise ToolError(str(exc)) from exc
+            raise _tool_error(exc) from exc
 
     @server.tool(
         name="memory_evidence_audit",
@@ -555,7 +586,7 @@ def create_mcp_server(application: MemoryApplication) -> MCPServer:
         try:
             return api.evidence_audit(limit)
         except (MemoryErrorBase, OSError, ValueError) as exc:
-            raise ToolError(str(exc)) from exc
+            raise _tool_error(exc) from exc
 
     return server
 

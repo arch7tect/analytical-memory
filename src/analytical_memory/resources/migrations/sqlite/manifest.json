@@ -30,6 +30,12 @@
       "file": "005_dynamic_ontology.sql",
       "target_fingerprint": "c8d44a0a4ea59e870bd5475f247eb28f1690538c735f0e362a71651289cfd7c3",
       "version": 5
+    },
+    {
+      "checksum": "4612bdf3c53da24f5c65191ce939d0d3d6ac621ce0af65b618a2e32af264cac3",
+      "file": "006_portable_sort_keys.sql",
+      "target_fingerprint": "882802d6f0ffd1970e2c1c75f99e38199696dfaa998a108e7306deb8c10380b2",
+      "version": 6
     }
   ]
 }

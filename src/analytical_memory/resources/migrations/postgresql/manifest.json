@@ -1,0 +1,12 @@
+{
+  "backend_profile": "postgresql",
+  "schema_version": 6,
+  "migrations": [
+    {
+      "version": 6,
+      "file": "006_initial.sql",
+      "checksum": "f43ed8c0bc73c78f1b56fbb8f46523e8b0786d6195c3747b2ed973e14c9aa8c2",
+      "target_fingerprint": "882802d6f0ffd1970e2c1c75f99e38199696dfaa998a108e7306deb8c10380b2"
+    }
+  ]
+}

@@ -1,18 +1,188 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+from analytical_memory.limits import (
+    MAX_QUERY_PATTERN_EDGES,
+    MAX_QUERY_PATTERN_NODES,
+    MAX_QUERY_RESULTS,
+)
 
 
 class APIModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+JsonType = Literal["unresolved", "string", "number", "boolean", "object", "array"]
+DeclaredJsonType = Literal["string", "number", "boolean", "object", "array"]
+PrivacyClass = Literal["public", "private"]
+QueryComparisonOperator = Literal["eq", "ne", "lt", "lte", "gt", "gte"]
+QueryInOperator = Literal["in"]
+QueryExistsOperator = Literal["exists"]
+QUERY_OPERATORS = frozenset(
+    (
+        *get_args(QueryComparisonOperator),
+        *get_args(QueryInOperator),
+        *get_args(QueryExistsOperator),
+    )
+)
+
+
+class FieldDeclarationInput(APIModel):
+    type: DeclaredJsonType | None = None
+    required: bool = False
+    nullable: bool = True
+    privacy: PrivacyClass | None = None
+    searchable: bool = False
+
+
+class KeyFieldInput(APIModel):
+    field: str = Field(min_length=1)
+    type: Literal["string", "number", "boolean"]
+
+
+class JoinEndpointInput(APIModel):
+    type: str = Field(min_length=3)
+    fields: list[str] = Field(min_length=1)
+
+
+class OntologyProvenance(APIModel):
+    fragment_id: str | None
+    recorded_at: str
+    source_id: str | None
+
+
+class OntologyField(APIModel):
+    type: JsonType
+    privacy: PrivacyClass
+    declared: bool
+    required: bool
+    nullable: bool
+    searchable: bool
+
+
+class OntologyEntity(APIModel):
+    type: str
+    privacy: PrivacyClass
+    declared: bool
+    fields: dict[str, OntologyField]
+    provenance: OntologyProvenance | None
+
+
+class OntologyRelationStatistics(APIModel):
+    active_edges: int
+    inactive_edges: int
+
+
+class OntologyRelation(APIModel):
+    name: str
+    relation: str
+    from_: JoinEndpointInput = Field(alias="from")
+    to: JoinEndpointInput
+    enabled: bool
+    statistics: OntologyRelationStatistics
+    provenance: OntologyProvenance
+
+
+class OntologyStatistics(APIModel):
+    nodes: int
+    attributes: int
+    active_relations: int
+
+
+class OntologyDocument(APIModel):
+    ontology_version: Literal["1"]
+    entities: list[OntologyEntity]
+    relations: list[OntologyRelation]
+    ontology_fingerprint: str
+    statistics: OntologyStatistics
 
 
 class OntologyResponse(APIModel):
     contract_fingerprint: str
-    document: dict[str, Any]
+    document: OntologyDocument
     ontology_fingerprint: str
+
+
+class QueryNodePattern(APIModel):
+    type: str = Field(min_length=3)
+    alias: str = Field(alias="as", min_length=1)
+
+
+class QueryEdgePattern(APIModel):
+    type: str
+    from_: str = Field(alias="from")
+    to: str
+    logical_key: str | None = None
+
+
+class QueryMatch(APIModel):
+    nodes: list[QueryNodePattern] = Field(
+        min_length=1, max_length=MAX_QUERY_PATTERN_NODES
+    )
+    edges: list[QueryEdgePattern] = Field(
+        default_factory=list, max_length=MAX_QUERY_PATTERN_EDGES
+    )
+
+
+class QueryFieldOperand(APIModel):
+    field: str
+
+
+class QueryValueOperand(APIModel):
+    value: Any
+
+
+class QueryValuesOperand(APIModel):
+    values: list[Any] = Field(min_length=1)
+
+
+class QueryComparisonPredicate(APIModel):
+    left: QueryFieldOperand
+    op: QueryComparisonOperator
+    right: QueryValueOperand
+
+
+class QueryInPredicate(APIModel):
+    left: QueryFieldOperand
+    op: QueryInOperator
+    right: QueryValuesOperand
+
+
+class QueryExistsPredicate(APIModel):
+    left: QueryFieldOperand
+    op: QueryExistsOperator
+
+
+QueryPredicate = QueryComparisonPredicate | QueryInPredicate | QueryExistsPredicate
+
+
+class QueryFieldProjection(APIModel):
+    field: str
+
+
+class QueryCountProjection(APIModel):
+    count: Literal[True]
+
+
+QueryProjection = QueryFieldProjection | QueryCountProjection
+
+
+class QueryOrderBy(APIModel):
+    field: str
+    direction: Literal["asc", "desc"] = "asc"
+
+
+class QueryIRDocument(APIModel):
+    query_ir_version: Literal["1"]
+    match: QueryMatch
+    where: list[QueryPredicate] = Field(default_factory=list)
+    return_: list[QueryProjection] = Field(alias="return", min_length=1)
+    order_by: list[QueryOrderBy] = Field(default_factory=list)
+    limit: int = Field(default=100, ge=1, le=MAX_QUERY_RESULTS)
+    offset: int = Field(default=0, ge=0)
 
 
 class JsonlImportResponse(APIModel):
@@ -72,12 +242,36 @@ class JoinMaterializationResponse(APIModel):
     source_id: str
 
 
+class QueryProjectionResult(APIModel):
+    batch_id: str | None
+    field: str
+    fragment_id: str | None
+    json_type: JsonType
+    node_id: str
+    record_id: str | None
+    run_id: str | None
+    source_id: str | None
+    updated_at: str | None
+    value: Any
+
+
+class QueryRow(APIModel):
+    bindings: dict[str, str]
+    projections: list[QueryProjectionResult]
+
+
+class QueryEffectiveOrdering(APIModel):
+    direction: Literal["asc", "desc"]
+    field: str | None = None
+    tie_breaker: str | None = None
+
+
 class QueryIRResponse(APIModel):
     contract_fingerprint: str
     count: int | None = None
     ontology_fingerprint: str
-    ordering: list[dict[str, Any]]
-    rows: list[dict[str, Any]]
+    ordering: list[QueryEffectiveOrdering]
+    rows: list[QueryRow]
     truncated: bool
 
 
@@ -171,6 +365,7 @@ class RelationNode(APIModel):
     id: str
     namespace: str
     type: str
+    display_label: str | None = None
     privacy_class: Literal["public", "private"]
 
 

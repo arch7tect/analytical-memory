@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from analytical_memory.api_models import QUERY_OPERATORS
 from analytical_memory.domain import QueryPlan
 from analytical_memory.errors import QueryValidationError
 from analytical_memory.limits import (
@@ -10,7 +11,87 @@ from analytical_memory.limits import (
     MAX_QUERY_RESULTS,
 )
 
-OPERATORS = {"eq", "ne", "lt", "lte", "gt", "gte", "in", "exists"}
+QUERY_IR_VERSION = "1"
+DEFAULT_QUERY_LIMIT = 100
+DEFAULT_QUERY_OFFSET = 0
+
+
+def query_ir_contract_document(schema_fingerprint: str) -> dict[str, Any]:
+    from analytical_memory.api_models import QueryIRDocument, QueryIRResponse
+
+    return {
+        "contract_document_version": "1",
+        "query_ir_version": QUERY_IR_VERSION,
+        "schema_fingerprint": schema_fingerprint,
+        "input_schema": QueryIRDocument.model_json_schema(by_alias=True),
+        "result_schema": QueryIRResponse.model_json_schema(by_alias=True),
+        "semantics": {
+            "edges": "directed active relations only",
+            "field_reference": "<node-alias>.<attribute-name>",
+            "missing": "no current NodeAttribute row",
+            "null": "a present NodeAttribute whose JSON value is null",
+            "exists": "tests attribute-row presence, so explicit null exists",
+            "where": "implicit conjunction; OR is not supported",
+            "not_equal": (
+                "ne matches only present attributes of the effective field type; "
+                "missing attributes do not match"
+            ),
+            "comparison": (
+                "literals must match the field effective JSON type; strings and "
+                "numbers are never coerced"
+            ),
+            "unresolved": "typed comparison produces no matches",
+            "ordering": (
+                "explicit fields first, present values before missing values, then "
+                "every node alias ID ascending as a deterministic tie-breaker"
+            ),
+            "string_ordering": "Unicode casefold, then original code-point order",
+            "pagination": (
+                f"limit defaults to {DEFAULT_QUERY_LIMIT}, offset defaults to "
+                f"{DEFAULT_QUERY_OFFSET}; truncated uses a limit-plus-one probe"
+            ),
+            "count": "count cannot be combined with field projections",
+            "bindings": "every non-count row maps each node alias to its Node ID",
+            "provenance": (
+                "each field projection includes its current record, source, batch, "
+                "run, evidence fragment, and update time"
+            ),
+            "missing_projection": (
+                "a missing projected attribute has null value and null record_id; "
+                "record_id distinguishes it from an explicit null value"
+            ),
+            "disconnected_patterns": (
+                "node patterns not connected by edges form a Cartesian product"
+            ),
+        },
+        "examples": [
+            {
+                "query_ir_version": QUERY_IR_VERSION,
+                "match": {
+                    "nodes": [{"type": "example.Session", "as": "session"}],
+                    "edges": [],
+                },
+                "where": [
+                    {
+                        "left": {"field": "session.status"},
+                        "op": "eq",
+                        "right": {"value": "failed"},
+                    }
+                ],
+                "return": [{"field": "session.status"}],
+                "limit": 100,
+                "offset": 0,
+            },
+            {
+                "query_ir_version": QUERY_IR_VERSION,
+                "match": {
+                    "nodes": [{"type": "example.Session", "as": "session"}],
+                    "edges": [],
+                },
+                "return": [{"count": True}],
+            },
+        ],
+    }
 
 
 def _field_ref(value: object, aliases: set[str]) -> str:
@@ -23,7 +104,10 @@ def _field_ref(value: object, aliases: set[str]) -> str:
 
 
 def parse_query_ir(document: dict[str, Any]) -> QueryPlan:
-    if not isinstance(document, dict) or document.get("query_ir_version") != "1":
+    if (
+        not isinstance(document, dict)
+        or document.get("query_ir_version") != QUERY_IR_VERSION
+    ):
         raise QueryValidationError("query_ir_version must be '1'")
     unknown = set(document) - {
         "query_ir_version",
@@ -68,7 +152,7 @@ def parse_query_ir(document: dict[str, Any]) -> QueryPlan:
         if not isinstance(predicate, dict):
             raise QueryValidationError("where entries must be objects")
         operator = predicate.get("op")
-        if operator not in OPERATORS:
+        if operator not in QUERY_OPERATORS:
             raise QueryValidationError(f"unsupported operator: {operator}")
         left = predicate.get("left")
         if not isinstance(left, dict) or set(left) != {"field"}:
@@ -79,7 +163,11 @@ def parse_query_ir(document: dict[str, Any]) -> QueryPlan:
             if not isinstance(right, dict):
                 raise QueryValidationError("predicate right side must be an object")
             if operator == "in":
-                if set(right) != {"values"} or not isinstance(right["values"], list):
+                if (
+                    set(right) != {"values"}
+                    or not isinstance(right["values"], list)
+                    or not right["values"]
+                ):
                     raise QueryValidationError("in requires right.values")
                 normalized["values"] = right["values"]
             else:
@@ -118,8 +206,8 @@ def parse_query_ir(document: dict[str, Any]) -> QueryPlan:
                 "direction": direction,
             }
         )
-    limit = document.get("limit", 100)
-    offset = document.get("offset", 0)
+    limit = document.get("limit", DEFAULT_QUERY_LIMIT)
+    offset = document.get("offset", DEFAULT_QUERY_OFFSET)
     if (
         isinstance(limit, bool)
         or not isinstance(limit, int)

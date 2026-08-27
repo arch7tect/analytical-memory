@@ -30,11 +30,14 @@ from analytical_memory.domain import (
     KeyField,
 )
 from analytical_memory.errors import (
+    BatchValidationError,
     EmbeddingProviderError,
     IdempotencyConflictError,
     RecordNotFoundError,
     RetentionBlockedError,
     SchemaChangedError,
+    TransferError,
+    error_code_registry,
 )
 from analytical_memory.evidence import PRIVACY_ORDER, select_fragment
 from analytical_memory.jsonl import import_idempotency_key, scan_jsonl
@@ -45,6 +48,8 @@ from analytical_memory.limits import (
     MAX_EVIDENCE_VERIFY_BYTES,
     MAX_IMPORT_CHUNK_RECORDS,
     MAX_JSONL_LINE_BYTES,
+    MAX_QUERY_PATTERN_EDGES,
+    MAX_QUERY_PATTERN_NODES,
     MAX_QUERY_RESULTS,
     MAX_SEARCH_RESULTS,
     MAX_SNAPSHOT_BYTES,
@@ -53,9 +58,14 @@ from analytical_memory.limits import (
     MAX_VALIDATION_EVIDENCE_OBJECTS,
 )
 from analytical_memory.ports import EmbeddingProvider, EvidenceStore, MemoryStore
-from analytical_memory.query_ir import parse_query_ir
+from analytical_memory.query_ir import (
+    DEFAULT_QUERY_LIMIT,
+    DEFAULT_QUERY_OFFSET,
+    parse_query_ir,
+)
 from analytical_memory.schema_contract import SchemaContract
 from analytical_memory.snapshot import create_snapshot, import_snapshot, load_snapshot
+from analytical_memory.transfer import create_transfer, load_transfer
 from analytical_memory.vectors import (
     cosine_similarity,
     decode_vector,
@@ -984,23 +994,27 @@ class MemoryApplication:
             method=method,
         )
         fragment_results: list[dict[str, Any]] = []
-        if status.verification == "verified" and status.byte_size is not None:
+        if status.availability == "present" and status.byte_size is not None:
             data = self._read_for_verification(digest, status.byte_size)
             for fragment in catalog[0]["fragments"]:
                 locator = json.loads(str(fragment["locator_json"]))
-                selection = select_fragment(data, locator)
-                actual_digest = sha256_bytes(selection.extracted_bytes)
+                try:
+                    selection = select_fragment(data, locator)
+                    selected = selection.extracted_bytes
+                except BatchValidationError:
+                    selected = b""
+                actual_digest = sha256_bytes(selected)
                 outcome = (
                     "verified"
                     if actual_digest == fragment["digest"]
-                    and len(selection.extracted_bytes) == fragment["byte_size"]
+                    and len(selected) == fragment["byte_size"]
                     else "corrupt"
                 )
                 self.memory_store.record_fragment_check(
                     str(fragment["id"]),
                     digest=actual_digest,
                     outcome=outcome,
-                    byte_size=len(selection.extracted_bytes),
+                    byte_size=len(selected),
                     checked_at=checked,
                     method=method,
                 )
@@ -1232,6 +1246,39 @@ class MemoryApplication:
         )
         return result
 
+    def transfer_export(
+        self, destination: Path, *, created_at: str | None = None
+    ) -> dict[str, Any]:
+        return create_transfer(
+            self.memory_store,
+            self.schema,
+            destination,
+            created_at or _now(),
+        )
+
+    def transfer_import(self, source: Path) -> dict[str, Any]:
+        document = load_transfer(source, self.schema.fingerprint)
+        self.initialize()
+        records = document["records"]
+        counts = self.memory_store.import_transfer_records(records)
+        imported = self.memory_store.transfer_records()
+        imported_hashes = {
+            table: sha256_bytes(canonical_json(rows).encode("utf-8"))
+            for table, rows in sorted(imported.items())
+        }
+        if imported_hashes != document["table_hashes"]:
+            raise TransferError("imported transfer hashes do not match")
+        ontology = self.memory_store.ontology_snapshot()
+        if ontology["ontology_fingerprint"] != document["ontology_fingerprint"]:
+            raise TransferError("imported ontology fingerprint does not match")
+        return {
+            "counts": counts,
+            "source_backend": document["source_backend"],
+            "target_backend": self.memory_store.status().backend,
+            "transfer_id": document["transfer_id"],
+            "verified": True,
+        }
+
     def sanitized_export(
         self,
         destination: Path,
@@ -1276,7 +1323,7 @@ class MemoryApplication:
         memory_status = self.memory_store.status()
         evidence_status = self.evidence_store.status()
         document: dict[str, Any] = {
-            "capabilities_document_version": "1",
+            "capabilities_document_version": "2",
             "evidence_store": {
                 "initialized": evidence_status.initialized,
                 "provider": evidence_status.provider,
@@ -1290,6 +1337,10 @@ class MemoryApplication:
                 "evidence_ingest_bytes": MAX_EVIDENCE_INGEST_BYTES,
                 "jsonl_chunk_records": MAX_IMPORT_CHUNK_RECORDS,
                 "jsonl_line_bytes": MAX_JSONL_LINE_BYTES,
+                "query_default_limit": DEFAULT_QUERY_LIMIT,
+                "query_default_offset": DEFAULT_QUERY_OFFSET,
+                "query_pattern_edges": MAX_QUERY_PATTERN_EDGES,
+                "query_pattern_nodes": MAX_QUERY_PATTERN_NODES,
                 "returned_query_items": MAX_QUERY_RESULTS,
                 "search_results": MAX_SEARCH_RESULTS,
                 "snapshot_uncompressed_bytes": MAX_SNAPSHOT_BYTES,
@@ -1298,32 +1349,169 @@ class MemoryApplication:
                 "validated_evidence_objects": MAX_VALIDATION_EVIDENCE_OBJECTS,
             },
             "logical_schema_fingerprint": self.schema.fingerprint,
+            "errors": error_code_registry(),
             "operations": {
-                "delete_node": {"enabled": True, "mutating": True},
-                "entity_declaration": {"enabled": True, "mutating": True},
-                "evidence_audit": {"enabled": True, "mutating": True},
-                "evidence_read": {"enabled": True, "mutating": False},
-                "evidence_status": {"enabled": True, "mutating": False},
-                "evidence_verify": {"enabled": True, "mutating": True},
-                "jsonl_import": {"enabled": True, "mutating": True},
-                "analytical_attribute_write": {"enabled": True, "mutating": True},
-                "analytical_metric_write": {"enabled": True, "mutating": True},
-                "join_materialize": {"enabled": True, "mutating": True},
-                "ontology": {"enabled": True, "mutating": False},
-                "query_execute": {"enabled": True, "mutating": False},
-                "query_current_metric": {"enabled": True, "mutating": False},
-                "relation_deactivate": {"enabled": True, "mutating": True},
-                "search_text": {"enabled": True, "mutating": False},
-                "search_semantic": {"enabled": True, "mutating": False},
-                "embedding_rebuild": {"enabled": True, "mutating": True},
-                "traverse_relations": {"enabled": True, "mutating": False},
-                "retention": {"enabled": True, "mutating": True},
-                "sanitized_export": {"enabled": True, "mutating": False},
-                "snapshot": {"enabled": True, "mutating": True},
+                "delete_node": {
+                    "enabled": True,
+                    "interfaces": ["python", "cli", "mcp"],
+                    "mcp_tool": "memory_node_delete",
+                    "mutating": True,
+                },
+                "entity_declaration": {
+                    "enabled": True,
+                    "interfaces": ["python", "cli", "mcp"],
+                    "mcp_tool": "memory_ontology_declare_entity",
+                    "mutating": True,
+                },
+                "evidence_audit": {
+                    "enabled": True,
+                    "interfaces": ["python", "cli", "mcp"],
+                    "mcp_tool": "memory_evidence_audit",
+                    "mutating": True,
+                },
+                "evidence_read": {
+                    "enabled": True,
+                    "interfaces": ["python", "cli", "mcp"],
+                    "mcp_tool": "memory_evidence_read",
+                    "mutating": False,
+                },
+                "evidence_status": {
+                    "enabled": True,
+                    "interfaces": ["python", "cli", "mcp"],
+                    "mcp_tool": "memory_evidence_status",
+                    "mutating": False,
+                },
+                "evidence_verify": {
+                    "enabled": True,
+                    "interfaces": ["python", "cli", "mcp"],
+                    "mcp_tool": "memory_evidence_verify",
+                    "mutating": True,
+                },
+                "jsonl_import": {
+                    "enabled": True,
+                    "interfaces": ["python", "cli", "mcp"],
+                    "mcp_tool": "memory_jsonl_import",
+                    "mutating": True,
+                },
+                "analytical_attribute_write": {
+                    "enabled": True,
+                    "interfaces": ["python", "cli", "mcp"],
+                    "mcp_tool": "memory_attribute_write_analysis",
+                    "mutating": True,
+                },
+                "analytical_metric_write": {
+                    "enabled": True,
+                    "interfaces": ["python", "cli", "mcp"],
+                    "mcp_tool": "memory_metric_write_analysis",
+                    "mutating": True,
+                },
+                "join_materialize": {
+                    "enabled": True,
+                    "interfaces": ["python", "cli", "mcp"],
+                    "mcp_tool": "memory_join_materialize",
+                    "mutating": True,
+                },
+                "ontology": {
+                    "enabled": True,
+                    "interfaces": ["python", "cli", "mcp-resource"],
+                    "mutating": False,
+                },
+                "embedding_status": {
+                    "enabled": True,
+                    "interfaces": ["python", "cli", "mcp"],
+                    "mcp_tool": "memory_embedding_status",
+                    "mutating": False,
+                },
+                "explain_attribute": {
+                    "enabled": True,
+                    "interfaces": ["python", "cli", "mcp"],
+                    "mcp_tool": "memory_explain",
+                    "mutating": False,
+                },
+                "explain_metric": {
+                    "enabled": True,
+                    "interfaces": ["python", "cli", "mcp"],
+                    "mcp_tool": "memory_explain_metric",
+                    "mutating": False,
+                },
+                "explain_relation": {
+                    "enabled": True,
+                    "interfaces": ["python", "cli", "mcp"],
+                    "mcp_tool": "memory_explain_relation",
+                    "mutating": False,
+                },
+                "query_execute": {
+                    "enabled": True,
+                    "interfaces": ["python", "cli", "mcp"],
+                    "mcp_tool": "memory_query_execute",
+                    "mutating": False,
+                },
+                "query_current_metric": {
+                    "enabled": True,
+                    "interfaces": ["python", "cli", "mcp"],
+                    "mcp_tool": "memory_query_current_metric",
+                    "mutating": False,
+                },
+                "relation_deactivate": {
+                    "enabled": True,
+                    "interfaces": ["python", "cli", "mcp"],
+                    "mcp_tool": "memory_relation_deactivate",
+                    "mutating": True,
+                },
+                "search_text": {
+                    "enabled": True,
+                    "interfaces": ["python", "cli", "mcp"],
+                    "mcp_tool": "memory_search_text",
+                    "mutating": False,
+                },
+                "search_semantic": {
+                    "enabled": True,
+                    "interfaces": ["python", "cli", "mcp"],
+                    "mcp_tool": "memory_search_semantic",
+                    "mutating": False,
+                },
+                "embedding_rebuild": {
+                    "enabled": True,
+                    "interfaces": ["python", "cli"],
+                    "mutating": True,
+                },
+                "traverse_relations": {
+                    "enabled": True,
+                    "interfaces": ["python", "cli", "mcp"],
+                    "mcp_tool": "memory_traverse_relations",
+                    "mutating": False,
+                },
+                "retention": {
+                    "enabled": True,
+                    "interfaces": ["python", "cli"],
+                    "mutating": True,
+                },
+                "sanitized_export": {
+                    "enabled": True,
+                    "interfaces": ["python", "cli"],
+                    "mutating": False,
+                },
+                "snapshot": {
+                    "enabled": True,
+                    "interfaces": ["python", "cli"],
+                    "mutating": True,
+                },
+                "transfer": {
+                    "enabled": True,
+                    "interfaces": ["python", "cli"],
+                    "mutating": True,
+                },
             },
             "record_types": list(self.schema.document["record_types"]),
             "retrieval": {
-                "full_text": {"enabled": True, "engine": "sqlite-fts5"},
+                "full_text": {
+                    "enabled": True,
+                    "engine": (
+                        "sqlite-fts5"
+                        if memory_status.backend == "sqlite"
+                        else "postgresql-tsvector"
+                    ),
+                },
                 "vector": {
                     "enabled": True,
                     "mode": "exact-application-cosine",

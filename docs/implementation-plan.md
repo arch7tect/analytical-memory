@@ -2,7 +2,8 @@
 
 ## Status
 
-Milestones 0 through 5 are implemented. Milestones 0 through 4 remain the
+Milestones 0 through 7 are implemented and complete the working v1. Milestones
+0 through 4 remain the
 description of the original foundation. Milestone 5, approved by ADR 0001, is a
 clean-break contract with dynamic ontology, JSON Query IR, and a simpler
 current-state model for imported and analytical data.
@@ -110,7 +111,10 @@ uv sync --all-groups
 uv run pytest
 uv run ruff check .
 uv run ruff format --check .
-uv run mypy src
+uv run mypy src tests
+uv run python scripts/compile_schema.py --check
+uv run python scripts/smoke.py
+uv run python scripts/mcp_smoke.py
 ```
 
 No framework is selected until a milestone requires it. Standard-library
@@ -515,28 +519,110 @@ migrated through a competing-candidate policy.
 - arbitrary expressions, subqueries, unbounded traversal, and general graph
   mutation.
 
-## Milestone 6: PostgreSQL conformance and transfer
+## Milestone 5.1: Agent-executable contract
+
+Status: implemented.
+
+### Objective
+
+An MCP client with no CLI access and no source-code knowledge can discover the
+complete contract and ontology, import data, construct a valid query, obtain
+canonical Node IDs, write analytical results, traverse and correct relations,
+and delete a Node.
 
 ### Deliver
 
-- PostgreSQL migrations and `MemoryStore` adapter;
-- the shared backend conformance suite;
+- replacement of the existing `memory://schema/query-ir/current` payload with a
+  complete machine-readable JSON Schema and semantic contract generated from
+  the same constants and limits used by Query IR validation;
+- `bindings` on every non-count Query IR row, mapping every pattern alias to its
+  canonical Node ID without adding node or edge projections to Query IR v1;
+- typed MCP boundary models for Query IR requests and results, ontology
+  documents, entity declaration fields, JSONL key selectors, and join
+  endpoints, while storage-adapter dictionaries remain internal;
+- structured stable error codes, details, retry guidance, and refresh-resource
+  hints where applicable;
+- transport-aware capabilities, including exact Query IR pattern limits,
+  defaults, a stable error-code registry, and a capabilities-document version
+  bump;
+- typed saved-query parameters, defaults, and result fields;
+- agent-facing reference documentation with complete `match`, `where`,
+  `return`, `order_by`, `count`, null, missing, ordering, pagination, result,
+  and provenance semantics;
+- packaged schema and migration resources resolved through `importlib.resources`
+  so the installed wheel does not depend on a repository checkout;
+- schema compilation and fingerprint bump before recording SQLite migration
+  006 in the migration manifest and ledger;
+- SQLite migration 006 adding `sort_text_folded`, `sort_text_exact`, and
+  IEEE-754 `sort_number` projections, followed by an idempotent initialization
+  backfill before the store becomes usable; every attribute writer maintains
+  the projections, preserving missing-last ordering and removing the
+  process-local `canonical_text` collation from the query path;
+- a structural contract and fingerprint bump covering the agent-visible result,
+  discovery, and storage changes.
+
+### Acceptance
+
+- a real stdio MCP client completes declare, import, query, analytical write,
+  join, traversal, relation correction, and Node deletion using IDs learned
+  only through MCP resources and tool results;
+- the Query IR contract validates every shipped example and exposes required
+  fields, variants, defaults, limits, semantics, result schema, and examples;
+- changing an operator or Query IR limit without regenerating the contract fails
+  a deterministic golden test;
+- every expected application error has a unique stable code and every MCP error
+  returns the structured error envelope;
+- every capability operation declares its supported interfaces and every `mcp`
+  declaration corresponds to an actual MCP tool;
+- strict boundary models leave `Any` only for intentionally open JSON values;
+- a wheel installed into an empty environment outside the source tree can run
+  `memory init`, schema discovery, and the synthetic quickstart.
+
+### Explicitly deferred
+
+- edge aliases and direct relation projection in Query IR;
+- textual GQL, openCypher, or SQL parsing;
+- typing every internal `MemoryStore` dictionary;
+- new logical operators, grouping, variable-length paths, and mutation clauses.
+
+## Milestone 6: PostgreSQL conformance and transfer
+
+Status: implemented.
+
+### Deliver
+
+- PostgreSQL 17 migrations and a `MemoryStore` implementation built from one
+  shared `SqlMemoryStore` plus small explicit SQLite and PostgreSQL dialect
+  classes; no ORM, query builder, or second copy of store behavior;
+- `psycopg` as an optional PostgreSQL dependency and backend selection through
+  configuration without changing application, CLI, or MCP shapes;
+- an explicit refactor of the M5 application fixture and behavioral tests onto
+  the backend-parameterized store seam, followed by PostgreSQL registration in
+  that same suite;
 - canonical SQLite export and PostgreSQL import;
 - transfer verification and rollback workflow;
 - PostgreSQL full-text and exact-vector integration behind existing ports.
+- PostgreSQL conformance in CI through a PostgreSQL 17 service container and a
+  local Docker workflow using `ANALYTICAL_MEMORY_TEST_POSTGRES_URL`; local tests
+  skip with a clear reason only when that variable is absent.
 
 ### Acceptance
 
 - SQLite and PostgreSQL preserve logical IDs, hashes, current imported and
-  analytical values, active relation state, metrics, and deterministic ordered
-  query results for the same fixtures;
+  analytical values, active relation state, metrics, deterministic Query IR
+  results, traversal results, and metric selection for the same fixtures;
 - both migration sets declare the same logical target fingerprint;
 - transfer rebuilds derived indexes rather than copying backend projections;
 - a failed or cancelled import leaves the SQLite source unchanged and the
   PostgreSQL target unselected;
 - switching backend configuration changes capabilities, not API shapes.
+- full-text conformance requires the same matched document IDs, coverage, and
+  deterministic per-backend ordering; backend-specific relevance scores are not
+  required to be numerically identical.
 
 ## Milestone 7: Operational hardening and release
+
+Status: implemented.
 
 ### Deliver
 
@@ -550,11 +636,28 @@ migrated through a competing-candidate policy.
 
 ### Acceptance
 
-- recovery and restore are executed in automated tests;
-- limits and failure states are reported through capabilities and status;
-- destructive operations remain exact, planned, and explicit;
-- a clean published package installs and runs the documented quickstart;
-- release artifacts contain no private data or machine-specific paths.
+1. A wheel and source distribution install into an empty environment outside
+   the source tree and run the documented quickstart successfully.
+2. Forced interruption during a chunked import leaves no partial canonical
+   batch; integrity remains clean and evidence audit reports any orphan without
+   deleting it.
+3. Snapshot create, verify, and import reproduce the same ordered Query IR
+   result and ontology fingerprint in a fresh store.
+4. Deliberate evidence-byte corruption is reported for the object and affected
+   fragments without changing canonical rows.
+5. A bounded synthetic import records duration, peak RSS, database size, and
+   evidence size in a committed reproducible baseline; it does not introduce an
+   optimization target without a measured failure.
+6. Opening each supported schema version either migrates it forward or fails
+   with a named compatibility error; it never operates silently on an unknown
+   version.
+7. Built artifacts contain no `.env`, credential, private fixture, or
+   developer-specific absolute path.
+8. The release includes a version bump, changelog, contribution guide, and
+   operator documentation for integrity, snapshots, transfer, and retention.
+
+No package registry publication is required for v1 acceptance; local wheel and
+source-distribution verification is authoritative.
 
 ## Cross-cutting verification
 
@@ -571,10 +674,12 @@ Tests are added with the milestone that introduces the behavior:
   unavailable evidence, and forbidden operations;
 - scripted clean-clone quickstart tests using synthetic fixtures only.
 
-Store-facing tests use a backend-parameterized `MemoryStore` fixture from
-Milestone 0. SQLite is the only registered backend until Milestone 6, which
-registers PostgreSQL against the existing test bodies rather than creating a
-second suite.
+Before PostgreSQL implementation, M5 store-facing tests are refactored to use a
+backend-parameterized `MemoryStore` fixture. SQLite is initially the only
+registered backend; Milestone 6 registers PostgreSQL against the same test
+bodies rather than creating a second behavioral suite. CI provides PostgreSQL
+17 and fails if the conformance suite is skipped there; local runs skip it with
+a clear reason when no test URL is configured.
 
 ## Scope controls
 
@@ -596,7 +701,6 @@ expanding the active slice.
 
 ## Immediate next action
 
-Implement M5 as one end-to-end delivery, covering an undeclared flexible import,
-an optionally declared validated import, explicit join materialization, ontology
-discovery, and a JSON Query IR request through a real MCP client. PostgreSQL work
-does not begin until that core loop is complete.
+The approved working-v1 plan is complete. New product behavior belongs in a
+new decision record and later milestone rather than expanding these completed
+acceptance gates.

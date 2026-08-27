@@ -1,8 +1,10 @@
 {
   "query_ir": {
+    "contract_document_version": "1",
     "mutation_allowed": false,
     "operators": ["eq", "ne", "lt", "lte", "gt", "gte", "in", "exists"],
     "pagination": ["limit", "offset"],
+    "result_bindings": "node_alias_to_node_id",
     "version": "1"
   }
 }

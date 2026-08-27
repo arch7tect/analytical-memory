@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from analytical_memory.canonical import sha256_json
+from analytical_memory.resources import resource_path
 
 
 class SchemaContractError(ValueError):
@@ -19,7 +20,7 @@ class SchemaContract:
 
 
 def default_schema_path() -> Path:
-    return Path(__file__).resolve().parents[2] / "schema" / "current.json"
+    return resource_path("schema", "current.json")
 
 
 def load_schema(path: Path | None = None) -> SchemaContract:

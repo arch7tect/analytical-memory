@@ -8,8 +8,10 @@ from pathlib import Path
 
 from analytical_memory.canonical import sha256_bytes
 from analytical_memory.errors import StoreNotInitializedError
+from analytical_memory.resources import resource_path
+from analytical_memory.version import __version__
 
-MIGRATION_TOOL_VERSION = "0.1.0"
+MIGRATION_TOOL_VERSION = __version__
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,7 +23,7 @@ class MigrationDefinition:
 
 
 def default_migrations_directory() -> Path:
-    return Path(__file__).resolve().parents[2] / "migrations" / "sqlite"
+    return resource_path("migrations", "sqlite")
 
 
 def load_migration_manifest(directory: Path) -> tuple[MigrationDefinition, ...]:

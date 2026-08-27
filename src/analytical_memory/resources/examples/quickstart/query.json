@@ -1,0 +1,23 @@
+{
+  "query_ir_version": "1",
+  "match": {
+    "nodes": [
+      {"type": "example.Session", "as": "session"},
+      {"type": "example.SessionMessage", "as": "message"}
+    ],
+    "edges": [
+      {"type": "session", "from": "message", "to": "session"}
+    ]
+  },
+  "where": [
+    {
+      "left": {"field": "session.status"},
+      "op": "eq",
+      "right": {"value": "failed"}
+    }
+  ],
+  "return": [
+    {"field": "session.id"},
+    {"field": "message.message"}
+  ]
+}

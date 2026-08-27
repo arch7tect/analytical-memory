@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import sqlite3
 import sys
 from hashlib import sha256
 from pathlib import Path
@@ -10,9 +9,11 @@ from typing import Any
 
 import pytest
 from mcp import Client, StdioServerParameters
+from mcp.types import TextContent
 
 from analytical_memory.adapters.filesystem import FileEvidenceStore
 from analytical_memory.adapters.sqlite import SqliteMemoryStore
+from analytical_memory.api_models import QUERY_OPERATORS, QueryIRDocument
 from analytical_memory.application import MemoryApplication
 from analytical_memory.cli import main
 from analytical_memory.domain import (
@@ -27,9 +28,13 @@ from analytical_memory.errors import (
     OntologyConflictError,
     ProhibitedContentError,
     QueryValidationError,
+    SchemaChangedError,
+    error_code_registry,
 )
-from analytical_memory.ports import EmbeddingProvider
-from analytical_memory.schema_contract import load_schema
+from analytical_memory.ports import EmbeddingProvider, MemoryStore
+from analytical_memory.query_ir import parse_query_ir, query_ir_contract_document
+from analytical_memory.resources import resource_path
+from analytical_memory.schema_contract import default_schema_path, load_schema
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
@@ -54,15 +59,19 @@ class FixtureEmbeddingProvider(EmbeddingProvider):
 
 
 @pytest.fixture
-def m5(tmp_path: Path) -> tuple[MemoryApplication, Path, Path]:
-    database = tmp_path / "memory.db"
+def m5(
+    tmp_path: Path, memory_store: MemoryStore
+) -> tuple[MemoryApplication, Path | None, Path]:
     evidence_root = tmp_path / "evidence"
     application = MemoryApplication(
-        SqliteMemoryStore(database),
+        memory_store,
         FileEvidenceStore(evidence_root),
-        load_schema(REPOSITORY_ROOT / "schema" / "current.json"),
+        load_schema(default_schema_path()),
     )
     application.initialize()
+    database = (
+        memory_store.database if isinstance(memory_store, SqliteMemoryStore) else None
+    )
     return application, database, evidence_root
 
 
@@ -95,6 +104,13 @@ def _tool_json(result: Any) -> dict[str, Any]:
     value = json.loads("".join(blocks))
     if not isinstance(value, dict):
         raise AssertionError("tool result must be an object")
+    return value
+
+
+def _resource_json(result: Any) -> dict[str, Any]:
+    value = json.loads(str(result.contents[0].text))
+    if not isinstance(value, dict):
+        raise AssertionError("resource must contain an object")
     return value
 
 
@@ -153,6 +169,8 @@ def test_declaration_import_patch_replay_and_ontology(m5: tuple[Any, ...]) -> No
             ],
         }
     )
+    binding = query["rows"][0]["bindings"]["session"]
+    assert query["rows"][0]["projections"][0]["node_id"] == binding
     projections = query["rows"][0]["projections"]
     assert projections[0]["value"] is None
     assert projections[1]["value"] == 42
@@ -176,8 +194,7 @@ def test_import_rejects_duplicates_types_and_credentials_without_writes(
     )
     with pytest.raises(ProhibitedContentError):
         _import(application, credential, "calls.Session")
-    with sqlite3.connect(database) as connection:
-        assert connection.execute("SELECT COUNT(*) FROM node").fetchone()[0] == 0
+    assert application.ontology()["document"]["statistics"]["nodes"] == 0
     assert list((evidence_root / "objects" / "sha256").glob("*/*")) == []
 
 
@@ -209,11 +226,13 @@ def test_ambiguous_import_rolls_back_and_compensates_evidence(
     _import(application, original, "calls.Session")
     conflicting = _write(tmp_path / "conflicting.jsonl", [{"code": "same", "value": 1}])
     digest = sha256(conflicting.read_bytes()).hexdigest()
-    with sqlite3.connect(database) as connection:
-        before = {
-            table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-            for table in ("node", "node_attribute", "observed_field")
-        }
+    before = {
+        table: len(application.memory_store.snapshot_records()[table])
+        for table in ("node", "node_attribute")
+    }
+    before["observed_field"] = len(
+        application.ontology()["document"]["entities"][0]["fields"]
+    )
     with pytest.raises(ImportValidationError, match="ambiguous import key"):
         _import(
             application,
@@ -221,11 +240,13 @@ def test_ambiguous_import_rolls_back_and_compensates_evidence(
             "calls.Session",
             [{"field": "code", "type": "string"}],
         )
-    with sqlite3.connect(database) as connection:
-        after = {
-            table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-            for table in before
-        }
+    after = {
+        table: len(application.memory_store.snapshot_records()[table])
+        for table in ("node", "node_attribute")
+    }
+    after["observed_field"] = len(
+        application.ontology()["document"]["entities"][0]["fields"]
+    )
     assert after == before
     object_path = evidence_root / "objects" / "sha256" / digest[:2] / digest
     assert not object_path.exists()
@@ -262,11 +283,14 @@ def test_declaration_tightens_privacy_and_rejects_loosening(
         privacy="private",
         contract_fingerprint=application.schema.fingerprint,
     )
-    with sqlite3.connect(database) as connection:
-        assert (
-            connection.execute("SELECT privacy_class FROM node").fetchone()[0]
-            == "private"
-        )
+    node_id = application.execute_query(
+        {
+            "query_ir_version": "1",
+            "match": {"nodes": [{"type": "calls.Session", "as": "session"}]},
+            "return": [{"field": "session.id"}],
+        }
+    )["rows"][0]["bindings"]["session"]
+    assert application.memory_store.get_node(node_id)["privacy_class"] == "private"
     with pytest.raises(OntologyConflictError, match="cannot be loosened"):
         application.declare_entity(
             "calls.Session",
@@ -375,14 +399,9 @@ def test_join_query_rerun_correction_and_cascade(
             }
         )
 
-    with sqlite3.connect(database) as connection:
-        relation_id = connection.execute("SELECT id FROM relation LIMIT 1").fetchone()[
-            0
-        ]
-        source_node_id = connection.execute(
-            "SELECT source_node_id FROM relation WHERE id = ?", (relation_id,)
-        ).fetchone()[0]
+    source_node_id = query["rows"][0]["bindings"]["message"]
     traversal = application.traverse_relations(source_node_id, direction="outbound")
+    relation_id = traversal["edges"][0]["relation_id"]
     assert traversal["edges"][0]["relation_type"] == "session"
     explanation = application.explain_relation(relation_id)
     assert explanation["relation"]["relation_type"] == "session"
@@ -435,8 +454,13 @@ def test_analytical_value_uses_attribute_shape_and_direct_provenance(
     application, database, _ = m5
     source = _write(tmp_path / "sessions.jsonl", [{"id": "s1", "status": "ok"}])
     _import(application, source, "calls.Session")
-    with sqlite3.connect(database) as connection:
-        node_id = str(connection.execute("SELECT id FROM node").fetchone()[0])
+    node_id = application.execute_query(
+        {
+            "query_ir_version": "1",
+            "match": {"nodes": [{"type": "calls.Session", "as": "session"}]},
+            "return": [{"field": "session.id"}],
+        }
+    )["rows"][0]["bindings"]["session"]
     first = application.write_analytical_attribute(
         node_id,
         "classification",
@@ -457,12 +481,12 @@ def test_analytical_value_uses_attribute_shape_and_direct_provenance(
     assert explanation["attribute"]["batch_id"] is None
     assert explanation["attribute"]["run_id"] == first["run_id"]
     assert explanation["evidence"]["status"]["verification"] == "verified"
-    with sqlite3.connect(database) as connection:
-        row = connection.execute(
-            "SELECT batch_id, method FROM analytical_run WHERE id = ?",
-            (first["run_id"],),
-        ).fetchone()
-    assert row == (None, "session-classifier-v1")
+    row = next(
+        row
+        for row in application.memory_store.snapshot_records()["analytical_run"]
+        if row["id"] == first["run_id"]
+    )
+    assert (row["batch_id"], row["method"]) == (None, "session-classifier-v1")
 
 
 def test_analytical_metric_write_query_replay_and_explain(m5: tuple[Any, ...]) -> None:
@@ -540,7 +564,7 @@ def test_query_count_offset_and_truncation(m5: tuple[Any, ...], tmp_path: Path) 
 
 
 def test_text_semantic_snapshot_and_public_export(tmp_path: Path) -> None:
-    schema = load_schema(REPOSITORY_ROOT / "schema" / "current.json")
+    schema = load_schema(default_schema_path())
     database = tmp_path / "memory.db"
     evidence_root = tmp_path / "evidence"
     application = MemoryApplication(
@@ -637,7 +661,7 @@ def test_m5_cli_import_ontology_and_query(tmp_path: Path, capsys: Any) -> None:
     shared = ["--database", str(database), "--evidence-root", str(evidence)]
     assert main([*shared, "init"]) == 0
     capsys.readouterr()
-    fingerprint = load_schema(REPOSITORY_ROOT / "schema" / "current.json").fingerprint
+    fingerprint = load_schema(default_schema_path()).fingerprint
     assert (
         main(
             [
@@ -667,30 +691,54 @@ def test_m5_cli_import_ontology_and_query(tmp_path: Path, capsys: Any) -> None:
 @pytest.mark.anyio
 async def test_real_m5_flow_through_mcp(m5: tuple[Any, ...], tmp_path: Path) -> None:
     application, database, evidence_root = m5
-    sessions = _write(tmp_path / "sessions.jsonl", [{"id": "s1", "status": "ok"}])
+    sessions = _write(
+        tmp_path / "sessions.jsonl", [{"id": "s1", "status": "ok", "note": None}]
+    )
     messages = _write(
         tmp_path / "messages.jsonl",
         [{"id": "m1", "session_id": "s1", "message": "hello"}],
     )
-    fingerprint = application.schema.fingerprint
-    environment = {
+    environment: dict[str, str] = {
         **os.environ,
-        "ANALYTICAL_MEMORY_DB": str(database),
         "ANALYTICAL_MEMORY_EVIDENCE_ROOT": str(evidence_root),
-        "ANALYTICAL_MEMORY_SCHEMA": str(REPOSITORY_ROOT / "schema" / "current.json"),
+        "ANALYTICAL_MEMORY_SCHEMA": str(default_schema_path()),
     }
+    if database is None:
+        store = application.memory_store
+        environment.update(
+            {
+                "ANALYTICAL_MEMORY_BACKEND": "postgresql",
+                "ANALYTICAL_MEMORY_POSTGRES_URL": str(store.dsn),
+                "ANALYTICAL_MEMORY_POSTGRES_SCHEMA": str(store.schema),
+            }
+        )
+    else:
+        environment["ANALYTICAL_MEMORY_BACKEND"] = "sqlite"
+        environment["ANALYTICAL_MEMORY_DB"] = str(database)
     parameters = StdioServerParameters(
         command=sys.executable,
         args=["-m", "analytical_memory.mcp_server"],
         env=environment,
     )
     async with Client(parameters) as client:
+        schema_resource = _resource_json(
+            await client.read_resource("memory://schema/current")
+        )
+        fingerprint = str(schema_resource["schema_fingerprint"])
+        query_contract = _resource_json(
+            await client.read_resource("memory://schema/query-ir/current")
+        )
+        assert query_contract["input_schema"]["properties"]["match"]
+        assert query_contract["semantics"]["bindings"]
         declaration = await client.call_tool(
             "memory_ontology_declare_entity",
             {
                 "entity_type": "calls.Session",
                 "contract_fingerprint": fingerprint,
-                "fields": {"id": {"type": "string", "required": True}},
+                "fields": {
+                    "id": {"type": "string", "required": True},
+                    "note": {"type": "string"},
+                },
             },
         )
         assert declaration.is_error is False
@@ -708,6 +756,46 @@ async def test_real_m5_flow_through_mcp(m5: tuple[Any, ...], tmp_path: Path) -> 
                 },
             )
             assert imported.is_error is False
+        session_query = await client.call_tool(
+            "memory_query_execute",
+            {
+                "document": {
+                    "query_ir_version": "1",
+                    "match": {"nodes": [{"type": "calls.Session", "as": "session"}]},
+                    "return": [{"field": "session.id"}],
+                }
+            },
+        )
+        session_node_id = _tool_json(session_query)["rows"][0]["bindings"]["session"]
+        null_query = await client.call_tool(
+            "memory_query_execute",
+            {
+                "document": {
+                    "query_ir_version": "1",
+                    "match": {"nodes": [{"type": "calls.Session", "as": "session"}]},
+                    "where": [
+                        {
+                            "left": {"field": "session.note"},
+                            "op": "eq",
+                            "right": {"value": None},
+                        }
+                    ],
+                    "return": [{"field": "session.note"}],
+                }
+            },
+        )
+        assert len(_tool_json(null_query)["rows"]) == 1
+        written = await client.call_tool(
+            "memory_attribute_write_analysis",
+            {
+                "node_id": session_node_id,
+                "attribute_name": "classification",
+                "value": "excellent",
+                "method": "mcp-test-v1",
+                "contract_fingerprint": fingerprint,
+            },
+        )
+        assert _tool_json(written)["attribute_id"]
         joined = await client.call_tool(
             "memory_join_materialize",
             {
@@ -742,6 +830,17 @@ async def test_real_m5_flow_through_mcp(m5: tuple[Any, ...], tmp_path: Path) -> 
                 }
             },
         )
+        query_result = _tool_json(queried)
+        message_node_id = query_result["rows"][0]["bindings"]["message"]
+        traversed = await client.call_tool(
+            "memory_traverse_relations",
+            {"start_node_id": message_node_id, "direction": "outbound"},
+        )
+        relation_id = _tool_json(traversed)["edges"][0]["relation_id"]
+        corrected = await client.call_tool(
+            "memory_relation_deactivate", {"relation_id": relation_id}
+        )
+        assert _tool_json(corrected)["active"] is False
         metric = await client.call_tool(
             "memory_metric_write_analysis",
             {
@@ -757,5 +856,129 @@ async def test_real_m5_flow_through_mcp(m5: tuple[Any, ...], tmp_path: Path) -> 
         explained_metric = await client.call_tool(
             "memory_explain_metric", {"metric_id": metric_id}
         )
-    assert _tool_json(queried)["rows"][0]["projections"][0]["value"] == "hello"
+        deleted = await client.call_tool(
+            "memory_node_delete", {"node_id": message_node_id}
+        )
+        assert _tool_json(deleted)["nodes"] == 1
+        stale = await client.call_tool(
+            "memory_ontology_declare_entity",
+            {
+                "entity_type": "calls.Other",
+                "contract_fingerprint": "stale",
+            },
+        )
+        assert stale.is_error is True
+        assert isinstance(stale.content[0], TextContent)
+        error_text = stale.content[0].text
+        error = json.loads(error_text[error_text.index("{") :])
+        assert error["code"] == SchemaChangedError.code
+        tools = await client.list_tools()
+        tool_names = {tool.name for tool in tools.tools}
+        capabilities = _resource_json(
+            await client.read_resource("memory://capabilities/current")
+        )
+        declared_tools = {
+            operation["mcp_tool"]
+            for operation in capabilities["operations"].values()
+            if "mcp_tool" in operation
+        }
+        assert declared_tools == tool_names
+    assert query_result["rows"][0]["projections"][0]["value"] == "hello"
     assert _tool_json(explained_metric)["metric"]["value"] == 1
+
+
+def test_query_ir_contract_and_error_registry_are_self_describing(
+    m5: tuple[Any, ...],
+) -> None:
+    application, _, _ = m5
+    assert application.status()["ready"] is True
+    assert application.validate()["issues"] == []
+    contract = query_ir_contract_document(application.schema.fingerprint)
+    schema = contract["input_schema"]
+    assert schema["properties"]["limit"]["maximum"] == 1000
+    assert schema["$defs"]["QueryMatch"]["properties"]["nodes"]["maxItems"] == 8
+    for example in contract["examples"]:
+        validated = QueryIRDocument.model_validate(example)
+        parse_query_ir(validated.model_dump(mode="json", by_alias=True))
+    golden = json.loads(
+        resource_path("schema", "query-ir-contract.json").read_text(encoding="utf-8")
+    )
+    assert contract == golden
+    assert {
+        "eq",
+        "ne",
+        "lt",
+        "lte",
+        "gt",
+        "gte",
+        "in",
+        "exists",
+    } == QUERY_OPERATORS
+    assert set(application.schema.document["query_ir"]["operators"]) == QUERY_OPERATORS
+    codes = [item["code"] for item in error_code_registry()]
+    assert len(codes) == len(set(codes))
+    assert {"invalid_request", "io_error"} <= set(codes)
+
+
+@pytest.mark.parametrize("resolver", ["import", "declaration", "analysis"])
+def test_null_attribute_is_backfilled_for_every_type_resolution_path(
+    m5: tuple[Any, ...], tmp_path: Path, resolver: str
+) -> None:
+    application, _, _ = m5
+    _import(
+        application,
+        _write(
+            tmp_path / "first.jsonl",
+            [{"id": "s1", "note": None}, {"id": "s2"}],
+        ),
+        "calls.Session",
+    )
+    if resolver == "import":
+        _import(
+            application,
+            _write(tmp_path / "second.jsonl", [{"id": "s2", "note": "resolved"}]),
+            "calls.Session",
+        )
+    elif resolver == "declaration":
+        application.declare_entity(
+            "calls.Session",
+            fields={"note": {"type": "string"}},
+            contract_fingerprint=application.schema.fingerprint,
+        )
+    else:
+        target = application.execute_query(
+            {
+                "query_ir_version": "1",
+                "match": {"nodes": [{"type": "calls.Session", "as": "session"}]},
+                "where": [
+                    {
+                        "left": {"field": "session.id"},
+                        "op": "eq",
+                        "right": {"value": "s2"},
+                    }
+                ],
+                "return": [{"field": "session.id"}],
+            }
+        )["rows"][0]["bindings"]["session"]
+        application.write_analytical_attribute(
+            target,
+            "note",
+            "resolved",
+            method="test",
+            contract_fingerprint=application.schema.fingerprint,
+        )
+    result = application.execute_query(
+        {
+            "query_ir_version": "1",
+            "match": {"nodes": [{"type": "calls.Session", "as": "session"}]},
+            "where": [
+                {
+                    "left": {"field": "session.note"},
+                    "op": "eq",
+                    "right": {"value": None},
+                }
+            ],
+            "return": [{"field": "session.id"}],
+        }
+    )
+    assert [row["projections"][0]["value"] for row in result["rows"]] == ["s1"]

@@ -6,13 +6,13 @@ object types incrementally, create explicit graph relations, run relational and
 graph queries through a backend-neutral JSON Query IR, and trace current values
 to their source and raw evidence.
 
-SQLite stores canonical records and a content-addressed local filesystem stores
-raw evidence. The application depends on explicit abstract interfaces so a
-PostgreSQL adapter can replace SQLite without changing the public use cases.
+SQLite or PostgreSQL 17 stores canonical records and a content-addressed local
+filesystem stores raw evidence. Both backends implement the same explicit
+interface and public use cases.
 
 ## Current status
 
-Milestones 0 through 5 are implemented. M5 is a clean-break contract with:
+Milestones 0 through 7 are implemented. The working v1 includes:
 
 - streaming, atomic JSONL patch/upsert;
 - optional entity declarations and a data-derived current ontology;
@@ -34,6 +34,7 @@ Python 3.12 or newer and [uv](https://docs.astral.sh/uv/) are required.
 uv sync --all-groups --locked
 uv run memory init
 uv run memory schema show
+uv run memory-quickstart
 ```
 
 Use the `schema_fingerprint` returned by `schema show` as
@@ -100,7 +101,13 @@ uv run python scripts/compile_schema.py --check
 
 See the [system design](docs/design.md),
 [implementation plan](docs/implementation-plan.md), and
-[ADR 0001](docs/decisions/0001-dynamic-ontology-query-ir.md).
+[ADR 0001](docs/decisions/0001-dynamic-ontology-query-ir.md). The
+[backend portability reference](docs/reference/backend-portability.md) covers
+PostgreSQL 17 setup and verified SQLite-to-PostgreSQL transfer. Operational
+backup, integrity, evidence, and retention procedures are in the
+[operations reference](docs/reference/operations.md).
+Release history is in [CHANGELOG.md](CHANGELOG.md); development and verification
+guidance is in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

@@ -11,11 +11,11 @@ from typing import Any
 from mcp import Client, StdioServerParameters
 
 from analytical_memory.configuration import build_application
-from analytical_memory.schema_contract import load_schema
+from analytical_memory.schema_contract import default_schema_path, load_schema
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = REPOSITORY_ROOT / "examples" / "quickstart"
-SCHEMA = REPOSITORY_ROOT / "schema" / "current.json"
+SCHEMA = default_schema_path()
 
 
 def structured(result: Any) -> dict[str, Any]:

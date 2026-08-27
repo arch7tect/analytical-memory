@@ -11,8 +11,11 @@ from analytical_memory.api import MemoryAPI
 from analytical_memory.application import MemoryApplication
 from analytical_memory.configuration import (
     build_application,
+    environment_backend,
     environment_database,
     environment_evidence_root,
+    environment_postgres_schema,
+    environment_postgres_url,
 )
 from analytical_memory.errors import MemoryErrorBase
 from analytical_memory.schema_compiler import (
@@ -34,6 +37,11 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         default=environment_evidence_root(),
     )
+    parser.add_argument(
+        "--backend", choices=("sqlite", "postgresql"), default=environment_backend()
+    )
+    parser.add_argument("--postgres-url", default=environment_postgres_url())
+    parser.add_argument("--postgres-schema", default=environment_postgres_schema())
     parser.add_argument("--schema", type=Path)
     subcommands = parser.add_subparsers(dest="command", required=True)
 
@@ -206,6 +214,14 @@ def _parser() -> argparse.ArgumentParser:
     snapshot_import = snapshot_commands.add_parser("import")
     snapshot_import.add_argument("source", type=Path)
 
+    transfer = subcommands.add_parser("transfer")
+    transfer_commands = transfer.add_subparsers(dest="transfer_command", required=True)
+    transfer_export = transfer_commands.add_parser("export")
+    transfer_export.add_argument("destination", type=Path)
+    transfer_export.add_argument("--created-at")
+    transfer_import = transfer_commands.add_parser("import")
+    transfer_import.add_argument("source", type=Path)
+
     sanitized_export = subcommands.add_parser("export")
     sanitized_export.add_argument("destination", type=Path)
     sanitized_export.add_argument(
@@ -222,6 +238,9 @@ def _application(arguments: argparse.Namespace) -> MemoryApplication:
         database=arguments.database,
         evidence_root=arguments.evidence_root,
         schema_path=arguments.schema,
+        backend=arguments.backend,
+        postgres_url=arguments.postgres_url,
+        postgres_schema=arguments.postgres_schema,
     )
 
 
@@ -402,6 +421,12 @@ def _execute(arguments: argparse.Namespace) -> dict[str, Any]:
         if arguments.snapshot_command == "verify":
             return application.snapshot_verify(arguments.source)
         return application.snapshot_import(arguments.source)
+    if arguments.command == "transfer":
+        if arguments.transfer_command == "export":
+            return application.transfer_export(
+                arguments.destination, created_at=arguments.created_at
+            )
+        return application.transfer_import(arguments.source)
     if arguments.command == "export":
         return application.sanitized_export(
             arguments.destination,

@@ -269,6 +269,16 @@ class MemoryStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def transfer_records(self) -> dict[str, list[dict[str, Any]]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def import_transfer_records(
+        self, records: dict[str, list[dict[str, Any]]]
+    ) -> dict[str, int]:
+        raise NotImplementedError
+
+    @abstractmethod
     def integrity(self) -> dict[str, Any]:
         raise NotImplementedError
 

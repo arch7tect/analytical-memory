@@ -92,6 +92,7 @@
     "private"
   ],
   "query_ir": {
+    "contract_document_version": "1",
     "mutation_allowed": false,
     "operators": [
       "eq",
@@ -107,6 +108,7 @@
       "limit",
       "offset"
     ],
+    "result_bindings": "node_alias_to_node_id",
     "version": "1"
   },
   "record_types": [
@@ -148,12 +150,26 @@
   "saved_queries": {
     "current-metric": {
       "parameters": [
-        "definition_version",
-        "dimensions"
+        {
+          "name": "definition_version",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "dimensions",
+          "required": true,
+          "type": "object"
+        }
       ],
-      "result": [
-        "metric",
-        "coverage"
+      "result_fields": [
+        {
+          "name": "metric",
+          "type": "metric|null"
+        },
+        {
+          "name": "coverage",
+          "type": "object"
+        }
       ]
     },
     "search-semantic": {
@@ -162,45 +178,131 @@
         "document_id"
       ],
       "parameters": [
-        "profile_id",
-        "query",
-        "namespace",
-        "node_type",
-        "limit"
+        {
+          "name": "profile_id",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "query",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "default": null,
+          "name": "namespace",
+          "required": false,
+          "type": "string|null"
+        },
+        {
+          "default": null,
+          "name": "node_type",
+          "required": false,
+          "type": "string|null"
+        },
+        {
+          "default": 20,
+          "name": "limit",
+          "required": false,
+          "type": "integer"
+        }
       ],
-      "result": [
-        "results",
-        "coverage",
-        "status"
+      "result_fields": [
+        {
+          "name": "results",
+          "type": "array"
+        },
+        {
+          "name": "coverage",
+          "type": "object"
+        },
+        {
+          "name": "status",
+          "type": "string"
+        }
       ]
     },
     "search-text": {
       "parameters": [
-        "query",
-        "limit"
+        {
+          "name": "query",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "default": 20,
+          "name": "limit",
+          "required": false,
+          "type": "integer"
+        }
       ],
-      "result": [
-        "results",
-        "coverage"
+      "result_fields": [
+        {
+          "name": "results",
+          "type": "array"
+        },
+        {
+          "name": "coverage",
+          "type": "object"
+        }
       ]
     },
     "traverse-relations": {
       "parameters": [
-        "start_node_id",
-        "relation_types",
-        "direction",
-        "max_depth",
-        "limit"
+        {
+          "name": "start_node_id",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "default": null,
+          "name": "relation_types",
+          "required": false,
+          "type": "array|null"
+        },
+        {
+          "default": "outbound",
+          "name": "direction",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "default": 3,
+          "name": "max_depth",
+          "required": false,
+          "type": "integer"
+        },
+        {
+          "default": 100,
+          "name": "limit",
+          "required": false,
+          "type": "integer"
+        },
+        {
+          "default": null,
+          "name": "states",
+          "required": false,
+          "type": "array[active]|null"
+        }
       ],
-      "result": [
-        "nodes",
-        "edges",
-        "truncated"
+      "result_fields": [
+        {
+          "name": "nodes",
+          "type": "array"
+        },
+        {
+          "name": "edges",
+          "type": "array"
+        },
+        {
+          "name": "truncated",
+          "type": "boolean"
+        }
       ]
     }
   },
-  "schema_document_version": "5",
-  "schema_fingerprint": "c8d44a0a4ea59e870bd5475f247eb28f1690538c735f0e362a71651289cfd7c3",
+  "schema_document_version": "6",
+  "schema_fingerprint": "882802d6f0ffd1970e2c1c75f99e38199696dfaa998a108e7306deb8c10380b2",
   "search_document": {
     "coverage": "active_indexed_documents_vs_searchable_attributes",
     "fts_engine": "sqlite-fts5",

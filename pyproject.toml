@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "analytical-memory"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Evidence-backed local-first analytical memory"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -17,9 +17,13 @@ dependencies = [
     "python-dotenv>=1.1,<2",
 ]
 
+[project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.2,<4"]
+
 [project.scripts]
 memory = "analytical_memory.cli:main"
 memory-mcp = "analytical_memory.mcp_server:main"
+memory-quickstart = "analytical_memory.quickstart:main"
 
 [dependency-groups]
 dev = [
@@ -31,6 +35,9 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/analytical_memory"]
+
+[tool.hatch.version]
+path = "src/analytical_memory/version.py"
 
 [tool.pytest.ini_options]
 addopts = "-ra"

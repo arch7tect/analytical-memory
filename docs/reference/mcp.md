@@ -15,6 +15,9 @@ Discovery remains available while a store is uninitialized.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `ANALYTICAL_MEMORY_DB` | `.local/memory.db` | SQLite database |
+| `ANALYTICAL_MEMORY_BACKEND` | `sqlite` | `sqlite` or `postgresql` |
+| `ANALYTICAL_MEMORY_POSTGRES_URL` | unset | PostgreSQL connection URL when selected |
+| `ANALYTICAL_MEMORY_POSTGRES_SCHEMA` | `public` | PostgreSQL schema |
 | `ANALYTICAL_MEMORY_EVIDENCE_ROOT` | `.local/evidence` | Local evidence store |
 | `ANALYTICAL_MEMORY_SCHEMA` | packaged `schema/current.json` | Structural contract |
 | `OPENAI_API_KEY` | unset | Commercial embedding API credential |
@@ -28,7 +31,7 @@ Runtime paths and secrets are never included in discovery resources.
 | `memory://schema/current` | Structural contract and fingerprint |
 | `memory://schema/ontology/current` | Current derived ontology and fingerprint |
 | `memory://schema/ontology/{namespace}` | Namespace-filtered ontology |
-| `memory://schema/query-ir/current` | Read-only JSON Query IR v1 contract |
+| `memory://schema/query-ir/current` | Complete Query IR input/result JSON Schemas, semantics, defaults, limits, and examples |
 | `memory://schema/queries` | Convenience query contracts |
 | `memory://capabilities/current` | Backend, limits, operations, and readiness |
 
@@ -44,7 +47,7 @@ queryable shape changes, but not when only row counts change.
 | `memory_attribute_write_analysis` | Yes | Current attribute with run provenance |
 | `memory_metric_write_analysis` | Yes | Immutable metric with run provenance |
 | `memory_join_materialize` | Yes | Join declaration, counts, and relation writes |
-| `memory_query_execute` | No | Ordered Query IR rows with direct provenance |
+| `memory_query_execute` | No | Ordered Query IR rows with node bindings and direct provenance |
 | `memory_relation_deactivate` | Yes | Explicit current relation correction |
 | `memory_node_delete` | Yes | Cascaded current graph deletion counts |
 | `memory_traverse_relations` | No | Bounded active-relation traversal |
@@ -73,3 +76,17 @@ remain explicit CLI workflows.
 
 `memory_search_semantic` is the only MCP query tool that calls an external
 service. Both indexed content and query policy are public-only.
+
+## Agent contract and errors
+
+Tool inputs and outputs are strict typed objects; unknown members are rejected.
+An agent should discover tools from `memory://capabilities/current`, queryable
+shape from `memory://schema/ontology/current`, and exact Query IR syntax from
+`memory://schema/query-ir/current`. The latter resource is authoritative; the
+shorter `memory://schema/queries` resource only describes saved convenience
+queries.
+
+Expected failures use a JSON envelope with `code`, `message`, `details`, and
+`retryable`. The stdio MCP transport prepends an error description to this JSON,
+so consumers should parse from the first `{`. Error codes and retryability are
+discoverable under `errors` in `memory://capabilities/current`.

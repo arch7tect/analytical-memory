@@ -1,0 +1,43 @@
+{
+  "baseline_version": "1",
+  "deterministic": {
+    "attributes_written": 3500,
+    "corpus_sha256": "b5f601ec18dfa8b173c8fab273753b35a108ad02fbc7b00f2ac2234ba6484cb5",
+    "created_nodes": 1000,
+    "created_relations": 500,
+    "evidence_bytes": 68580,
+    "ontology_fingerprint": "b2cf50b0612753bf2527c91788141f552dc6d36ef05fce79886dee5a340c0936",
+    "record_count": 1000,
+    "row_counts": {
+      "analytical_run": 3,
+      "entity_declaration": 0,
+      "evidence_acquisition": 3,
+      "evidence_derivation": 0,
+      "evidence_fragment": 3,
+      "evidence_location": 3,
+      "evidence_object": 3,
+      "evidence_retirement": 0,
+      "evidence_verification": 3,
+      "ingestion_batch": 3,
+      "metric": 0,
+      "node": 1000,
+      "node_attribute": 3500,
+      "observed_field": 7,
+      "ontology_declaration": 1,
+      "relation": 500,
+      "search_document": 0,
+      "source": 3
+    },
+    "schema_fingerprint": "882802d6f0ffd1970e2c1c75f99e38199696dfaa998a108e7306deb8c10380b2"
+  },
+  "observed": {
+    "backend": "sqlite",
+    "database_bytes": 2625536,
+    "duration_seconds": 0.406253,
+    "machine": "arm64",
+    "peak_rss_bytes": 49676288,
+    "platform": "Darwin",
+    "python_version": "3.12.3",
+    "sqlite_version": "3.45.3"
+  }
+}

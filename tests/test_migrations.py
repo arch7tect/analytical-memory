@@ -10,19 +10,20 @@ import pytest
 from analytical_memory.adapters.sqlite import SqliteMemoryStore
 from analytical_memory.canonical import sha256_bytes
 from analytical_memory.errors import StoreNotInitializedError
+from analytical_memory.migrations import default_migrations_directory
+from analytical_memory.schema_contract import default_schema_path
 
-from .conftest import REPOSITORY_ROOT
 
-
-def test_fresh_database_reaches_m5_schema(tmp_path: Path) -> None:
+def test_fresh_database_reaches_m51_schema(tmp_path: Path) -> None:
     database = tmp_path / "memory.db"
     store = SqliteMemoryStore(database)
 
     store.initialize()
 
     integrity = store.integrity()
-    assert integrity["schema_version"] == 5
-    assert [item["version"] for item in integrity["migrations"]] == [1, 2, 3, 4, 5]
+    assert store.status().initialized is True
+    assert integrity["schema_version"] == 6
+    assert [item["version"] for item in integrity["migrations"]] == [1, 2, 3, 4, 5, 6]
     with sqlite3.connect(database) as connection:
         tables = {
             row[0]
@@ -37,7 +38,7 @@ def test_fresh_database_reaches_m5_schema(tmp_path: Path) -> None:
 
 def test_m5_clean_break_reinitializes_legacy_current_tables(tmp_path: Path) -> None:
     database = tmp_path / "legacy.db"
-    migrations = REPOSITORY_ROOT / "migrations" / "sqlite"
+    migrations = default_migrations_directory()
     with sqlite3.connect(database) as connection:
         for version in range(1, 5):
             name = next(migrations.glob(f"{version:03d}_*.sql"))
@@ -58,12 +59,67 @@ def test_m5_clean_break_reinitializes_legacy_current_tables(tmp_path: Path) -> N
     SqliteMemoryStore(database).initialize()
 
     with sqlite3.connect(database) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
         assert connection.execute("SELECT COUNT(*) FROM node").fetchone()[0] == 0
 
 
+def test_version_five_rows_receive_portable_sort_keys(tmp_path: Path) -> None:
+    database = tmp_path / "version-five.db"
+    migrations = default_migrations_directory()
+    with sqlite3.connect(database) as connection:
+        for version in range(1, 6):
+            name = next(migrations.glob(f"{version:03d}_*.sql"))
+            connection.executescript(name.read_text(encoding="utf-8"))
+        connection.execute(
+            "INSERT INTO source VALUES (?, ?, ?, ?, ?, ?)",
+            ("source", "source", "test", "test", "public", "2000-01-01T00:00:00Z"),
+        )
+        connection.execute(
+            "INSERT INTO node VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                "node",
+                "example",
+                "Item",
+                None,
+                "public",
+                "2000-01-01T00:00:00Z",
+                "2000-01-01T00:00:00Z",
+            ),
+        )
+        for identifier, attribute_name, value_json, json_type in (
+            ("text", "name", '"Beta"', "string"),
+            ("number", "score", "42", "number"),
+        ):
+            connection.execute(
+                "INSERT INTO node_attribute VALUES "
+                "(?, 'node', ?, ?, ?, 'public', 0, 'source', NULL, NULL, NULL, ?)",
+                (
+                    identifier,
+                    attribute_name,
+                    value_json,
+                    json_type,
+                    "2000-01-01T00:00:00Z",
+                ),
+            )
+
+    store = SqliteMemoryStore(database)
+    store.initialize()
+    store.initialize()
+
+    with sqlite3.connect(database) as connection:
+        text = connection.execute(
+            "SELECT sort_text_folded, sort_text_exact FROM node_attribute "
+            "WHERE id = 'text'"
+        ).fetchone()
+        number = connection.execute(
+            "SELECT sort_number FROM node_attribute WHERE id = 'number'"
+        ).fetchone()
+    assert text == ("beta", "Beta")
+    assert number == (42.0,)
+
+
 def test_changed_migration_is_rejected_before_initialization(tmp_path: Path) -> None:
-    source = REPOSITORY_ROOT / "migrations" / "sqlite"
+    source = default_migrations_directory()
     migrations = tmp_path / "migrations"
     shutil.copytree(source, migrations)
     initial = migrations / "001_initial.sql"
@@ -75,13 +131,9 @@ def test_changed_migration_is_rejected_before_initialization(tmp_path: Path) -> 
 
 def test_manifest_targets_current_logical_fingerprint() -> None:
     manifest = json.loads(
-        (REPOSITORY_ROOT / "migrations" / "sqlite" / "manifest.json").read_text(
-            encoding="utf-8"
-        )
+        (default_migrations_directory() / "manifest.json").read_text(encoding="utf-8")
     )
-    schema = json.loads(
-        (REPOSITORY_ROOT / "schema" / "current.json").read_text(encoding="utf-8")
-    )
+    schema = json.loads(default_schema_path().read_text(encoding="utf-8"))
     assert (
         manifest["migrations"][-1]["target_fingerprint"] == schema["schema_fingerprint"]
     )
@@ -89,7 +141,7 @@ def test_manifest_targets_current_logical_fingerprint() -> None:
 
 def test_failed_migration_rolls_back_its_partial_schema(tmp_path: Path) -> None:
     database = tmp_path / "version-one.db"
-    source = REPOSITORY_ROOT / "migrations" / "sqlite"
+    source = default_migrations_directory()
     migrations = tmp_path / "migrations"
     shutil.copytree(source, migrations)
     with sqlite3.connect(database) as connection:

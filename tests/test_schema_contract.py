@@ -12,21 +12,21 @@ from analytical_memory.schema_compiler import (
     render_schema,
     schema_is_current,
 )
-from analytical_memory.schema_contract import SchemaContractError, load_schema
-
-from .conftest import REPOSITORY_ROOT
+from analytical_memory.schema_contract import (
+    SchemaContractError,
+    default_schema_path,
+    load_schema,
+)
 
 
 def _read_schema() -> dict[str, Any]:
-    value = json.loads(
-        (REPOSITORY_ROOT / "schema" / "current.json").read_text(encoding="utf-8")
-    )
+    value = json.loads(default_schema_path().read_text(encoding="utf-8"))
     assert isinstance(value, dict)
     return value
 
 
 def test_current_schema_fingerprint_is_self_consistent() -> None:
-    schema = load_schema(REPOSITORY_ROOT / "schema" / "current.json")
+    schema = load_schema(default_schema_path())
     assert schema.fingerprint == schema.document["schema_fingerprint"]
 
 
@@ -45,9 +45,7 @@ def test_compiler_reproduces_current_schema() -> None:
     compiled = compile_schema()
     current = _read_schema()
     assert compiled == current
-    assert render_schema() == (REPOSITORY_ROOT / "schema" / "current.json").read_text(
-        encoding="utf-8"
-    )
+    assert render_schema() == default_schema_path().read_text(encoding="utf-8")
 
 
 def test_compiler_rejects_duplicate_top_level_keys(tmp_path: Path) -> None:

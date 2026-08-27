@@ -1,0 +1,63 @@
+{
+  "metric": {
+    "current_selection": ["run_recorded_at_desc", "run_id_desc", "metric_id_desc"],
+    "dimensions": "canonical_json_object"
+  },
+  "saved_queries": {
+    "current-metric": {
+      "parameters": [
+        {"name": "definition_version", "type": "string", "required": true},
+        {"name": "dimensions", "type": "object", "required": true}
+      ],
+      "result_fields": [
+        {"name": "metric", "type": "metric|null"},
+        {"name": "coverage", "type": "object"}
+      ]
+    },
+    "search-semantic": {
+      "ordering": ["score_desc", "document_id"],
+      "parameters": [
+        {"name": "profile_id", "type": "string", "required": true},
+        {"name": "query", "type": "string", "required": true},
+        {"name": "namespace", "type": "string|null", "required": false, "default": null},
+        {"name": "node_type", "type": "string|null", "required": false, "default": null},
+        {"name": "limit", "type": "integer", "required": false, "default": 20}
+      ],
+      "result_fields": [
+        {"name": "results", "type": "array"},
+        {"name": "coverage", "type": "object"},
+        {"name": "status", "type": "string"}
+      ]
+    },
+    "search-text": {
+      "parameters": [
+        {"name": "query", "type": "string", "required": true},
+        {"name": "limit", "type": "integer", "required": false, "default": 20}
+      ],
+      "result_fields": [
+        {"name": "results", "type": "array"},
+        {"name": "coverage", "type": "object"}
+      ]
+    },
+    "traverse-relations": {
+      "parameters": [
+        {"name": "start_node_id", "type": "string", "required": true},
+        {"name": "relation_types", "type": "array|null", "required": false, "default": null},
+        {"name": "direction", "type": "string", "required": false, "default": "outbound"},
+        {"name": "max_depth", "type": "integer", "required": false, "default": 3},
+        {"name": "limit", "type": "integer", "required": false, "default": 100},
+        {"name": "states", "type": "array[active]|null", "required": false, "default": null}
+      ],
+      "result_fields": [
+        {"name": "nodes", "type": "array"},
+        {"name": "edges", "type": "array"},
+        {"name": "truncated", "type": "boolean"}
+      ]
+    }
+  },
+  "search_document": {
+    "coverage": "active_indexed_documents_vs_searchable_attributes",
+    "fts_engine": "sqlite-fts5",
+    "target_kinds": ["node_attribute"]
+  }
+}

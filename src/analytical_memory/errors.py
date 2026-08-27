@@ -1,64 +1,111 @@
+from __future__ import annotations
+
+from typing import Any, ClassVar
+
+
 class MemoryErrorBase(Exception):
     """Base class for expected application errors."""
 
+    code: ClassVar[str] = "memory_error"
+    retryable: ClassVar[bool] = False
+
+    def __init__(self, message: str, *, details: dict[str, Any] | None = None) -> None:
+        self.details = details or {}
+        super().__init__(message)
+
+    def envelope(self) -> dict[str, Any]:
+        return {
+            "code": self.code,
+            "details": self.details,
+            "message": str(self),
+            "retryable": self.retryable,
+        }
+
 
 class BatchValidationError(MemoryErrorBase):
-    pass
+    code = "batch_validation"
 
 
 class SchemaChangedError(MemoryErrorBase):
+    code = "schema_changed"
+    retryable = True
+
     def __init__(self, supplied: str, current: str) -> None:
         self.supplied = supplied
         self.current = current
         super().__init__(
-            f"schema_changed: supplied={supplied} current={current} "
-            "refresh=memory://schema/current"
+            "the structural contract fingerprint changed",
+            details={
+                "current": current,
+                "refresh_resource": "memory://schema/current",
+                "supplied": supplied,
+            },
         )
 
 
 class IdempotencyConflictError(MemoryErrorBase):
-    pass
+    code = "idempotency_conflict"
 
 
 class StoreNotInitializedError(MemoryErrorBase):
-    pass
+    code = "store_not_initialized"
 
 
 class RecordNotFoundError(MemoryErrorBase):
-    pass
+    code = "record_not_found"
 
 
 class RetentionBlockedError(MemoryErrorBase):
-    pass
+    code = "retention_blocked"
 
 
 class SnapshotError(MemoryErrorBase):
-    pass
+    code = "snapshot_error"
 
 
 class EmbeddingProviderError(MemoryErrorBase):
-    pass
+    code = "embedding_provider"
 
 
 class ImportValidationError(MemoryErrorBase):
-    pass
+    code = "import_validation"
 
 
 class OntologyConflictError(MemoryErrorBase):
-    pass
+    code = "ontology_conflict"
 
 
 class AmbiguousTargetError(MemoryErrorBase):
-    pass
+    code = "ambiguous_target"
 
 
 class JoinConflictError(MemoryErrorBase):
-    pass
+    code = "join_conflict"
 
 
 class QueryValidationError(MemoryErrorBase):
-    pass
+    code = "query_validation"
 
 
 class ProhibitedContentError(MemoryErrorBase):
-    pass
+    code = "prohibited_content"
+
+
+class InvalidRequestError(MemoryErrorBase):
+    code = "invalid_request"
+
+
+class InputOutputError(MemoryErrorBase):
+    code = "io_error"
+
+
+class TransferError(MemoryErrorBase):
+    code = "transfer_error"
+
+
+def error_code_registry() -> list[dict[str, Any]]:
+    classes = MemoryErrorBase.__subclasses__()
+    return [
+        {"code": error.code, "retryable": error.retryable}
+        for error in sorted(classes, key=lambda item: item.code)
+    ]

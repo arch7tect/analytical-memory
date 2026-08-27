@@ -10,9 +10,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from analytical_memory.adapters.sql_dialect import SqlDialect, SqliteDialect
 from analytical_memory.canonical import (
     canonical_json,
-    canonical_text_key,
     sha256_bytes,
     sha256_json,
     stable_uuid,
@@ -44,7 +44,11 @@ from analytical_memory.errors import (
     StoreNotInitializedError,
 )
 from analytical_memory.jsonl import iter_jsonl, json_type, split_entity_type
-from analytical_memory.migrations import default_migrations_directory, migrate_sqlite
+from analytical_memory.migrations import (
+    default_migrations_directory,
+    load_migration_manifest,
+    migrate_sqlite,
+)
 from analytical_memory.ontology import ontology_document
 from analytical_memory.ports import MemoryStore
 
@@ -68,19 +72,39 @@ SNAPSHOT_TABLES = (
     "evidence_verification",
     "evidence_retirement",
 )
+SNAPSHOT_ORDER = {"observed_field": "entity_type, field_name"}
 
 
 def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
-def _canonical_compare(left: str, right: str) -> int:
-    left_key = canonical_text_key(left)
-    right_key = canonical_text_key(right)
-    return (left_key > right_key) - (left_key < right_key)
+def _sort_values(value: Any) -> tuple[str | None, str | None, float | None]:
+    if isinstance(value, str):
+        return value.casefold(), value, None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return None, None, float(value)
+    return None, None, None
 
 
-class SqliteMemoryStore(MemoryStore):
+def _backfill_attribute_type(
+    connection: sqlite3.Connection,
+    entity_type: str,
+    attribute_name: str,
+    resolved_type: str,
+) -> None:
+    if resolved_type == "unresolved":
+        return
+    namespace, node_type = split_entity_type(entity_type)
+    connection.execute(
+        "UPDATE node_attribute SET json_type = ? "
+        "WHERE attribute_name = ? AND json_type = 'unresolved' "
+        "AND node_id IN (SELECT id FROM node WHERE namespace = ? AND type = ?)",
+        (resolved_type, attribute_name, namespace, node_type),
+    )
+
+
+class SqlMemoryStore(MemoryStore):
     def __init__(
         self, database: Path, migrations_directory: Path | None = None
     ) -> None:
@@ -88,13 +112,13 @@ class SqliteMemoryStore(MemoryStore):
         self.migrations_directory = (
             migrations_directory or default_migrations_directory()
         )
+        self.dialect: SqlDialect = SqliteDialect()
 
     def _connect(self, *, require_initialized: bool = True) -> sqlite3.Connection:
         if require_initialized and not self.database.is_file():
             raise StoreNotInitializedError("memory store is not initialized")
         connection = sqlite3.connect(self.database)
         connection.row_factory = sqlite3.Row
-        connection.create_collation("canonical_text", _canonical_compare)
         connection.execute("PRAGMA foreign_keys = ON")
         return connection
 
@@ -102,6 +126,22 @@ class SqliteMemoryStore(MemoryStore):
         self.database.parent.mkdir(parents=True, exist_ok=True)
         with self._connect(require_initialized=False) as connection:
             migrate_sqlite(connection, self.migrations_directory)
+            rows = connection.execute(
+                "SELECT id, value_json FROM node_attribute "
+                "WHERE (json_type = 'string' AND "
+                "(sort_text_folded IS NULL OR sort_text_exact IS NULL)) "
+                "OR (json_type = 'number' AND sort_number IS NULL)"
+            ).fetchall()
+            with connection:
+                for row in rows:
+                    folded, exact, number = _sort_values(
+                        json.loads(str(row["value_json"]))
+                    )
+                    connection.execute(
+                        "UPDATE node_attribute SET sort_text_folded = ?, "
+                        "sort_text_exact = ?, sort_number = ? WHERE id = ?",
+                        (folded, exact, number, row["id"]),
+                    )
 
     @contextmanager
     def _write_connection(self) -> Iterator[sqlite3.Connection]:
@@ -109,7 +149,7 @@ class SqliteMemoryStore(MemoryStore):
         try:
             with connection:
                 yield connection
-        except sqlite3.IntegrityError as exc:
+        except self.dialect.integrity_errors as exc:
             raise BatchValidationError(
                 f"batch violates storage constraints: {exc}"
             ) from exc
@@ -174,8 +214,10 @@ class SqliteMemoryStore(MemoryStore):
             item["from_fields"] = json.loads(str(row["from_fields_json"]))
             item["to_fields"] = json.loads(str(row["to_fields_json"]))
             counts = connection.execute(
-                "SELECT SUM(CASE WHEN active = 1 THEN 1 ELSE 0 END), "
-                "SUM(CASE WHEN active = 0 THEN 1 ELSE 0 END) FROM relation "
+                "SELECT SUM(CASE WHEN active = 1 THEN 1 ELSE 0 END) "
+                "AS active_count, "
+                "SUM(CASE WHEN active = 0 THEN 1 ELSE 0 END) AS inactive_count "
+                "FROM relation "
                 "WHERE logical_key = ? AND type = ?",
                 (row["name"], row["relation_type"]),
             ).fetchone()
@@ -446,6 +488,12 @@ class SqliteMemoryStore(MemoryStore):
                         int(specification["nullable"]),
                         int(specification["searchable"]),
                     ),
+                )
+                _backfill_attribute_type(
+                    connection,
+                    declaration.entity_type,
+                    name,
+                    requested_type,
                 )
             if declaration.privacy == "private":
                 namespace, node_type = split_entity_type(declaration.entity_type)
@@ -726,12 +774,14 @@ class SqliteMemoryStore(MemoryStore):
                     if effective_type is None:
                         effective_type = specification.get("type") or "unresolved"
                     attribute_id = stable_uuid("node_attribute", node_id, name)
+                    sort_text_folded, sort_text_exact, sort_number = _sort_values(value)
                     connection.execute(
                         "INSERT INTO node_attribute "
                         "(id, node_id, attribute_name, value_json, json_type, "
                         "privacy_class, searchable, source_id, batch_id, run_id, "
-                        "fragment_id, updated_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                        "fragment_id, updated_at, sort_text_folded, sort_text_exact, "
+                        "sort_number) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                         "ON CONFLICT(node_id, attribute_name) DO UPDATE SET "
                         "value_json = excluded.value_json, "
                         "json_type = excluded.json_type, "
@@ -742,7 +792,10 @@ class SqliteMemoryStore(MemoryStore):
                         "source_id = excluded.source_id, "
                         "batch_id = excluded.batch_id, run_id = excluded.run_id, "
                         "fragment_id = excluded.fragment_id, "
-                        "updated_at = excluded.updated_at",
+                        "updated_at = excluded.updated_at, "
+                        "sort_text_folded = excluded.sort_text_folded, "
+                        "sort_text_exact = excluded.sort_text_exact, "
+                        "sort_number = excluded.sort_number",
                         (
                             attribute_id,
                             node_id,
@@ -756,6 +809,9 @@ class SqliteMemoryStore(MemoryStore):
                             run_id,
                             evidence.fragment.id,
                             recorded_at,
+                            sort_text_folded,
+                            sort_text_exact,
+                            sort_number,
                         ),
                     )
                     searchable = bool(specification.get("searchable", False))
@@ -815,7 +871,8 @@ class SqliteMemoryStore(MemoryStore):
                 if existing is None:
                     new_fields.append(name)
                 elif (
-                    str(existing["json_type"]) == "unresolved" and inferred is not None
+                    str(existing["json_type"]) == "unresolved"
+                    and effective_type != "unresolved"
                 ):
                     resolved_types.append(name)
                 connection.execute(
@@ -842,6 +899,9 @@ class SqliteMemoryStore(MemoryStore):
                         batch_id,
                         batch_id,
                     ),
+                )
+                _backfill_attribute_type(
+                    connection, request.entity_type, name, effective_type
                 )
             snapshot = self._ontology_snapshot_connection(connection)
             result = {
@@ -996,15 +1056,19 @@ class SqliteMemoryStore(MemoryStore):
             connection.execute(
                 "INSERT INTO node_attribute "
                 "(id, node_id, attribute_name, value_json, json_type, privacy_class, "
-                "searchable, source_id, batch_id, run_id, fragment_id, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?) "
+                "searchable, source_id, batch_id, run_id, fragment_id, updated_at, "
+                "sort_text_folded, sort_text_exact, sort_number) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(node_id, attribute_name) DO UPDATE SET "
                 "value_json = excluded.value_json, json_type = excluded.json_type, "
                 "privacy_class = CASE WHEN node_attribute.privacy_class = 'private' "
                 "THEN 'private' ELSE excluded.privacy_class END, "
                 "searchable = excluded.searchable, source_id = excluded.source_id, "
                 "batch_id = NULL, run_id = excluded.run_id, "
-                "fragment_id = excluded.fragment_id, updated_at = excluded.updated_at",
+                "fragment_id = excluded.fragment_id, updated_at = excluded.updated_at, "
+                "sort_text_folded = excluded.sort_text_folded, "
+                "sort_text_exact = excluded.sort_text_exact, "
+                "sort_number = excluded.sort_number",
                 (
                     attribute_id,
                     request.node_id,
@@ -1017,6 +1081,7 @@ class SqliteMemoryStore(MemoryStore):
                     run_id,
                     evidence.fragment.id,
                     recorded_at,
+                    *_sort_values(request.value),
                 ),
             )
             document_id = stable_uuid(
@@ -1074,6 +1139,9 @@ class SqliteMemoryStore(MemoryStore):
                     request.privacy,
                     int(request.searchable),
                 ),
+            )
+            _backfill_attribute_type(
+                connection, entity_type, request.attribute_name, effective_type
             )
             snapshot = self._ontology_snapshot_connection(connection)
             return {
@@ -1494,14 +1562,29 @@ class SqliteMemoryStore(MemoryStore):
                             f"{operator} is not supported for {effective_type}"
                         )
                     symbols = {"lt": "<", "lte": "<=", "gt": ">", "gte": ">="}
-                    collation = (
-                        " COLLATE canonical_text" if effective_type == "string" else ""
-                    )
-                    conditions.append(
-                        f"json_extract({attribute_alias}.value_json, '$')"
-                        f"{collation} {symbols[operator]} ?"
-                    )
-                    sql_parameters.append(predicate["value"])
+                    if effective_type == "number":
+                        conditions.append(
+                            f"{attribute_alias}.sort_number {symbols[operator]} ?"
+                        )
+                        sql_parameters.append(float(predicate["value"]))
+                    else:
+                        value = str(predicate["value"])
+                        folded = value.casefold()
+                        primary = f"{attribute_alias}.sort_text_folded"
+                        secondary = f"{attribute_alias}.sort_text_exact"
+                        if operator in {"lt", "lte"}:
+                            secondary_symbol = "<" if operator == "lt" else "<="
+                            conditions.append(
+                                f"({primary} < ? OR ({primary} = ? AND "
+                                f"{secondary} {secondary_symbol} ?))"
+                            )
+                        else:
+                            secondary_symbol = ">" if operator == "gt" else ">="
+                            conditions.append(
+                                f"({primary} > ? OR ({primary} = ? AND "
+                                f"{secondary} {secondary_symbol} ?))"
+                            )
+                        sql_parameters.extend([folded, folded, value])
             if always_empty:
                 conditions.append("0 = 1")
             where_sql = " WHERE " + " AND ".join(conditions)
@@ -1519,7 +1602,10 @@ class SqliteMemoryStore(MemoryStore):
                     "rows": [],
                     "truncated": False,
                 }
-            select_columns: list[str] = []
+            select_columns: list[str] = [
+                f"{node_sql_aliases[alias]}.id AS b{index}"
+                for index, (alias, _) in enumerate(plan.node_aliases)
+            ]
             for index, projection in enumerate(plan.projections):
                 reference = str(projection["field"])
                 attribute_alias = field_aliases[reference]
@@ -1539,16 +1625,19 @@ class SqliteMemoryStore(MemoryStore):
             ordering_sql: list[str] = []
             for item in plan.order_by:
                 attribute_alias = field_aliases[item["field"]]
-                collation = (
-                    " COLLATE canonical_text"
-                    if effective_types[item["field"]] == "string"
-                    else ""
-                )
+                direction = item["direction"].upper()
+                effective_type = effective_types[item["field"]]
+                if effective_type == "string":
+                    value_order = (
+                        f"{attribute_alias}.sort_text_folded {direction}, "
+                        f"{attribute_alias}.sort_text_exact {direction}"
+                    )
+                elif effective_type == "number":
+                    value_order = f"{attribute_alias}.sort_number {direction}"
+                else:
+                    value_order = f"{attribute_alias}.value_json {direction}"
                 ordering_sql.append(
-                    f"({attribute_alias}.id IS NULL) ASC, "
-                    f"json_extract({attribute_alias}.value_json, '$')"
-                    f"{collation} "
-                    f"{item['direction'].upper()}"
+                    f"({attribute_alias}.id IS NULL) ASC, {value_order}"
                 )
             ordering_sql.extend(
                 f"{node_sql_aliases[alias]}.id ASC" for alias, _ in plan.node_aliases
@@ -1568,6 +1657,9 @@ class SqliteMemoryStore(MemoryStore):
             ).fetchall()
             selected = rows[: plan.limit]
             results: list[dict[str, Any]] = []
+            binding_indexes = {
+                alias: index for index, (alias, _) in enumerate(plan.node_aliases)
+            }
             for row in selected:
                 projections: list[dict[str, Any]] = []
                 for index, projection in enumerate(plan.projections):
@@ -1578,6 +1670,11 @@ class SqliteMemoryStore(MemoryStore):
                             "field": projection["field"],
                             "fragment_id": row[f"p{index}_fragment_id"],
                             "json_type": effective_types[str(projection["field"])],
+                            "node_id": str(
+                                row[
+                                    f"b{binding_indexes[str(projection['field']).partition('.')[0]]}"
+                                ]
+                            ),
                             "record_id": record_id,
                             "run_id": row[f"p{index}_run_id"],
                             "source_id": row[f"p{index}_source_id"],
@@ -1587,7 +1684,15 @@ class SqliteMemoryStore(MemoryStore):
                             else json.loads(str(row[f"p{index}_value_json"])),
                         }
                     )
-                results.append({"projections": projections})
+                results.append(
+                    {
+                        "bindings": {
+                            alias: str(row[f"b{index}"])
+                            for index, (alias, _) in enumerate(plan.node_aliases)
+                        },
+                        "projections": projections,
+                    }
+                )
             snapshot = self._ontology_snapshot_connection(connection)
             effective_ordering: list[dict[str, str]] = [
                 dict(item) for item in plan.order_by
@@ -2422,7 +2527,10 @@ class SqliteMemoryStore(MemoryStore):
             return {
                 table: [
                     dict(row)
-                    for row in connection.execute(f"SELECT * FROM {table} ORDER BY 1")
+                    for row in connection.execute(
+                        f"SELECT * FROM {table} "
+                        f"ORDER BY {SNAPSHOT_ORDER.get(table, '1')}"
+                    )
                 ]
                 for table in SNAPSHOT_TABLES
             }
@@ -2475,6 +2583,31 @@ class SqliteMemoryStore(MemoryStore):
             )
         return counts
 
+    def transfer_records(self) -> dict[str, list[dict[str, Any]]]:
+        records = self.snapshot_records()
+        records["node_attribute"] = [
+            {
+                key: value
+                for key, value in row.items()
+                if key not in {"sort_text_folded", "sort_text_exact", "sort_number"}
+            }
+            for row in records["node_attribute"]
+        ]
+        return records
+
+    def import_transfer_records(
+        self, records: dict[str, list[dict[str, Any]]]
+    ) -> dict[str, int]:
+        normalized = {
+            table: [dict(row) for row in rows] for table, rows in records.items()
+        }
+        for row in normalized.get("node_attribute", []):
+            folded, exact, number = _sort_values(json.loads(str(row["value_json"])))
+            row["sort_text_folded"] = folded
+            row["sort_text_exact"] = exact
+            row["sort_number"] = number
+        return self.import_snapshot_records(normalized)
+
     def integrity(self) -> dict[str, Any]:
         with self._connect() as connection:
             integrity_rows = connection.execute("PRAGMA integrity_check").fetchall()
@@ -2507,9 +2640,10 @@ class SqliteMemoryStore(MemoryStore):
             )
         with self._connect() as connection:
             version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+        expected_version = len(load_migration_manifest(self.migrations_directory))
         return MemoryStoreStatus(
             backend="sqlite",
-            initialized=version == 5,
+            initialized=version == expected_version,
             schema_version=version,
         )
 
@@ -2929,3 +3063,7 @@ class SqliteMemoryStore(MemoryStore):
                 "locator": str(row["source_locator"]),
             },
         }
+
+
+class SqliteMemoryStore(SqlMemoryStore):
+    pass

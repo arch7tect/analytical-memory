@@ -1,0 +1,627 @@
+{
+  "contract_document_version": "1",
+  "examples": [
+    {
+      "limit": 100,
+      "match": {
+        "edges": [],
+        "nodes": [
+          {
+            "as": "session",
+            "type": "example.Session"
+          }
+        ]
+      },
+      "offset": 0,
+      "query_ir_version": "1",
+      "return": [
+        {
+          "field": "session.status"
+        }
+      ],
+      "where": [
+        {
+          "left": {
+            "field": "session.status"
+          },
+          "op": "eq",
+          "right": {
+            "value": "failed"
+          }
+        }
+      ]
+    },
+    {
+      "match": {
+        "edges": [],
+        "nodes": [
+          {
+            "as": "session",
+            "type": "example.Session"
+          }
+        ]
+      },
+      "query_ir_version": "1",
+      "return": [
+        {
+          "count": true
+        }
+      ]
+    }
+  ],
+  "input_schema": {
+    "$defs": {
+      "QueryComparisonPredicate": {
+        "additionalProperties": false,
+        "properties": {
+          "left": {
+            "$ref": "#/$defs/QueryFieldOperand"
+          },
+          "op": {
+            "enum": [
+              "eq",
+              "ne",
+              "lt",
+              "lte",
+              "gt",
+              "gte"
+            ],
+            "title": "Op",
+            "type": "string"
+          },
+          "right": {
+            "$ref": "#/$defs/QueryValueOperand"
+          }
+        },
+        "required": [
+          "left",
+          "op",
+          "right"
+        ],
+        "title": "QueryComparisonPredicate",
+        "type": "object"
+      },
+      "QueryCountProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "const": true,
+            "title": "Count",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "count"
+        ],
+        "title": "QueryCountProjection",
+        "type": "object"
+      },
+      "QueryEdgePattern": {
+        "additionalProperties": false,
+        "properties": {
+          "from": {
+            "title": "From",
+            "type": "string"
+          },
+          "logical_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Logical Key"
+          },
+          "to": {
+            "title": "To",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "from",
+          "to"
+        ],
+        "title": "QueryEdgePattern",
+        "type": "object"
+      },
+      "QueryExistsPredicate": {
+        "additionalProperties": false,
+        "properties": {
+          "left": {
+            "$ref": "#/$defs/QueryFieldOperand"
+          },
+          "op": {
+            "const": "exists",
+            "title": "Op",
+            "type": "string"
+          }
+        },
+        "required": [
+          "left",
+          "op"
+        ],
+        "title": "QueryExistsPredicate",
+        "type": "object"
+      },
+      "QueryFieldOperand": {
+        "additionalProperties": false,
+        "properties": {
+          "field": {
+            "title": "Field",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field"
+        ],
+        "title": "QueryFieldOperand",
+        "type": "object"
+      },
+      "QueryFieldProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "field": {
+            "title": "Field",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field"
+        ],
+        "title": "QueryFieldProjection",
+        "type": "object"
+      },
+      "QueryInPredicate": {
+        "additionalProperties": false,
+        "properties": {
+          "left": {
+            "$ref": "#/$defs/QueryFieldOperand"
+          },
+          "op": {
+            "const": "in",
+            "title": "Op",
+            "type": "string"
+          },
+          "right": {
+            "$ref": "#/$defs/QueryValuesOperand"
+          }
+        },
+        "required": [
+          "left",
+          "op",
+          "right"
+        ],
+        "title": "QueryInPredicate",
+        "type": "object"
+      },
+      "QueryMatch": {
+        "additionalProperties": false,
+        "properties": {
+          "edges": {
+            "items": {
+              "$ref": "#/$defs/QueryEdgePattern"
+            },
+            "maxItems": 8,
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/$defs/QueryNodePattern"
+            },
+            "maxItems": 8,
+            "minItems": 1,
+            "title": "Nodes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "nodes"
+        ],
+        "title": "QueryMatch",
+        "type": "object"
+      },
+      "QueryNodePattern": {
+        "additionalProperties": false,
+        "properties": {
+          "as": {
+            "minLength": 1,
+            "title": "As",
+            "type": "string"
+          },
+          "type": {
+            "minLength": 3,
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "as"
+        ],
+        "title": "QueryNodePattern",
+        "type": "object"
+      },
+      "QueryOrderBy": {
+        "additionalProperties": false,
+        "properties": {
+          "direction": {
+            "default": "asc",
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "field": {
+            "title": "Field",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field"
+        ],
+        "title": "QueryOrderBy",
+        "type": "object"
+      },
+      "QueryValueOperand": {
+        "additionalProperties": false,
+        "properties": {
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "title": "QueryValueOperand",
+        "type": "object"
+      },
+      "QueryValuesOperand": {
+        "additionalProperties": false,
+        "properties": {
+          "values": {
+            "items": {},
+            "minItems": 1,
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "values"
+        ],
+        "title": "QueryValuesOperand",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "limit": {
+        "default": 100,
+        "maximum": 1000,
+        "minimum": 1,
+        "title": "Limit",
+        "type": "integer"
+      },
+      "match": {
+        "$ref": "#/$defs/QueryMatch"
+      },
+      "offset": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Offset",
+        "type": "integer"
+      },
+      "order_by": {
+        "items": {
+          "$ref": "#/$defs/QueryOrderBy"
+        },
+        "title": "Order By",
+        "type": "array"
+      },
+      "query_ir_version": {
+        "const": "1",
+        "title": "Query Ir Version",
+        "type": "string"
+      },
+      "return": {
+        "items": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QueryFieldProjection"
+            },
+            {
+              "$ref": "#/$defs/QueryCountProjection"
+            }
+          ]
+        },
+        "minItems": 1,
+        "title": "Return",
+        "type": "array"
+      },
+      "where": {
+        "items": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QueryComparisonPredicate"
+            },
+            {
+              "$ref": "#/$defs/QueryInPredicate"
+            },
+            {
+              "$ref": "#/$defs/QueryExistsPredicate"
+            }
+          ]
+        },
+        "title": "Where",
+        "type": "array"
+      }
+    },
+    "required": [
+      "query_ir_version",
+      "match",
+      "return"
+    ],
+    "title": "QueryIRDocument",
+    "type": "object"
+  },
+  "query_ir_version": "1",
+  "result_schema": {
+    "$defs": {
+      "QueryEffectiveOrdering": {
+        "additionalProperties": false,
+        "properties": {
+          "direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Field"
+          },
+          "tie_breaker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tie Breaker"
+          }
+        },
+        "required": [
+          "direction"
+        ],
+        "title": "QueryEffectiveOrdering",
+        "type": "object"
+      },
+      "QueryProjectionResult": {
+        "additionalProperties": false,
+        "properties": {
+          "batch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch Id"
+          },
+          "field": {
+            "title": "Field",
+            "type": "string"
+          },
+          "fragment_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fragment Id"
+          },
+          "json_type": {
+            "enum": [
+              "unresolved",
+              "string",
+              "number",
+              "boolean",
+              "object",
+              "array"
+            ],
+            "title": "Json Type",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "record_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Record Id"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "batch_id",
+          "field",
+          "fragment_id",
+          "json_type",
+          "node_id",
+          "record_id",
+          "run_id",
+          "source_id",
+          "updated_at",
+          "value"
+        ],
+        "title": "QueryProjectionResult",
+        "type": "object"
+      },
+      "QueryRow": {
+        "additionalProperties": false,
+        "properties": {
+          "bindings": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Bindings",
+            "type": "object"
+          },
+          "projections": {
+            "items": {
+              "$ref": "#/$defs/QueryProjectionResult"
+            },
+            "title": "Projections",
+            "type": "array"
+          }
+        },
+        "required": [
+          "bindings",
+          "projections"
+        ],
+        "title": "QueryRow",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "contract_fingerprint": {
+        "title": "Contract Fingerprint",
+        "type": "string"
+      },
+      "count": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Count"
+      },
+      "ontology_fingerprint": {
+        "title": "Ontology Fingerprint",
+        "type": "string"
+      },
+      "ordering": {
+        "items": {
+          "$ref": "#/$defs/QueryEffectiveOrdering"
+        },
+        "title": "Ordering",
+        "type": "array"
+      },
+      "rows": {
+        "items": {
+          "$ref": "#/$defs/QueryRow"
+        },
+        "title": "Rows",
+        "type": "array"
+      },
+      "truncated": {
+        "title": "Truncated",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "contract_fingerprint",
+      "ontology_fingerprint",
+      "ordering",
+      "rows",
+      "truncated"
+    ],
+    "title": "QueryIRResponse",
+    "type": "object"
+  },
+  "schema_fingerprint": "882802d6f0ffd1970e2c1c75f99e38199696dfaa998a108e7306deb8c10380b2",
+  "semantics": {
+    "bindings": "every non-count row maps each node alias to its Node ID",
+    "comparison": "literals must match the field effective JSON type; strings and numbers are never coerced",
+    "count": "count cannot be combined with field projections",
+    "disconnected_patterns": "node patterns not connected by edges form a Cartesian product",
+    "edges": "directed active relations only",
+    "exists": "tests attribute-row presence, so explicit null exists",
+    "field_reference": "<node-alias>.<attribute-name>",
+    "missing": "no current NodeAttribute row",
+    "missing_projection": "a missing projected attribute has null value and null record_id; record_id distinguishes it from an explicit null value",
+    "not_equal": "ne matches only present attributes of the effective field type; missing attributes do not match",
+    "null": "a present NodeAttribute whose JSON value is null",
+    "ordering": "explicit fields first, present values before missing values, then every node alias ID ascending as a deterministic tie-breaker",
+    "pagination": "limit defaults to 100, offset defaults to 0; truncated uses a limit-plus-one probe",
+    "provenance": "each field projection includes its current record, source, batch, run, evidence fragment, and update time",
+    "string_ordering": "Unicode casefold, then original code-point order",
+    "unresolved": "typed comparison produces no matches",
+    "where": "implicit conjunction; OR is not supported"
+  }
+}

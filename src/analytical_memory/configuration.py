@@ -9,6 +9,7 @@ from analytical_memory.adapters.filesystem import FileEvidenceStore
 from analytical_memory.adapters.openai import OpenAIEmbeddingProvider
 from analytical_memory.adapters.sqlite import SqliteMemoryStore
 from analytical_memory.application import MemoryApplication
+from analytical_memory.ports import MemoryStore
 from analytical_memory.schema_contract import load_schema
 
 load_dotenv()
@@ -16,6 +17,21 @@ load_dotenv()
 
 def environment_database() -> Path:
     return Path(os.environ.get("ANALYTICAL_MEMORY_DB", ".local/memory.db"))
+
+
+def environment_backend() -> str:
+    backend = os.environ.get("ANALYTICAL_MEMORY_BACKEND", "sqlite")
+    if backend not in {"sqlite", "postgresql"}:
+        raise ValueError("ANALYTICAL_MEMORY_BACKEND must be sqlite or postgresql")
+    return backend
+
+
+def environment_postgres_url() -> str | None:
+    return os.environ.get("ANALYTICAL_MEMORY_POSTGRES_URL") or None
+
+
+def environment_postgres_schema() -> str:
+    return os.environ.get("ANALYTICAL_MEMORY_POSTGRES_SCHEMA", "public")
 
 
 def environment_evidence_root() -> Path:
@@ -36,9 +52,27 @@ def build_application(
     database: Path | None = None,
     evidence_root: Path | None = None,
     schema_path: Path | None = None,
+    backend: str | None = None,
+    postgres_url: str | None = None,
+    postgres_schema: str | None = None,
 ) -> MemoryApplication:
+    selected_backend = backend or environment_backend()
+    memory_store: MemoryStore
+    if selected_backend == "postgresql":
+        from analytical_memory.adapters.postgresql import PostgresMemoryStore
+
+        dsn = postgres_url or environment_postgres_url()
+        if dsn is None:
+            raise ValueError("ANALYTICAL_MEMORY_POSTGRES_URL is required")
+        memory_store = PostgresMemoryStore(
+            dsn, schema=postgres_schema or environment_postgres_schema()
+        )
+    elif selected_backend == "sqlite":
+        memory_store = SqliteMemoryStore(database or environment_database())
+    else:
+        raise ValueError("backend must be sqlite or postgresql")
     return MemoryApplication(
-        memory_store=SqliteMemoryStore(database or environment_database()),
+        memory_store=memory_store,
         evidence_store=FileEvidenceStore(evidence_root or environment_evidence_root()),
         schema=load_schema(schema_path or environment_schema()),
         embedding_provider=OpenAIEmbeddingProvider(
