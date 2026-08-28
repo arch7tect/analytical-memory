@@ -665,10 +665,18 @@ in M5.
 }
 ```
 
-Missing or null source keys and keys with no target are skipped and counted. A
-source key matching multiple target Nodes fails with `ambiguous_target` and
-rolls back the entire operation. Existing Relations are counted rather than
-duplicated. The operation never creates a missing endpoint.
+Scalar source fields contribute one typed value to a join tuple. Array source
+fields contribute their unique non-null scalar elements, and multiple array
+fields are expanded as a Cartesian product. Target fields remain scalar. A
+Relation is materialized for every resolved source-target pair, while duplicate
+tuples and pairs collapse to one Relation.
+
+Missing, null, or empty source keys and keys with no target are skipped and
+counted. Each expanded source tuple matching multiple target Nodes fails with
+`ambiguous_target` and rolls back the entire operation. Non-scalar source array
+elements, array-valued target fields, and incompatible element types reject the
+operation. Existing Relations are counted rather than duplicated. The operation
+never creates a missing endpoint.
 
 V1 sets Relation `logical_key` to the join name, making edge identity
 independent of declaration revision. Relation privacy is the strictest class of
@@ -686,9 +694,9 @@ materialized active and inactive pairs separately. Restoring an inactive pair
 requires an explicit correction operation; rerun never silently reverses a
 correction.
 
-V1 equality is type-strict and exact. String `"12"` does not equal number `12`.
-Normalization and coercion functions require later, explicitly versioned Query
-IR operators.
+V1 equality is type-strict and exact after endpoint expansion. String `"12"`
+does not equal number `12`. Normalization and coercion functions require later,
+explicitly versioned Query IR operators.
 
 An accepted join is a provenance-bearing ontology declaration. It remains
 queryable even when it currently materializes zero edges. Loading future JSONL

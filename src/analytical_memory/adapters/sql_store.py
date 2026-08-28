@@ -6,6 +6,7 @@ from abc import abstractmethod
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from itertools import product
 from typing import Any
 
 from analytical_memory.adapters.sql_dialect import SqlDialect
@@ -84,6 +85,48 @@ def _sort_values(value: Any) -> tuple[str | None, str | None, float | None]:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return None, None, float(value)
     return None, None, None
+
+
+JoinKey = tuple[tuple[str, str], ...]
+
+
+def _join_keys(
+    connection: Any,
+    node_id: str,
+    fields: tuple[str, ...],
+    paired_types: tuple[str, ...],
+) -> tuple[JoinKey, ...] | None:
+    components: list[tuple[tuple[str, str], ...]] = []
+    for field, paired_type in zip(fields, paired_types, strict=True):
+        row = connection.execute(
+            "SELECT value_json, json_type FROM node_attribute "
+            "WHERE node_id = ? AND attribute_name = ?",
+            (node_id, field),
+        ).fetchone()
+        if row is None or str(row["value_json"]) == "null":
+            return None
+        value_json = str(row["value_json"])
+        effective_type = str(row["json_type"])
+        if effective_type != "array":
+            components.append(((value_json, effective_type),))
+            continue
+        value = json.loads(value_json)
+        if not isinstance(value, list):
+            raise JoinConflictError("join array field must contain a JSON array")
+        elements: set[tuple[str, str]] = set()
+        for item in value:
+            item_type = json_type(item)
+            if item_type is None:
+                continue
+            if item_type not in {"string", "number", "boolean"}:
+                raise JoinConflictError("join arrays require scalar elements")
+            if paired_type != "array" and item_type != paired_type:
+                raise JoinConflictError("join array elements have incompatible types")
+            elements.add((canonical_json(item), item_type))
+        if not elements:
+            return None
+        components.append(tuple(sorted(elements)))
+    return tuple(product(*components))
 
 
 def _backfill_attribute_type(
@@ -1476,6 +1519,7 @@ class SqlMemoryStore(MemoryStore):
                 raise JoinConflictError(
                     f"join name {request.name!r} already has another definition"
                 )
+            to_field_types: list[str] = []
             type_pairs = zip(request.from_.fields, request.to.fields, strict=True)
             for from_field, to_field in type_pairs:
                 from_row = connection.execute(
@@ -1490,10 +1534,15 @@ class SqlMemoryStore(MemoryStore):
                 ).fetchone()
                 if from_row is None or to_row is None:
                     raise JoinConflictError("join references an unknown field")
-                if str(from_row["json_type"]) == "unresolved" or str(
-                    from_row["json_type"]
-                ) != str(to_row["json_type"]):
+                from_field_type = str(from_row["json_type"])
+                to_field_type = str(to_row["json_type"])
+                if "unresolved" in {from_field_type, to_field_type}:
                     raise JoinConflictError("join fields have incompatible types")
+                if to_field_type == "array":
+                    raise JoinConflictError("join target fields must be scalar")
+                if from_field_type not in {to_field_type, "array"}:
+                    raise JoinConflictError("join fields have incompatible types")
+                to_field_types.append(to_field_type)
             connection.execute(
                 "INSERT INTO ingestion_batch "
                 "(id, idempotency_key, kind, input_hash, schema_fingerprint, "
@@ -1572,7 +1621,8 @@ class SqlMemoryStore(MemoryStore):
                     ),
                 )
             source_nodes = connection.execute(
-                "SELECT id FROM node WHERE namespace = ? AND type = ? ORDER BY id",
+                "SELECT id, privacy_class FROM node "
+                "WHERE namespace = ? AND type = ? ORDER BY id",
                 (from_namespace, from_type),
             ).fetchall()
             created = 0
@@ -1582,102 +1632,101 @@ class SqlMemoryStore(MemoryStore):
             previous_inactive = 0
             for source_node in source_nodes:
                 source_node_id = str(source_node["id"])
-                key_values: list[tuple[str, str]] = []
-                missing = False
-                for field in request.from_.fields:
-                    row = connection.execute(
-                        "SELECT value_json, json_type FROM node_attribute "
-                        "WHERE node_id = ? AND attribute_name = ?",
-                        (source_node_id, field),
-                    ).fetchone()
-                    if row is None or str(row["value_json"]) == "null":
-                        missing = True
-                        break
-                    key_values.append((str(row["value_json"]), str(row["json_type"])))
-                if missing:
+                source_keys = _join_keys(
+                    connection,
+                    source_node_id,
+                    request.from_.fields,
+                    tuple(to_field_types),
+                )
+                if source_keys is None:
                     skipped_null_or_missing += 1
                     continue
-                target_conditions = []
-                target_parameters: list[Any] = [to_namespace, to_type]
-                for field, (value_json, effective_type) in zip(
-                    request.to.fields, key_values, strict=True
-                ):
-                    target_conditions.append(
-                        "EXISTS (SELECT 1 FROM node_attribute AS target_attribute "
-                        "WHERE target_attribute.node_id = node.id "
-                        "AND target_attribute.attribute_name = ? "
-                        "AND target_attribute.json_type = ? "
-                        "AND target_attribute.value_json = ?)"
-                    )
-                    target_parameters.extend([field, effective_type, value_json])
-                targets = connection.execute(
-                    "SELECT node.id, node.privacy_class FROM node "
-                    "WHERE node.namespace = ? AND node.type = ? AND "
-                    + " AND ".join(target_conditions)
-                    + " LIMIT 2",
-                    target_parameters,
-                ).fetchall()
-                if len(targets) > 1:
-                    raise AmbiguousTargetError(
-                        f"ambiguous_target for source node {source_node_id}"
-                    )
+                targets: dict[str, str] = {}
+                for source_key in source_keys:
+                    target_conditions = []
+                    target_parameters: list[Any] = [to_namespace, to_type]
+                    for field, (value_json, effective_type) in zip(
+                        request.to.fields, source_key, strict=True
+                    ):
+                        target_conditions.append(
+                            "EXISTS (SELECT 1 FROM node_attribute AS "
+                            "target_attribute WHERE target_attribute.node_id = "
+                            "node.id AND target_attribute.attribute_name = ? AND "
+                            "target_attribute.json_type = ? AND "
+                            "target_attribute.value_json = ?)"
+                        )
+                        target_parameters.extend(
+                            [field, effective_type, value_json]
+                        )
+                    key_targets = connection.execute(
+                        "SELECT node.id, node.privacy_class FROM node "
+                        "WHERE node.namespace = ? AND node.type = ? AND "
+                        + " AND ".join(target_conditions)
+                        + " LIMIT 2",
+                        target_parameters,
+                    ).fetchall()
+                    if len(key_targets) > 1:
+                        raise AmbiguousTargetError(
+                            f"ambiguous_target for source node {source_node_id}"
+                        )
+                    if key_targets:
+                        targets[str(key_targets[0]["id"])] = str(
+                            key_targets[0]["privacy_class"]
+                        )
                 if not targets:
                     skipped_unmatched += 1
                     continue
-                target_node_id = str(targets[0]["id"])
-                existing_relation = connection.execute(
-                    "SELECT id, active FROM relation WHERE source_node_id = ? "
-                    "AND type = ? AND target_node_id = ? AND logical_key = ?",
-                    (
+                for target_node_id, target_privacy in sorted(targets.items()):
+                    existing_relation = connection.execute(
+                        "SELECT id, active FROM relation WHERE source_node_id = ? "
+                        "AND type = ? AND target_node_id = ? AND logical_key = ?",
+                        (
+                            source_node_id,
+                            request.relation,
+                            target_node_id,
+                            request.name,
+                        ),
+                    ).fetchone()
+                    if existing_relation is not None:
+                        if bool(existing_relation["active"]):
+                            previous_active += 1
+                        else:
+                            previous_inactive += 1
+                        continue
+                    privacy = (
+                        "private"
+                        if "private"
+                        in {str(source_node["privacy_class"]), target_privacy}
+                        else "public"
+                    )
+                    relation_id = stable_uuid(
+                        "relation",
                         source_node_id,
                         request.relation,
                         target_node_id,
                         request.name,
-                    ),
-                ).fetchone()
-                if existing_relation is not None:
-                    if bool(existing_relation["active"]):
-                        previous_active += 1
-                    else:
-                        previous_inactive += 1
-                    continue
-                source_privacy = connection.execute(
-                    "SELECT privacy_class FROM node WHERE id = ?", (source_node_id,)
-                ).fetchone()[0]
-                privacy = (
-                    "private"
-                    if "private"
-                    in {str(source_privacy), str(targets[0]["privacy_class"])}
-                    else "public"
-                )
-                relation_id = stable_uuid(
-                    "relation",
-                    source_node_id,
-                    request.relation,
-                    target_node_id,
-                    request.name,
-                )
-                connection.execute(
-                    "INSERT INTO relation "
-                    "(id, source_node_id, type, target_node_id, logical_key, active, "
-                    "privacy_class, source_id, batch_id, run_id, fragment_id, "
-                    "updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)",
-                    (
-                        relation_id,
-                        source_node_id,
-                        request.relation,
-                        target_node_id,
-                        request.name,
-                        privacy,
-                        source_id,
-                        batch_id,
-                        run_id,
-                        evidence.fragment.id,
-                        recorded_at,
-                    ),
-                )
-                created += 1
+                    )
+                    connection.execute(
+                        "INSERT INTO relation "
+                        "(id, source_node_id, type, target_node_id, logical_key, "
+                        "active, privacy_class, source_id, batch_id, run_id, "
+                        "fragment_id, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)",
+                        (
+                            relation_id,
+                            source_node_id,
+                            request.relation,
+                            target_node_id,
+                            request.name,
+                            privacy,
+                            source_id,
+                            batch_id,
+                            run_id,
+                            evidence.fragment.id,
+                            recorded_at,
+                        ),
+                    )
+                    created += 1
             snapshot = self._ontology_snapshot_connection(connection)
             result = {
                 "batch_id": batch_id,

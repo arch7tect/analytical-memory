@@ -169,10 +169,14 @@ class JoinMaterializeRequest(APIModel):
     name: str = Field(description="Stable join declaration name.")
     relation: str = Field(description="Relation type written on matching edges.")
     from_: JoinEndpointInput = Field(
-        alias="from", description="Directed source endpoint and ordered join fields."
+        alias="from",
+        description=(
+            "Directed source endpoint. Array fields expand their unique non-null "
+            "scalar elements, and multiple arrays form a Cartesian product."
+        ),
     )
     to: JoinEndpointInput = Field(
-        description="Directed target endpoint and ordered join fields."
+        description="Directed target endpoint with scalar ordered join fields."
     )
     contract_fingerprint: ContractFingerprint
     idempotency_key: str | None = Field(

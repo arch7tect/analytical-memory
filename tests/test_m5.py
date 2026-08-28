@@ -1159,6 +1159,109 @@ def test_ambiguous_join_rolls_back_declaration(
     assert application.ontology()["document"]["relations"] == []
 
 
+def test_join_expands_source_arrays_with_cartesian_product(
+    m5: tuple[Any, ...], tmp_path: Path
+) -> None:
+    application, _, _ = m5
+    sources = _write(
+        tmp_path / "sources.jsonl",
+        [
+            {"id": "src1", "codes": ["a", "b", "b"], "regions": ["1", "2"]},
+            {"id": "src2", "codes": [None], "regions": ["1"]},
+            {"id": "src3", "codes": ["q"], "regions": ["9"]},
+        ],
+    )
+    targets = _write(
+        tmp_path / "targets.jsonl",
+        [
+            {"id": "t1", "code": "b", "region": "1"},
+            {"id": "t2", "code": "a", "region": "2"},
+            {"id": "t3", "code": "a", "region": "1"},
+            {"id": "t4", "code": "b", "region": "2"},
+        ],
+    )
+    codes = _write(
+        tmp_path / "codes.jsonl",
+        [{"id": "c1", "code": "a"}, {"id": "c2", "code": "b"}],
+    )
+    array_targets = _write(
+        tmp_path / "array-targets.jsonl",
+        [{"id": "at1", "codes": ["a", "b"]}],
+    )
+    _import(application, sources, "example.Source")
+    _import(application, targets, "example.Target")
+    _import(application, codes, "example.Code")
+    _import(application, array_targets, "example.ArrayTarget")
+
+    array_join = {
+        "name": "source-target-arrays",
+        "relation": "matches",
+        "from_": {
+            "type": "example.Source",
+            "fields": ["codes", "regions"],
+        },
+        "to": {
+            "type": "example.Target",
+            "fields": ["code", "region"],
+        },
+        "contract_fingerprint": application.schema.fingerprint,
+    }
+    first = application.materialize_join(**array_join, idempotency_key="arrays-1")
+    second = application.materialize_join(**array_join, idempotency_key="arrays-2")
+
+    assert first["created_relations"] == 4
+    assert first["skipped_null_or_missing"] == 1
+    assert first["skipped_unmatched"] == 1
+    assert second["created_relations"] == 0
+    assert second["previously_materialized_active"] == 4
+
+    source_to_scalar = application.materialize_join(
+        name="source-code",
+        relation="contains_code",
+        from_={"type": "example.Source", "fields": ["codes"]},
+        to={"type": "example.Code", "fields": ["code"]},
+        contract_fingerprint=application.schema.fingerprint,
+    )
+    assert source_to_scalar["created_relations"] == 2
+    assert source_to_scalar["skipped_null_or_missing"] == 1
+    assert source_to_scalar["skipped_unmatched"] == 1
+
+    with pytest.raises(JoinConflictError, match="target fields must be scalar"):
+        application.materialize_join(
+            name="code-array-target",
+            relation="in_target",
+            from_={"type": "example.Code", "fields": ["code"]},
+            to={"type": "example.ArrayTarget", "fields": ["codes"]},
+            contract_fingerprint=application.schema.fingerprint,
+        )
+
+
+def test_join_rejects_non_scalar_array_elements(
+    m5: tuple[Any, ...], tmp_path: Path
+) -> None:
+    application, _, _ = m5
+    sources = _write(
+        tmp_path / "sources.jsonl",
+        [{"id": "src1", "codes": ["a", {"code": "b"}]}],
+    )
+    targets = _write(
+        tmp_path / "targets.jsonl",
+        [{"id": "t1", "code": "a"}],
+    )
+    _import(application, sources, "example.Source")
+    _import(application, targets, "example.Target")
+
+    with pytest.raises(JoinConflictError, match="require scalar elements"):
+        application.materialize_join(
+            name="invalid-array-elements",
+            relation="matches",
+            from_={"type": "example.Source", "fields": ["codes"]},
+            to={"type": "example.Target", "fields": ["code"]},
+            contract_fingerprint=application.schema.fingerprint,
+        )
+    assert application.ontology()["document"]["relations"] == []
+
+
 def test_analytical_value_uses_attribute_shape_and_direct_provenance(
     m5: tuple[Any, ...], tmp_path: Path
 ) -> None:

@@ -206,7 +206,10 @@ def agent_guide_document() -> dict[str, Any]:
             ),
             "join": (
                 "memory_relation_manage action=materialize explicitly connects Nodes "
-                "by equal typed field tuples. from is source and to is target; joins "
+                "by equal typed field tuples. Source array fields contribute unique "
+                "non-null scalar elements, and multiple source arrays form a "
+                "Cartesian product. Target fields must be scalar. Matching tuples "
+                "create one deduplicated Relation per source-target Node pair. Joins "
                 "are never inferred or rerun automatically."
             ),
             "query": (
@@ -1143,7 +1146,9 @@ def create_mcp_server(
             Field(
                 description=(
                     "Directed source endpoint: entity type and ordered fields whose "
-                    "tuple is matched to the to endpoint."
+                    "tuple is matched to the to endpoint. Array fields contribute "
+                    "unique non-null scalar elements, and multiple arrays form a "
+                    "Cartesian product."
                 )
             ),
         ],
@@ -1151,8 +1156,8 @@ def create_mcp_server(
             JoinEndpointInput,
             Field(
                 description=(
-                    "Directed target endpoint: entity type and ordered fields matched "
-                    "positionally to from_.fields."
+                    "Directed target endpoint: entity type and scalar ordered fields "
+                    "matched positionally to from_.fields."
                 )
             ),
         ],

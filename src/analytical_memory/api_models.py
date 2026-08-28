@@ -87,8 +87,10 @@ class JoinEndpointInput(APIModel):
     fields: list[str] = Field(
         min_length=1,
         description=(
-            "Ordered attribute names forming the equality tuple; both endpoints must "
-            "have the same number of compatible typed fields."
+            "Ordered attribute names forming equality tuples. On the source endpoint, "
+            "array fields contribute their unique non-null scalar elements and "
+            "multiple arrays form a Cartesian product. Target fields must be scalar. "
+            "Both endpoints must have the same number of compatible fields."
         ),
     )
 

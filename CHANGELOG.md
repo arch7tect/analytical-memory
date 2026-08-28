@@ -2,6 +2,17 @@
 
 All notable changes to Analytical Memory are documented here.
 
+## 0.4.0 - 2026-08-28
+
+- Expanded array-valued source join fields into their Cartesian product when
+  materializing relations.
+- Kept target join fields scalar and preserved exact typed matching, ambiguity
+  detection, pair deduplication, and add-only materialization.
+- Documented the array join contract in the MCP guide and operation
+  specification.
+- Added regression coverage for empty, null, duplicate, invalid, and
+  multi-array source values, plus target-array rejection.
+
 ## 0.3.0 - 2026-08-27
 
 - Added one implicit default memory and stateless optional named-memory routing
