@@ -24,6 +24,7 @@ from analytical_memory.errors import (
     MemoryCatalogError,
     MemoryErrorBase,
     MemoryNotFoundError,
+    MemoryStateChangedError,
 )
 from analytical_memory.mcp_operations import OPERATION_DEFINITIONS
 from analytical_memory.memories import MemoryRouter
@@ -86,6 +87,16 @@ def test_default_is_implicit_and_unknown_never_falls_back(tmp_path: Path) -> Non
         router.resolve("missing")
 
 
+def test_default_database_cannot_be_inside_evidence_root(tmp_path: Path) -> None:
+    evidence = tmp_path / "evidence"
+    application = _application(evidence / "memory.db", evidence)
+    application.initialize()
+    router = MemoryRouter(application, tmp_path / "missing-catalog.json")
+
+    with pytest.raises(MemoryCatalogError, match="inside an evidence root"):
+        router.catalog()
+
+
 def test_plugin_empty_environment_values_use_plugin_data_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -130,6 +141,75 @@ def test_create_named_sqlite_memory_and_catalog_permissions(tmp_path: Path) -> N
         "database": str(database),
         "evidence_root": str(evidence),
     }
+
+
+def test_wipe_default_requires_exact_state_and_preserves_target(tmp_path: Path) -> None:
+    router = _router(tmp_path)
+    source = tmp_path / "records.jsonl"
+    source.write_text('{"id":"one"}\n', encoding="utf-8")
+    MemoryAPI(router.default_application).jsonl_import(
+        source,
+        "notes.Record",
+        [{"field": "id", "type": "string"}],
+        router.default_application.schema.fingerprint,
+    )
+    status = router.lifecycle_status("default")
+
+    with pytest.raises(MemoryStateChangedError) as error:
+        router.lifecycle(
+            action="wipe",
+            memory="default",
+            expected_state={**status["state"], "nodes": 0},
+        )
+
+    assert error.value.details["actual_state"] == status["state"]
+    result = router.lifecycle(
+        action="wipe", memory="default", expected_state=status["state"]
+    )
+
+    assert result["catalog_entry_removed"] is False
+    assert result["removed"] == {
+        **status["state"],
+        "evidence_bytes": source.stat().st_size,
+        "evidence_files": 1,
+    }
+    empty_state = router.lifecycle_status("default")["state"]
+    assert {
+        key: value for key, value in empty_state.items() if key != "fingerprint"
+    } == {
+        "active_relations": 0,
+        "attributes": 0,
+        "evidence_objects": 0,
+        "nodes": 0,
+    }
+    assert isinstance(empty_state["fingerprint"], str)
+    assert len(empty_state["fingerprint"]) == 64
+    assert router.default_application.status()["ready"] is True
+
+
+def test_delete_named_memory_removes_storage_and_catalog(tmp_path: Path) -> None:
+    router = _router(tmp_path)
+    database = tmp_path / "research" / "memory.db"
+    evidence = tmp_path / "research" / "evidence"
+    router.configure(
+        action="create",
+        name="research",
+        backend="sqlite",
+        database=database,
+        evidence_root=evidence,
+    )
+    state = router.lifecycle_status("research")["state"]
+
+    result = router.lifecycle(action="delete", memory="research", expected_state=state)
+
+    assert result["catalog_entry_removed"] is True
+    assert "research" not in router.catalog()["memories"]
+    assert not database.exists()
+    assert not evidence.exists()
+    with pytest.raises(MemoryNotFoundError):
+        router.resolve("research")
+    with pytest.raises(MemoryCatalogError, match="cannot be deleted"):
+        router.lifecycle(action="delete", memory="default", expected_state=state)
 
 
 def test_attach_is_read_only_and_checks_exact_migrations(tmp_path: Path) -> None:
@@ -358,6 +438,32 @@ def test_cli_catalog_selection_and_capability_fingerprint(
     catalog = json.loads(capsys.readouterr().out)
     assert set(catalog["memories"]) == {"default"}
 
+    assert main([*shared, "memories", "status", "default"]) == 0
+    lifecycle_status = json.loads(capsys.readouterr().out)
+    state = lifecycle_status["state"]
+    assert (
+        main(
+            [
+                *shared,
+                "memories",
+                "wipe",
+                "default",
+                "--expected-nodes",
+                str(state["nodes"]),
+                "--expected-attributes",
+                str(state["attributes"]),
+                "--expected-active-relations",
+                str(state["active_relations"]),
+                "--expected-evidence-objects",
+                str(state["evidence_objects"]),
+                "--expected-fingerprint",
+                state["fingerprint"],
+            ]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["action"] == "wipe"
+
     assert main([*shared, "--memory", "missing", "status"]) == 2
     error = json.loads(capsys.readouterr().err)
     assert error["code"] == "memory_not_found"
@@ -369,6 +475,8 @@ def test_postgres_create_and_read_only_attach(
 ) -> None:
     dsn = os.environ.get("ANALYTICAL_MEMORY_TEST_POSTGRES_URL")
     if dsn is None:
+        if os.environ.get("CI"):
+            pytest.fail("CI requires ANALYTICAL_MEMORY_TEST_POSTGRES_URL")
         pytest.skip("ANALYTICAL_MEMORY_TEST_POSTGRES_URL is not configured")
     import psycopg
     from psycopg import sql
@@ -413,6 +521,27 @@ def test_postgres_create_and_read_only_attach(
         catalog_text = router.catalog_path.read_text(encoding="utf-8")
         assert connection_env in catalog_text
         assert dsn not in catalog_text
+
+        with psycopg.connect(dsn, autocommit=True) as connection:
+            connection.execute(
+                sql.SQL("CREATE TABLE {}.keep_me (id INTEGER PRIMARY KEY)").format(
+                    sql.Identifier(attached_schema)
+                )
+            )
+        state = router.lifecycle_status("attached")["state"]
+        deleted = router.lifecycle(
+            action="delete", memory="attached", expected_state=state
+        )
+        assert deleted["catalog_entry_removed"] is True
+        with psycopg.connect(dsn) as connection:
+            kept = connection.execute(
+                "SELECT to_regclass(%s)", (f"{attached_schema}.keep_me",)
+            ).fetchone()
+            removed = connection.execute(
+                "SELECT to_regclass(%s)", (f"{attached_schema}.node",)
+            ).fetchone()
+        assert kept is not None and kept[0] is not None
+        assert removed is not None and removed[0] is None
     finally:
         with psycopg.connect(dsn, autocommit=True) as connection:
             for schema in (created_schema, attached_schema):
@@ -516,7 +645,7 @@ async def test_mcp_configures_and_routes_named_memory(tmp_path: Path) -> None:
             "runtime_fingerprint"
         )
         assert default_runtime_fingerprint == sha256_json(default_capability_document)
-        assert default_capability_document["capabilities_document_version"] == "4"
+        assert default_capability_document["capabilities_document_version"] == "5"
         assert set(default_capability_document["discovery"].values()) <= resource_uris
         assert all(
             operation.get("description")
@@ -587,7 +716,7 @@ async def test_mcp_configures_and_routes_named_memory(tmp_path: Path) -> None:
             ],
             separators=(",", ":"),
         )
-        assert len(tools) == 11
+        assert len(tools) == 12
         assert len(serialized_tools) <= 25_000
         callable_capabilities = {
             name: operation
@@ -692,6 +821,22 @@ async def test_mcp_configures_and_routes_named_memory(tmp_path: Path) -> None:
         assert invalid_error["details"]["spec"] == (
             "memory://operations/namespace_declaration"
         )
+
+        lifecycle_status = await client.call_tool(
+            "memory_lifecycle_manage", {"action": "status", "memory": "research"}
+        )
+        lifecycle_state = _tool_json(lifecycle_status)["state"]
+        deleted = await client.call_tool(
+            "memory_lifecycle_manage",
+            {
+                "action": "delete",
+                "memory": "research",
+                "expected_state": lifecycle_state,
+            },
+        )
+        deleted_document = _tool_json(deleted)
+        assert deleted_document["catalog_entry_removed"] is True
+        assert deleted_document["memory"] == "research"
 
         missing_resource = await client.read_resource(
             "memory://memories/missing/capabilities/current"

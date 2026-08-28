@@ -183,6 +183,25 @@ def test_sqlite_to_postgresql_transfer_preserves_canonical_behavior(
     assert canonical_json(source.memory_store.transfer_records()) == before
 
 
+def test_lifecycle_wipe_is_backend_conformant(
+    memory_store: MemoryStore, tmp_path: Path
+) -> None:
+    application = _application(memory_store, tmp_path / "lifecycle-evidence")
+    _populate(application, tmp_path / "lifecycle")
+    state = memory_store.lifecycle_state()
+
+    removed = memory_store.wipe(state)
+
+    assert removed == state
+    empty = memory_store.lifecycle_state()
+    assert empty["nodes"] == 0
+    assert empty["attributes"] == 0
+    assert empty["active_relations"] == 0
+    assert empty["evidence_objects"] == 0
+    assert empty["fingerprint"] != state["fingerprint"]
+    assert memory_store.integrity()["ok"] is True
+
+
 def test_postgresql_exact_vector_engine_matches_sqlite(
     postgres_store: MemoryStore, tmp_path: Path
 ) -> None:

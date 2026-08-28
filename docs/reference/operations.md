@@ -31,6 +31,36 @@ Verification records append-only outcomes for the object and its fragments.
 Audit also reports provider objects that have no canonical catalog record as
 orphans. Audit never deletes an orphan or repairs corrupted evidence.
 
+## Memory wipe and deletion
+
+Inspect the exact guard counts immediately before a destructive action:
+
+```console
+uv run memory memories status default
+```
+
+Pass all four returned counts and the fingerprint to `wipe`. Wipe removes
+canonical content and
+evidence while preserving the selected target and its configuration:
+
+```console
+uv run memory memories wipe default \
+  --expected-nodes 12 \
+  --expected-attributes 84 \
+  --expected-active-relations 11 \
+  --expected-evidence-objects 3 \
+  --expected-fingerprint <sha256-from-status>
+```
+
+The fingerprint covers all canonical rows, including metrics, declarations,
+embedding profiles, and inactive relations. `delete` accepts the same guard,
+removes the named target's storage, and removes
+its catalog entry. It rejects `default`; wipe default instead. A changed count
+aborts with `memory_state_changed`, so inspect again rather than weakening the
+guard. Both operations remove raw evidence and are intentionally destructive.
+For PostgreSQL, delete removes Analytical Memory's tables but preserves the
+schema container and any unrelated objects in it.
+
 ## Snapshot backup and restore
 
 Create a private restore snapshot at a new path:

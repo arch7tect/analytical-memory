@@ -90,6 +90,42 @@ class ConfigureMemoryRequest(APIModel):
     )
 
 
+class ExpectedMemoryState(APIModel):
+    nodes: int = Field(ge=0, description="Current number of Nodes in the memory.")
+    attributes: int = Field(
+        ge=0, description="Current number of Node attributes in the memory."
+    )
+    active_relations: int = Field(
+        ge=0, description="Current number of active relations in the memory."
+    )
+    evidence_objects: int = Field(
+        ge=0, description="Current number of catalogued evidence objects."
+    )
+    fingerprint: str = Field(
+        pattern=r"^[0-9a-f]{64}$",
+        description="SHA-256 of all canonical rows.",
+    )
+
+
+class MemoryLifecycleRequest(APIModel):
+    action: Literal["status", "wipe", "delete"] = Field(
+        description=(
+            "status reads the guard counts; wipe resets the selected memory; delete "
+            "also removes a named target and catalog entry."
+        )
+    )
+    memory: str = Field(
+        description="Explicit configured memory name, including default when intended."
+    )
+    expected_state: ExpectedMemoryState | None = Field(
+        default=None,
+        description=(
+            "Exact counts from action=status; required for wipe/delete and omitted "
+            "for status. Any mismatch aborts."
+        )
+    )
+
+
 class DeclareEntityRequest(APIModel):
     entity_type: str = Field(description="Namespaced entity type to declare.")
     contract_fingerprint: ContractFingerprint
@@ -321,6 +357,34 @@ class MemoryConfigureResponse(APIModel):
     )
 
 
+class RemovedMemoryState(ExpectedMemoryState):
+    evidence_bytes: int = Field(
+        ge=0, description="Bytes removed from the file-backed evidence store."
+    )
+    evidence_files: int = Field(
+        ge=0, description="Regular files removed from the evidence store."
+    )
+
+
+class MemoryLifecycleResponse(APIModel):
+    action: Literal["status", "wipe", "delete"] = Field(
+        description="Lifecycle action that completed."
+    )
+    catalog_entry_removed: bool = Field(
+        description="Whether a named memory entry was removed from the catalog."
+    )
+    memory: str = Field(description="Memory that handled the lifecycle action.")
+    removed: RemovedMemoryState | None = Field(
+        description="Removed counts for wipe/delete; null for status."
+    )
+    state: ExpectedMemoryState | None = Field(
+        description="Current guard counts for status; null for wipe/delete."
+    )
+    target: MemoryTargetResponse = Field(
+        description="Non-secret coordinates of the affected target."
+    )
+
+
 class MemoryNodeDeleteResponse(NodeDeleteResponse):
     memory: str = Field(description="Memory that handled the deletion.")
 
@@ -447,6 +511,17 @@ OPERATION_DEFINITIONS = (
             "database": "/absolute/path/memory.db",
             "evidence_root": "/absolute/path/evidence",
         },
+    ),
+    _definition(
+        "memory_lifecycle",
+        "memory_lifecycle_manage",
+        None,
+        MemoryLifecycleRequest,
+        MemoryLifecycleResponse,
+        mutating=True,
+        destructive=True,
+        idempotent=False,
+        example={"action": "status", "memory": "default"},
     ),
     _definition(
         "entity_declaration",
@@ -730,7 +805,7 @@ def operations_index_document() -> dict[str, Any]:
         "operations": [
             definition.index_document() for definition in OPERATION_DEFINITIONS
         ],
-        "operations_version": "1",
+        "operations_version": "2",
     }
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import tempfile
 import time
 from collections import OrderedDict
@@ -18,7 +19,9 @@ from analytical_memory.canonical import canonical_json, sha256_json, strict_json
 from analytical_memory.configuration import build_application
 from analytical_memory.errors import (
     MemoryCatalogError,
+    MemoryLifecycleError,
     MemoryNotFoundError,
+    MemoryStateChangedError,
     MemoryUnavailableError,
 )
 from analytical_memory.mcp_operations import MCP_ROUTES
@@ -61,6 +64,9 @@ _OPERATION_DESCRIPTIONS = {
     ),
     "jsonl_import": "Stream and atomically patch/upsert one JSONL entity dataset.",
     "memory_configure": "Create or attach one named memory target.",
+    "memory_lifecycle": (
+        "Wipe a selected memory or delete a named memory with an exact state guard."
+    ),
     "namespace_declaration": "Declare a human-readable namespace description.",
     "ontology": "Discover current entity, field, relation, and description shape.",
     "query_current_metric": "Select the deterministic metric for an exact scope.",
@@ -83,11 +89,16 @@ def contextual_capabilities(
 ) -> dict[str, Any]:
     result = application.capabilities()
     result.pop("runtime_fingerprint")
-    result["capabilities_document_version"] = "4"
+    result["capabilities_document_version"] = "5"
     result["memory"] = memory
     result["operations"] = {
         **result["operations"],
         "memory_configure": {
+            "enabled": True,
+            "interfaces": ["cli", "mcp"],
+            "mutating": True,
+        },
+        "memory_lifecycle": {
             "enabled": True,
             "interfaces": ["cli", "mcp"],
             "mutating": True,
@@ -242,6 +253,7 @@ class MemoryRouter:
 
     def _read_entries(self) -> dict[str, MemoryTarget]:
         if not self.catalog_path.exists():
+            self._validate_disjoint({})
             return {}
         if not self.catalog_path.is_file() or self.catalog_path.is_symlink():
             raise MemoryCatalogError("memory catalog must be a regular file")
@@ -583,6 +595,179 @@ class MemoryRouter:
                 ) from exc
             self._write_entries(candidate)
         return {"action": action, "memory": name, "target": target.document()}
+
+    def lifecycle(
+        self,
+        *,
+        action: Literal["wipe", "delete"],
+        memory: str,
+        expected_state: dict[str, int | str],
+    ) -> dict[str, Any]:
+        expected_fields = {
+            "active_relations",
+            "attributes",
+            "evidence_objects",
+            "fingerprint",
+            "nodes",
+        }
+        counts = {
+            key: value
+            for key, value in expected_state.items()
+            if key != "fingerprint"
+        }
+        fingerprint = expected_state.get("fingerprint")
+        if (
+            set(expected_state) != expected_fields
+            or any(
+                not isinstance(value, int) or isinstance(value, bool) or value < 0
+                for value in counts.values()
+            )
+            or not isinstance(fingerprint, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", fingerprint)
+        ):
+            raise MemoryCatalogError(
+                "expected_state must contain non-negative integer counts for "
+                "nodes, attributes, active_relations, and evidence_objects plus "
+                "the exact lowercase SHA-256 fingerprint"
+            )
+        if action not in {"wipe", "delete"}:
+            raise MemoryCatalogError("action must be wipe or delete")
+        if action == "delete" and memory == "default":
+            raise MemoryCatalogError("default memory cannot be deleted; use wipe")
+
+        with self._write_lock():
+            entries = self._read_entries()
+            if memory == "default":
+                target = self._default_target()
+                application = self.default_application
+            else:
+                named_target = entries.get(memory)
+                if named_target is None:
+                    raise MemoryNotFoundError(
+                        f"memory {memory!r} is not configured",
+                        details={"memory": memory},
+                    )
+                target = named_target
+                application = self._application(target)
+                issues = self._validate_application(application)
+                if issues:
+                    raise MemoryUnavailableError(
+                        f"memory {memory!r} is unavailable",
+                        details={"memory": memory, "reason": "; ".join(issues)},
+                    )
+
+            actual_state = application.memory_store.lifecycle_state()
+            if actual_state != expected_state:
+                raise MemoryStateChangedError(
+                    "memory state changed; inspect it and retry with current counts",
+                    details={
+                        "actual_state": actual_state,
+                        "expected_state": expected_state,
+                        "memory": memory,
+                    },
+                )
+
+            self._require_wipeable_evidence_root(target)
+            try:
+                if action == "delete":
+                    removed = application.memory_store.destroy(expected_state)
+                else:
+                    removed = application.memory_store.wipe(expected_state)
+            except MemoryStateChangedError as exc:
+                exc.details.setdefault("memory", memory)
+                raise
+            except MemoryLifecycleError:
+                raise
+            except Exception as exc:
+                raise MemoryLifecycleError(
+                    "memory store lifecycle operation failed",
+                    details={"action": action, "memory": memory},
+                ) from exc
+            self._cache.clear()
+            try:
+                removed.update(application.evidence_store.wipe())
+            except Exception as exc:
+                raise MemoryLifecycleError(
+                    "canonical state was wiped but evidence removal failed",
+                    details={
+                        "canonical_removed": True,
+                        "catalog_entry_removed": False,
+                        "evidence_removed": False,
+                        "memory": memory,
+                    },
+                ) from exc
+            catalog_entry_removed = False
+            if action == "delete":
+                try:
+                    self._remove_target_storage(target)
+                    del entries[memory]
+                    self._write_entries(entries)
+                    catalog_entry_removed = True
+                except Exception as exc:
+                    raise MemoryLifecycleError(
+                        "memory content was wiped but named target removal failed",
+                        details={
+                            "canonical_removed": True,
+                            "catalog_entry_removed": False,
+                            "evidence_removed": True,
+                            "memory": memory,
+                        },
+                    ) from exc
+        return {
+            "action": action,
+            "catalog_entry_removed": catalog_entry_removed,
+            "memory": memory,
+            "removed": removed,
+            "target": target.document(),
+        }
+
+    def lifecycle_status(self, memory: str) -> dict[str, Any]:
+        entries = self._read_entries()
+        if memory == "default":
+            selected = "default"
+            target = self._default_target()
+            application = self.default_application
+        else:
+            selected = memory
+            named_target = entries.get(memory)
+            if named_target is None:
+                raise MemoryNotFoundError(
+                    f"memory {memory!r} is not configured",
+                    details={"memory": memory},
+                )
+            target = named_target
+            application = self._application(target)
+            issues = self._validate_application(application)
+            if issues:
+                raise MemoryUnavailableError(
+                    f"memory {memory!r} is unavailable",
+                    details={"memory": memory, "reason": "; ".join(issues)},
+                )
+        try:
+            state = application.memory_store.lifecycle_state()
+        except Exception as exc:
+            raise MemoryUnavailableError(
+                f"memory {memory!r} lifecycle state is unavailable",
+                details={"memory": memory, "reason": type(exc).__name__},
+            ) from exc
+        return {"memory": selected, "state": state, "target": target.document()}
+
+    @staticmethod
+    def _require_wipeable_evidence_root(target: MemoryTarget) -> None:
+        if target.evidence_root.is_symlink() or not target.evidence_root.is_dir():
+            raise MemoryCatalogError("evidence root must be a regular directory")
+
+    @staticmethod
+    def _remove_target_storage(target: MemoryTarget) -> None:
+        if target.backend == "sqlite":
+            assert target.database is not None
+            target.database.unlink(missing_ok=True)
+            for suffix in ("-shm", "-wal"):
+                Path(f"{target.database}{suffix}").unlink(missing_ok=True)
+        if target.evidence_root.exists():
+            if target.evidence_root.is_symlink() or not target.evidence_root.is_dir():
+                raise MemoryCatalogError("evidence root must be a regular directory")
+            shutil.rmtree(target.evidence_root)
 
     @staticmethod
     def _prepare_postgres_create(application: MemoryApplication) -> bool:

@@ -48,8 +48,10 @@ from analytical_memory.errors import (
 )
 from analytical_memory.mcp_operations import (
     OPERATIONS,
+    ExpectedMemoryState,
     ManagerResponse,
     MemoryConfigureResponse,
+    MemoryLifecycleResponse,
     MemoryNodeDeleteResponse,
     operation_document,
     operations_index_document,
@@ -776,6 +778,78 @@ def create_mcp_server(
             )
         except (MemoryErrorBase, OSError, ValueError) as exc:
             raise _tool_error(exc, name) from exc
+
+    @server.tool(
+        name="memory_lifecycle_manage",
+        description=(
+            "Inspect lifecycle guard counts, wipe one explicitly named memory, or "
+            "delete a named target. Wipe/delete require the exact status counts; "
+            "default can be wiped but cannot be deleted."
+        ),
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=True,
+            idempotent_hint=False,
+            open_world_hint=False,
+        ),
+        structured_output=True,
+    )
+    def manage_lifecycle(
+        action: Annotated[
+            Literal["status", "wipe", "delete"],
+            Field(
+                description=(
+                    "status returns guard counts; wipe resets storage and evidence; "
+                    "delete also removes a named target and catalog entry."
+                )
+            ),
+        ],
+        memory: Annotated[
+            str,
+            Field(
+                description=(
+                    "Explicit configured memory name. Pass 'default' explicitly when "
+                    "wiping default; delete default is forbidden."
+                )
+            ),
+        ],
+        expected_state: Annotated[
+            ExpectedMemoryState | None,
+            Field(
+                description=(
+                    "State from action=status; required for wipe/delete and omitted "
+                    "for status."
+                )
+            ),
+        ] = None,
+    ) -> MemoryLifecycleResponse:
+        try:
+            if action == "status":
+                if expected_state is not None:
+                    raise ValueError("expected_state must be omitted for status")
+                status = memory_router.lifecycle_status(memory)
+                return MemoryLifecycleResponse.model_validate(
+                    {
+                        "action": "status",
+                        "catalog_entry_removed": False,
+                        "memory": status["memory"],
+                        "removed": None,
+                        "state": status["state"],
+                        "target": status["target"],
+                    }
+                )
+            if expected_state is None:
+                raise ValueError("expected_state is required for wipe and delete")
+            result = memory_router.lifecycle(
+                action=action,
+                memory=memory,
+                expected_state=expected_state.model_dump(mode="python"),
+            )
+            return MemoryLifecycleResponse.model_validate(
+                {**result, "state": None}
+            )
+        except (MemoryErrorBase, OSError, ValueError) as exc:
+            raise _tool_error(exc, memory) from exc
 
     @_internal_handler(
         name="memory_ontology_declare_entity",

@@ -40,6 +40,9 @@ class SqliteMemoryStore(SqlMemoryStore):
         connection.execute("PRAGMA busy_timeout = 5000")
         return connection
 
+    def _lock_for_lifecycle(self, connection: sqlite3.Connection) -> None:
+        connection.execute("BEGIN IMMEDIATE")
+
     def initialize(self) -> None:
         self.database.parent.mkdir(parents=True, exist_ok=True)
         connection = self._connect(require_initialized=False)

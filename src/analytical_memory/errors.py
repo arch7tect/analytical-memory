@@ -111,6 +111,15 @@ class MemoryUnavailableError(MemoryErrorBase):
     code = "memory_unavailable"
 
 
+class MemoryStateChangedError(MemoryErrorBase):
+    code = "memory_state_changed"
+    retryable = True
+
+
+class MemoryLifecycleError(MemoryErrorBase):
+    code = "memory_lifecycle"
+
+
 class TransferError(MemoryErrorBase):
     code = "transfer_error"
 

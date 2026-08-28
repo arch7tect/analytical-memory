@@ -58,6 +58,16 @@ def _parser() -> argparse.ArgumentParser:
     memories = subcommands.add_parser("memories")
     memories_commands = memories.add_subparsers(dest="memories_command", required=True)
     memories_commands.add_parser("list")
+    lifecycle_status = memories_commands.add_parser("status")
+    lifecycle_status.add_argument("name")
+    for lifecycle_action in ("wipe", "delete"):
+        lifecycle = memories_commands.add_parser(lifecycle_action)
+        lifecycle.add_argument("name")
+        lifecycle.add_argument("--expected-nodes", type=int, required=True)
+        lifecycle.add_argument("--expected-attributes", type=int, required=True)
+        lifecycle.add_argument("--expected-active-relations", type=int, required=True)
+        lifecycle.add_argument("--expected-evidence-objects", type=int, required=True)
+        lifecycle.add_argument("--expected-fingerprint", required=True)
     configure = memories_commands.add_parser("configure")
     configure.add_argument("action", choices=("create", "attach"))
     configure.add_argument("name")
@@ -294,6 +304,20 @@ def _execute(arguments: argparse.Namespace) -> dict[str, Any]:
         router = MemoryRouter(default, arguments.catalog)
         if arguments.memories_command == "list":
             return router.catalog()
+        if arguments.memories_command == "status":
+            return router.lifecycle_status(arguments.name)
+        if arguments.memories_command in {"wipe", "delete"}:
+            return router.lifecycle(
+                action=arguments.memories_command,
+                memory=arguments.name,
+                expected_state={
+                    "active_relations": arguments.expected_active_relations,
+                    "attributes": arguments.expected_attributes,
+                    "evidence_objects": arguments.expected_evidence_objects,
+                    "fingerprint": arguments.expected_fingerprint,
+                    "nodes": arguments.expected_nodes,
+                },
+            )
         return router.configure(
             action=arguments.action,
             name=arguments.name,
@@ -521,7 +545,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         memory = (
             arguments.name
             if arguments.command == "memories"
-            and arguments.memories_command == "configure"
+            and arguments.memories_command != "list"
             else arguments.memory or "default"
         )
         if isinstance(exc, MemoryErrorBase):

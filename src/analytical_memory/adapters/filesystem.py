@@ -199,3 +199,18 @@ class FileEvidenceStore(EvidenceStore):
                     if len(digests) > limit:
                         return digests[:limit], True
         return digests, False
+
+    def wipe(self) -> dict[str, int]:
+        if self.root.is_symlink():
+            raise ValueError("evidence root must not be a symlink")
+        files = [] if not self.root.is_dir() else list(self.root.rglob("*"))
+        regular_files = [
+            path for path in files if path.is_file() and not path.is_symlink()
+        ]
+        byte_size = sum(path.stat().st_size for path in regular_files)
+        if self.root.exists():
+            if not self.root.is_dir():
+                raise ValueError("evidence root must be a directory")
+            shutil.rmtree(self.root)
+        self.initialize()
+        return {"evidence_bytes": byte_size, "evidence_files": len(regular_files)}

@@ -20,6 +20,10 @@ Use one linear pass for each request.
    - For a query, read `memory://schema/query-ir/current`, build one Query IR
      document from the current ontology, and use `memory_query_manage` action
      `execute`.
+   - Only when the user explicitly asks to wipe or delete a memory, call
+     `memory_lifecycle_manage` with action `status`, retain its exact state, then
+     pass that state unchanged to action `wipe` or `delete`. Never delete
+     `default`; wipe it instead.
 4. After an import, join, or ontology declaration, read the selected memory's
    current ontology once more and summarize the resulting queryable shape.
 

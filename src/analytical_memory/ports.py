@@ -85,6 +85,10 @@ class EvidenceStore(ABC):
     def list_digests(self, limit: int) -> tuple[list[str], bool]:
         raise NotImplementedError
 
+    @abstractmethod
+    def wipe(self) -> dict[str, int]:
+        raise NotImplementedError
+
 
 class MemoryStore(ABC):
     @abstractmethod
@@ -150,6 +154,18 @@ class MemoryStore(ABC):
 
     @abstractmethod
     def delete_node(self, node_id: str) -> dict[str, int]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def lifecycle_state(self) -> dict[str, int | str]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def wipe(self, expected_state: dict[str, int | str]) -> dict[str, int | str]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def destroy(self, expected_state: dict[str, int | str]) -> dict[str, int | str]:
         raise NotImplementedError
 
     @abstractmethod

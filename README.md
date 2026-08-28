@@ -87,6 +87,8 @@ analyze, and query without direct database or source-code access. See the
 Every data tool accepts an optional `memory` name. Omitting it selects the
 backward-compatible `default` memory. `memory://catalog` lists configured names;
 `memory_configure` creates a new store or attaches an already compatible one.
+`memory_lifecycle_manage` reports guarded deletion counts, wipes a selected
+memory, or deletes a named memory.
 
 ## Plugins
 

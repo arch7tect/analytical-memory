@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from abc import abstractmethod
@@ -35,6 +36,8 @@ from analytical_memory.errors import (
     BatchValidationError,
     ImportValidationError,
     JoinConflictError,
+    MemoryLifecycleError,
+    MemoryStateChangedError,
     OntologyConflictError,
     QueryValidationError,
     RecordNotFoundError,
@@ -73,6 +76,30 @@ SNAPSHOT_TABLES = (
     "evidence_retirement",
 )
 SNAPSHOT_ORDER = {"observed_field": "entity_type, field_name"}
+
+LIFECYCLE_DELETE_TABLES = (
+    "embedding_record",
+    "embedding_profile",
+    "search_document",
+    "ontology_declaration",
+    "observed_field",
+    "namespace_declaration",
+    "entity_declaration",
+    "metric",
+    "relation",
+    "node_attribute",
+    "node",
+    "evidence_retirement",
+    "evidence_verification",
+    "evidence_location",
+    "evidence_fragment",
+    "evidence_derivation",
+    "evidence_acquisition",
+    "analytical_run",
+    "ingestion_batch",
+    "evidence_object",
+    "source",
+)
 
 
 def _now() -> str:
@@ -154,6 +181,10 @@ class SqlMemoryStore(MemoryStore):
     def _connect(self, *, require_initialized: bool = True) -> Any:
         raise NotImplementedError
 
+    @abstractmethod
+    def _lock_for_lifecycle(self, connection: Any) -> None:
+        raise NotImplementedError
+
     @contextmanager
     def _read_connection(self) -> Iterator[Any]:
         connection = self._connect()
@@ -174,6 +205,77 @@ class SqlMemoryStore(MemoryStore):
             ) from exc
         finally:
             connection.close()
+
+    @staticmethod
+    def _lifecycle_state(connection: Any) -> dict[str, int | str]:
+        hasher = hashlib.sha256()
+        for table in ("search_document_fts", *LIFECYCLE_DELETE_TABLES):
+            hasher.update(table.encode("utf-8"))
+            for row in connection.execute(
+                f"SELECT * FROM {table} ORDER BY 1, 2"
+            ).fetchall():
+                document = {
+                    key: (
+                        {"hex": bytes(value).hex()}
+                        if isinstance(value, (bytes, bytearray, memoryview))
+                        else value
+                    )
+                    for key, value in dict(row).items()
+                }
+                hasher.update(canonical_json(document).encode("utf-8"))
+        return {
+            "active_relations": int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM relation WHERE active = 1"
+                ).fetchone()[0]
+            ),
+            "attributes": int(
+                connection.execute("SELECT COUNT(*) FROM node_attribute").fetchone()[0]
+            ),
+            "evidence_objects": int(
+                connection.execute("SELECT COUNT(*) FROM evidence_object").fetchone()[0]
+            ),
+            "fingerprint": hasher.hexdigest(),
+            "nodes": int(connection.execute("SELECT COUNT(*) FROM node").fetchone()[0]),
+        }
+
+    def lifecycle_state(self) -> dict[str, int | str]:
+        with self._read_connection() as connection:
+            return self._lifecycle_state(connection)
+
+    def _lifecycle_mutation(
+        self, expected_state: dict[str, int | str], *, destroy: bool
+    ) -> dict[str, int | str]:
+        try:
+            with self._write_connection() as connection:
+                self._lock_for_lifecycle(connection)
+                state = self._lifecycle_state(connection)
+                if state != expected_state:
+                    raise MemoryStateChangedError(
+                        "memory state changed; inspect and retry with current counts",
+                        details={
+                            "actual_state": state,
+                            "expected_state": expected_state,
+                        },
+                    )
+                connection.execute("DELETE FROM search_document_fts")
+                for table in LIFECYCLE_DELETE_TABLES:
+                    connection.execute(f"DELETE FROM {table}")
+                if destroy:
+                    connection.execute("DROP TABLE search_document_fts")
+                    for table in LIFECYCLE_DELETE_TABLES:
+                        connection.execute(f"DROP TABLE {table}")
+                    connection.execute("DROP TABLE schema_migration")
+        except BatchValidationError as exc:
+            action = "deletion" if destroy else "wipe"
+            raise MemoryLifecycleError(f"memory store {action} failed") from exc
+        return state
+
+    def wipe(self, expected_state: dict[str, int | str]) -> dict[str, int | str]:
+        return self._lifecycle_mutation(expected_state, destroy=False)
+
+    def destroy(self, expected_state: dict[str, int | str]) -> dict[str, int | str]:
+        return self._lifecycle_mutation(expected_state, destroy=True)
 
     @staticmethod
     def _upsert_provenance_entities(

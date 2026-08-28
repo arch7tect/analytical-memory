@@ -12,6 +12,7 @@ from psycopg.rows import dict_row
 
 from analytical_memory.adapters.sql_dialect import PostgresDialect, SqlDialect
 from analytical_memory.adapters.sql_store import (
+    LIFECYCLE_DELETE_TABLES,
     SNAPSHOT_TABLES,
     SqlMemoryStore,
     _sort_values,
@@ -128,6 +129,10 @@ class PostgresMemoryStore(SqlMemoryStore):
                 connection.close()
                 raise
         return wrapped
+
+    def _lock_for_lifecycle(self, connection: PostgresConnection) -> None:
+        tables = ", ".join(("search_document_fts", *LIFECYCLE_DELETE_TABLES))
+        connection.execute(f"LOCK TABLE {tables} IN ACCESS EXCLUSIVE MODE")
 
     def initialize(self) -> None:
         connection = self._raw_connect()

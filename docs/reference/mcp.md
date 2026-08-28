@@ -34,7 +34,7 @@ The existing environment-selected store is always named `default`. It is not
 written to the catalog and remains selected when a data tool omits `memory`.
 An explicit unknown or unavailable name fails and never falls back to default.
 
-`memory_configure` is the single lifecycle tool in v1:
+`memory_configure` creates or attaches named targets:
 
 - `create` accepts a new or empty target and initializes it;
 - `attach` accepts an existing initialized target and performs read-only
@@ -63,6 +63,16 @@ uv run memory memories list
 uv run memory --memory research ontology describe
 ```
 
+`memory_lifecycle_manage` has three actions. `status` requires an explicit
+memory name and returns exact `nodes`, `attributes`, `active_relations`, and
+`evidence_objects` counts plus a fingerprint of all canonical rows. `wipe` and
+`delete` require that returned object as
+`expected_state`; any mismatch aborts with `memory_state_changed`. Wipe resets
+canonical storage and raw evidence while preserving target configuration.
+Memory-local declarations and embedding profiles are reset. Delete also
+removes a named target's storage and catalog entry. Default may be wiped but
+cannot be deleted.
+
 ## Discovery resources
 
 | URI | Contents |
@@ -89,6 +99,7 @@ queryable shape or its descriptions change, but not when only row counts change.
 | Tool | Actions | Behavior |
 | --- | --- | --- |
 | `memory_configure` | `create`, `attach` | Typed named-memory lifecycle |
+| `memory_lifecycle_manage` | `status`, `wipe`, `delete` | Guarded full-memory lifecycle |
 | `memory_ontology_manage` | `declare_entity`, `declare_namespace` | Optional descriptions and validation metadata |
 | `memory_ingest_manage` | `jsonl_import`, `analytical_attribute`, `analytical_metric` | Atomic source and analysis ingestion |
 | `memory_relation_manage` | `materialize`, `deactivate` | Relation creation and explicit correction |

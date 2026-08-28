@@ -2,6 +2,18 @@
 
 All notable changes to Analytical Memory are documented here.
 
+## 0.5.0 - 2026-08-28
+
+- Added one explicit lifecycle surface for inspecting destructive guard counts,
+  wiping default or named memories, and deleting named memories.
+- Required exact node, attribute, active-relation, and evidence-object counts so
+  stale destructive requests fail closed, plus a full canonical-row fingerprint
+  rechecked under a backend write lock.
+- Removed canonical data and raw evidence on wipe, and removed backing storage
+  plus the catalog entry on named-memory deletion.
+- Added matching CLI commands, MCP discovery contracts, agent guidance, and
+  SQLite regression coverage.
+
 ## 0.4.0 - 2026-08-28
 
 - Expanded array-valued source join fields into their Cartesian product when
