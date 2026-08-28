@@ -611,9 +611,7 @@ class MemoryRouter:
             "nodes",
         }
         counts = {
-            key: value
-            for key, value in expected_state.items()
-            if key != "fingerprint"
+            key: value for key, value in expected_state.items() if key != "fingerprint"
         }
         fingerprint = expected_state.get("fingerprint")
         if (

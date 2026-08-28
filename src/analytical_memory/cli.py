@@ -544,8 +544,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (MemoryErrorBase, ValueError, OSError) as exc:
         memory = (
             arguments.name
-            if arguments.command == "memories"
-            and arguments.memories_command != "list"
+            if arguments.command == "memories" and arguments.memories_command != "list"
             else arguments.memory or "default"
         )
         if isinstance(exc, MemoryErrorBase):

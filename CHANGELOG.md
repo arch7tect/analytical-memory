@@ -2,6 +2,11 @@
 
 All notable changes to Analytical Memory are documented here.
 
+## 0.5.1 - 2026-08-28
+
+- Applied the canonical Ruff formatting required by the full CI gate without
+  changing lifecycle behavior.
+
 ## 0.5.0 - 2026-08-28
 
 - Added one explicit lifecycle surface for inspecting destructive guard counts,

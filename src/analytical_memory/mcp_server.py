@@ -845,9 +845,7 @@ def create_mcp_server(
                 memory=memory,
                 expected_state=expected_state.model_dump(mode="python"),
             )
-            return MemoryLifecycleResponse.model_validate(
-                {**result, "state": None}
-            )
+            return MemoryLifecycleResponse.model_validate({**result, "state": None})
         except (MemoryErrorBase, OSError, ValueError) as exc:
             raise _tool_error(exc, memory) from exc
 

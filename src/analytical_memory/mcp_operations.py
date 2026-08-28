@@ -122,7 +122,7 @@ class MemoryLifecycleRequest(APIModel):
         description=(
             "Exact counts from action=status; required for wipe/delete and omitted "
             "for status. Any mismatch aborts."
-        )
+        ),
     )
 
 
