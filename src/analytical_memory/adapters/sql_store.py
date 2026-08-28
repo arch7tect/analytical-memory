@@ -1655,9 +1655,7 @@ class SqlMemoryStore(MemoryStore):
                             "target_attribute.json_type = ? AND "
                             "target_attribute.value_json = ?)"
                         )
-                        target_parameters.extend(
-                            [field, effective_type, value_json]
-                        )
+                        target_parameters.extend([field, effective_type, value_json])
                     key_targets = connection.execute(
                         "SELECT node.id, node.privacy_class FROM node "
                         "WHERE node.namespace = ? AND node.type = ? AND "
