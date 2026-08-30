@@ -78,14 +78,16 @@ uv run memory init
 uv run memory-mcp
 ```
 
-An MCP client should start with `memory://guide`, `memory://catalog`, and
-`memory://operations`, then read the selected operation specification and
-memory discovery links. Compact manager tools can import, declare, connect,
-analyze, and query without direct database or source-code access. See the
-[MCP reference](docs/reference/mcp.md).
+An MCP client should start with `memory://guide` and `memory://catalog`, choose
+one memory, and follow the selected tool's direct link to a lazy operation
+specification. The full operation index remains available when the operation is
+not known. Compact manager tools can import, declare, connect, analyze, and
+query without direct database or source-code access. See the [MCP
+reference](docs/reference/mcp.md).
 
 Every data tool accepts an optional `memory` name. Omitting it selects the
 backward-compatible `default` memory. `memory://catalog` lists configured names;
+each entry links to a compact per-memory summary, capabilities, and ontology.
 `memory_configure` creates a new store or attaches an already compatible one.
 `memory_lifecycle_manage` reports guarded deletion counts, wipes a selected
 memory, or deletes a named memory.

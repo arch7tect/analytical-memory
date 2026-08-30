@@ -7,13 +7,16 @@ description: Use Analytical Memory through MCP to select a default or named memo
 
 Use one linear pass for each request.
 
-1. Read `memory://guide` and `memory://catalog`. Use the memory requested by the
-   user; otherwise omit `memory` and use `default`. There is no active selection.
-2. Read the selected memory's capabilities and ontology using the URIs in the
-   guide, then read `memory://operations` and `memory://schema/current`. Use its
-   structural fingerprint for writes and the same memory on related calls.
-3. Perform the requested operation:
-   - Read the selected operation's exact `spec` URI before calling its manager.
+1. Read `memory://catalog`. Use the memory requested by the user; otherwise omit
+   `memory` and use `default`. There is no active selection. Read that memory's
+   summary when choosing among memories or assessing available content. An empty
+   default does not imply that named memories are empty.
+2. Use the action-to-spec link in the selected tool description. Read
+   `memory://operations` only when the operation is not known. Read capabilities
+   only for readiness or availability questions, the ontology only when exact
+   entity/field/relation names are needed, and `memory://schema/current` only for
+   writes. Read `memory://guide` only for an unfamiliar workflow.
+3. Read the selected operation's exact spec, then perform the operation:
    - For JSONL ingestion, use `memory_ingest_manage` action `jsonl_import`.
    - To connect existing entity types, use `memory_relation_manage` action
      `materialize`. Never infer joins unless the user asks to connect datasets.

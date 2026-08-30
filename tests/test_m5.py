@@ -332,6 +332,7 @@ def test_declaration_import_patch_replay_and_ontology(m5: tuple[Any, ...]) -> No
     replay = _import(application, source, "calls.Session")
     assert first["created_nodes"] == 2
     assert replay["replayed"] is True
+    assert replay["contract_fingerprint"] == fingerprint
 
     patch = _write(
         source.with_name("session-patch.jsonl"),

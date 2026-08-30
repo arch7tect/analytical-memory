@@ -21,7 +21,10 @@ _OUTPUT_FIELD_DESCRIPTIONS = {
     "configured": "Whether the external provider is configured.",
     "content": "Normalized text represented by the search document.",
     "content_hash": "SHA-256 hash of normalized searchable content.",
-    "contract_fingerprint": "Structural contract fingerprint used by the operation.",
+    "contract_fingerprint": (
+        "Structural write gate whose value equals schema_fingerprint from "
+        "memory://schema/current."
+    ),
     "contract_hash": "Hash of the immutable embedding-profile contract.",
     "count": "Aggregate row count for a count query; absent for row queries.",
     "coverage": "Completeness or population details for the containing result.",
@@ -60,7 +63,10 @@ _OUTPUT_FIELD_DESCRIPTIONS = {
     "fragments": "Per-fragment evidence verification results.",
     "from": "Declared source entity type for the directed relation.",
     "id": "Canonical identifier of the containing object.",
-    "idempotency_key": "Caller-supplied key identifying the logical write operation.",
+    "idempotency_key": (
+        "Stable key identifying the logical write operation; its source is "
+        "operation-specific."
+    ),
     "inactive_edges": "Number of inactive relation edges in this scope.",
     "indexed_count": "Number of eligible current facts present in the index.",
     "invalidated": "Whether this immutable metric observation was invalidated.",

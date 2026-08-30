@@ -403,6 +403,37 @@ class MemoryRouter:
             "version": 1,
         }
 
+    def agent_catalog(self) -> dict[str, Any]:
+        catalog = self.catalog()
+        memories = {}
+        for name, target in catalog["memories"].items():
+            capabilities = (
+                "memory://capabilities/current"
+                if name == "default"
+                else f"memory://memories/{name}/capabilities/current"
+            )
+            ontology = (
+                "memory://schema/ontology/current"
+                if name == "default"
+                else f"memory://memories/{name}/schema/ontology/current"
+            )
+            memories[name] = {
+                **target,
+                "capabilities": capabilities,
+                "content": "unknown_until_summary",
+                "ontology": ontology,
+                "summary": f"memory://memories/{name}/summary",
+            }
+        return {
+            **catalog,
+            "agent_catalog_version": "1",
+            "memories": memories,
+            "selection_note": (
+                "An empty default memory does not imply that named memories are empty. "
+                "Read a memory summary before making a content claim."
+            ),
+        }
+
     def _application(self, target: MemoryTarget) -> MemoryApplication:
         if target.backend == "sqlite":
             return build_application(

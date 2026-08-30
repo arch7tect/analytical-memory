@@ -972,6 +972,7 @@ memory://capabilities/current
 memory://schema/queries
 memory://operations
 memory://operations/{operation}
+memory://memories/{memory}/summary
 ```
 
 `memory://schema/current` remains the stable structural contract and
@@ -988,6 +989,12 @@ operation resources, while configuration and destructive Node deletion remain
 isolated tools. The MCP adapter calls the same application services as the
 Python API and CLI. No tool infers or silently applies a relation.
 
+Tool descriptions link each manager action directly to its exact lazy
+specification. The complete operation index remains a fallback rather than a
+mandatory read on every request. Write payloads keep the compatible
+`contract_fingerprint` field and source its value from the structural resource's
+`schema_fingerprint`.
+
 ### Named memory routing
 
 One process may address multiple independent memories without process-local
@@ -1000,6 +1007,13 @@ contains only backend coordinates: an absolute SQLite database path or a
 PostgreSQL connection-environment name and schema, plus an absolute evidence
 root. Secrets remain in the per-user `.env`. Default is reserved, synthesized
 from existing configuration, and never stored in the catalog.
+
+The persisted catalog contract remains storage-only. Its MCP projection adds
+discovery links without resolving targets. A compact summary resource resolves
+one explicit memory and exposes readiness, current graph counts, and complete
+namespace, entity-type, and relation hints without dropping their names or
+descriptions; catalog-wide discovery never performs an implicit database or
+network fan-out.
 
 One lifecycle operation supports `create` and `attach`. Create requires a new
 or empty target and initializes it. Attach requires an existing target and

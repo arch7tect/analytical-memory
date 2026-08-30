@@ -673,6 +673,8 @@ Status: implemented.
 - route every MCP data tool through an optional memory name without shared
   active-selection state;
 - expose a catalog resource and named capabilities and ontology resources;
+- expose a compact lazy summary for one selected memory without catalog-wide
+  target fan-out;
 - expose a source-code-independent guide, operation descriptions, discovery
   links, and complete tool-input descriptions;
 - expose compact manager/action tools plus lazy, exact operation payload and
@@ -694,7 +696,7 @@ Status: implemented.
 - catalog contents never include PostgreSQL URLs or other credentials.
 - a real stdio client can discover every required input meaning and workflow
   without source-code access; no tool input property has a missing description.
-- serialized `tools/list` remains at or below 25,000 bytes while every callable
+- serialized `tools/list` remains at or below 23,600 bytes while every callable
   operation resolves to one discoverable specification and route.
 
 ## Cross-cutting verification

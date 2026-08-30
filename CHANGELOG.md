@@ -2,6 +2,18 @@
 
 All notable changes to Analytical Memory are documented here.
 
+## 0.5.2 - 2026-08-30
+
+- Reduced the always-visible MCP instruction and tool surface while linking
+  manager actions directly to their lazy operation specifications.
+- Added an additive agent catalog projection and a compact, per-memory summary
+  without changing persisted catalog or physical storage contracts.
+- Clarified operation-specific idempotency, fingerprint mapping, and targeted
+  stale-contract recovery in lazy specifications.
+- Preserved complete high-level discovery names and descriptions through lazy
+  progressive disclosure instead of mechanical truncation.
+- Restored the structural contract fingerprint in replayed JSONL import results.
+
 ## 0.5.1 - 2026-08-28
 
 - Applied the canonical Ruff formatting required by the full CI gate without

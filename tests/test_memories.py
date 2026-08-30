@@ -27,6 +27,10 @@ from analytical_memory.errors import (
     MemoryStateChangedError,
 )
 from analytical_memory.mcp_operations import OPERATION_DEFINITIONS
+from analytical_memory.mcp_server import (
+    create_mcp_server,
+    memory_summary_document,
+)
 from analytical_memory.memories import MemoryRouter
 from analytical_memory.schema_contract import load_schema
 from scripts.plugin_runtime import _configure_environment
@@ -42,6 +46,80 @@ def _router(tmp_path: Path) -> MemoryRouter:
     application = _application(tmp_path / "default.db", tmp_path / "default-evidence")
     application.initialize()
     return MemoryRouter(application, tmp_path / "memories.json")
+
+
+def test_mcp_server_instruction_budget(tmp_path: Path) -> None:
+    router = _router(tmp_path)
+    server = create_mcp_server(router.default_application, router)
+
+    assert server.instructions is not None
+    assert len(server.instructions) <= 120
+
+
+def test_memory_summary_content_hints_are_complete() -> None:
+    class SummaryApplication:
+        @staticmethod
+        def status() -> dict[str, Any]:
+            return {
+                "evidence_store": {"initialized": True, "provider": "test"},
+                "ready": True,
+                "schema_fingerprint": "schema",
+                "storage": {
+                    "backend": "sqlite",
+                    "initialized": True,
+                    "migration_version": 9,
+                },
+            }
+
+        @staticmethod
+        def ontology() -> dict[str, Any]:
+            count = 51
+            document = {
+                "entities": [
+                    {
+                        "description": f"Complete description {index}",
+                        "type": f"example.Type{index:02d}",
+                    }
+                    for index in range(count)
+                ],
+                "namespaces": [
+                    {"description": None, "name": f"example{index:02d}"}
+                    for index in range(count)
+                ],
+                "relations": [
+                    {
+                        "description": "Complete relation description",
+                        "enabled": True,
+                        "from": {"type": "example.Type00"},
+                        "name": "example-related",
+                        "relation": "example.RELATED",
+                        "to": {"type": "example.Type50"},
+                    }
+                ],
+                "statistics": {
+                    "active_relations": 0,
+                    "attributes": 0,
+                    "nodes": 0,
+                },
+            }
+            return {"document": document, "ontology_fingerprint": "ontology"}
+
+    summary = memory_summary_document(SummaryApplication(), "complete")  # type: ignore[arg-type]
+
+    assert len(summary["entity_types"]) == 51
+    assert len(summary["namespaces"]) == 51
+    assert summary["entity_types"][-1]["description"] == "Complete description 50"
+    assert summary["relations"] == [
+        {
+            "description": "Complete relation description",
+            "enabled": True,
+            "from": "example.Type00",
+            "name": "example-related",
+            "relation": "example.RELATED",
+            "to": "example.Type50",
+        }
+    ]
+    assert summary["content_status"] == "ontology_only"
 
 
 def _tool_json(result: Any) -> dict[str, Any]:
@@ -85,6 +163,43 @@ def test_default_is_implicit_and_unknown_never_falls_back(tmp_path: Path) -> Non
     assert set(router.catalog()["memories"]) == {"default"}
     with pytest.raises(MemoryNotFoundError):
         router.resolve("missing")
+
+
+def test_agent_catalog_adds_links_without_opening_named_targets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    router = _router(tmp_path)
+    connection_env = "ANALYTICAL_MEMORY_OFFLINE_POSTGRES_URL"
+    monkeypatch.delenv(connection_env, raising=False)
+    router.catalog_path.write_text(
+        canonical_json(
+            {
+                "memories": {
+                    "offline": {
+                        "backend": "postgresql",
+                        "connection_env": connection_env,
+                        "evidence_root": str(tmp_path / "offline-evidence"),
+                        "schema": "offline",
+                    }
+                },
+                "version": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    stored_projection = router.catalog()
+    agent_projection = router.agent_catalog()
+
+    assert router.catalog() == stored_projection
+    assert agent_projection["memories"]["offline"] == {
+        **stored_projection["memories"]["offline"],
+        "capabilities": "memory://memories/offline/capabilities/current",
+        "content": "unknown_until_summary",
+        "ontology": "memory://memories/offline/schema/ontology/current",
+        "summary": "memory://memories/offline/summary",
+    }
+    assert "named memories" in agent_projection["selection_note"]
 
 
 def test_default_database_cannot_be_inside_evidence_root(tmp_path: Path) -> None:
@@ -578,6 +693,7 @@ async def test_mcp_configures_and_routes_named_memory(tmp_path: Path) -> None:
             "memory://operations/{operation}",
             "memory://schema/ontology/{namespace}",
             "memory://memories/{memory}/capabilities/current",
+            "memory://memories/{memory}/summary",
             "memory://memories/{memory}/schema/ontology/current",
             "memory://memories/{memory}/schema/ontology/{namespace}",
         }
@@ -651,13 +767,22 @@ async def test_mcp_configures_and_routes_named_memory(tmp_path: Path) -> None:
             operation.get("description")
             for operation in default_capability_document["operations"].values()
         )
+        default_summary = await client.read_resource(
+            "memory://memories/default/summary"
+        )
+        assert isinstance(default_summary.contents[0], TextResourceContents)
+        default_summary_document = json.loads(default_summary.contents[0].text)
+        assert default_summary_document["memory"] == "default"
+        assert default_summary_document["ready"] is False
+        assert default_summary_document["content_status"] == "uninitialized"
+        assert default_summary_document["statistics"] is None
         operation_index = await client.read_resource("memory://operations")
         assert isinstance(operation_index.contents[0], TextResourceContents)
         operation_index_document = json.loads(operation_index.contents[0].text)
         serialized_operation_index = json.dumps(
             operation_index_document, separators=(",", ":")
         )
-        assert len(serialized_operation_index) <= 10_000
+        assert len(serialized_operation_index) <= 6_000
         indexed_operations = {
             item["operation"]: item for item in operation_index_document["operations"]
         }
@@ -665,12 +790,18 @@ async def test_mcp_configures_and_routes_named_memory(tmp_path: Path) -> None:
             definition.operation for definition in OPERATION_DEFINITIONS
         }
         tool_by_name = {tool.name: tool for tool in tools}
+        for definition in OPERATION_DEFINITIONS:
+            description = tool_by_name[definition.mcp_tool].description
+            assert description is not None
+            assert definition.spec_uri in description
+        operation_documents: dict[str, dict[str, Any]] = {}
         operation_spec_sizes: list[int] = []
         for definition in OPERATION_DEFINITIONS:
             operation_resource = await client.read_resource(definition.spec_uri)
             assert isinstance(operation_resource.contents[0], TextResourceContents)
             operation_spec_sizes.append(len(operation_resource.contents[0].text))
             operation_document = json.loads(operation_resource.contents[0].text)
+            operation_documents[definition.operation] = operation_document
             assert operation_document["mcp_tool"] == definition.mcp_tool
             example_call = operation_document["example"]["call"]
             if definition.action is None:
@@ -708,6 +839,48 @@ async def test_mcp_configures_and_routes_named_memory(tmp_path: Path) -> None:
                 == []
             )
         assert max(operation_spec_sizes) <= 15_000
+        assert {
+            name: operation_documents[name]["idempotency"]["key_source"]
+            for name in (
+                "jsonl_import",
+                "analytical_attribute_write",
+                "analytical_metric_write",
+                "join_materialize",
+            )
+        } == {
+            "jsonl_import": "server-derived",
+            "analytical_attribute_write": "server-derived",
+            "analytical_metric_write": "server-derived",
+            "join_materialize": "optional-caller",
+        }
+        assert (
+            operation_documents["join_materialize"]["idempotency"]["when_omitted"]
+            == "server-generated-random"
+        )
+        assert "operation-specific" in operation_documents["jsonl_import"][
+            "output_schema"
+        ]["properties"]["idempotency_key"]["description"]
+        for definition in OPERATION_DEFINITIONS:
+            if "memory://schema/current" in definition.preconditions:
+                assert operation_documents[definition.operation]["recovery"] == [
+                    {
+                        "action": "refresh_and_retry_once",
+                        "code": "schema_changed",
+                        "next": "memory://schema/current",
+                    }
+                ]
+                assert "schema_fingerprint" in operation_documents[
+                    definition.operation
+                ]["input_schema"]["properties"]["contract_fingerprint"][
+                    "description"
+                ]
+        assert operation_documents["memory_lifecycle"]["recovery"] == [
+            {
+                "action": "refresh_expected_state",
+                "code": "memory_state_changed",
+                "next": "memory_lifecycle_manage action=status",
+            }
+        ]
 
         serialized_tools = json.dumps(
             [
@@ -716,8 +889,49 @@ async def test_mcp_configures_and_routes_named_memory(tmp_path: Path) -> None:
             ],
             separators=(",", ":"),
         )
+        serialized_resources = json.dumps(
+            [
+                resource.model_dump(mode="json", by_alias=True, exclude_none=False)
+                for resource in resources
+            ],
+            separators=(",", ":"),
+        )
+        serialized_resource_templates = json.dumps(
+            [
+                template.model_dump(mode="json", by_alias=True, exclude_none=False)
+                for template in resource_templates
+            ],
+            separators=(",", ":"),
+        )
+        serialized_tool_sizes = {
+            tool.name: len(
+                json.dumps(
+                    tool.model_dump(mode="json", by_alias=True, exclude_none=False),
+                    separators=(",", ":"),
+                )
+            )
+            for tool in tools
+        }
         assert len(tools) == 12
-        assert len(serialized_tools) <= 25_000
+        assert len(serialized_tools) <= 23_600
+        assert len(serialized_resources) <= 2_500
+        assert len(serialized_resource_templates) <= 2_000
+        assert serialized_tool_sizes["memory_configure"] <= 2_900
+        assert serialized_tool_sizes["memory_lifecycle_manage"] <= 5_700
+        assert serialized_tool_sizes["memory_node_delete"] <= 1_800
+        assert max(
+            size
+            for name, size in serialized_tool_sizes.items()
+            if name
+            not in {
+                "memory_configure",
+                "memory_lifecycle_manage",
+                "memory_node_delete",
+            }
+        ) <= 1_600
+        assert len(guide_resource.contents[0].text) <= 5_100
+        assert len(default_capabilities.contents[0].text) <= 10_000
+        assert len(default_summary.contents[0].text) <= 800
         callable_capabilities = {
             name: operation
             for name, operation in default_capability_document["operations"].items()
@@ -739,6 +953,13 @@ async def test_mcp_configures_and_routes_named_memory(tmp_path: Path) -> None:
             },
         )
         assert _tool_json(configured)["memory"] == "research"
+        catalog_resource = await client.read_resource("memory://catalog")
+        assert isinstance(catalog_resource.contents[0], TextResourceContents)
+        catalog_document = json.loads(catalog_resource.contents[0].text)
+        assert catalog_document["agent_catalog_version"] == "1"
+        assert catalog_document["memories"]["research"]["summary"] == (
+            "memory://memories/research/summary"
+        )
         capabilities = await client.read_resource(
             "memory://memories/research/capabilities/current"
         )
@@ -776,6 +997,13 @@ async def test_mcp_configures_and_routes_named_memory(tmp_path: Path) -> None:
         assert isinstance(refreshed.contents[0], TextResourceContents)
         refreshed_document = json.loads(refreshed.contents[0].text)
         assert refreshed_document["document"]["namespaces"][0]["name"] == "notes"
+        summary = await client.read_resource("memory://memories/research/summary")
+        assert isinstance(summary.contents[0], TextResourceContents)
+        summary_document = json.loads(summary.contents[0].text)
+        assert summary_document["content_status"] == "ontology_only"
+        assert summary_document["namespaces"] == [
+            {"description": "Research notes.", "name": "notes"}
+        ]
         named_namespace = await client.read_resource(
             "memory://memories/research/schema/ontology/notes"
         )
@@ -844,6 +1072,12 @@ async def test_mcp_configures_and_routes_named_memory(tmp_path: Path) -> None:
         assert isinstance(missing_resource.contents[0], TextResourceContents)
         resource_error = json.loads(missing_resource.contents[0].text)
         assert resource_error["code"] == "memory_not_found"
+        missing_summary = await client.read_resource(
+            "memory://memories/missing/summary"
+        )
+        assert isinstance(missing_summary.contents[0], TextResourceContents)
+        summary_error = json.loads(missing_summary.contents[0].text)
+        assert summary_error["code"] == "memory_not_found"
 
         (tmp_path / "memories.json").write_text("{", encoding="utf-8")
         corrupt_catalog = await client.read_resource("memory://catalog")

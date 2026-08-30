@@ -608,7 +608,7 @@
     "additionalProperties": false,
     "properties": {
       "contract_fingerprint": {
-        "description": "Structural contract fingerprint used by the operation.",
+        "description": "Structural write gate whose value equals schema_fingerprint from memory://schema/current.",
         "title": "Contract Fingerprint",
         "type": "string"
       },

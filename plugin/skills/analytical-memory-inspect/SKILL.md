@@ -5,10 +5,17 @@ description: Inspect Analytical Memory through MCP when the user asks what data 
 
 # Inspect Analytical Memory
 
-Read `memory://guide` and `memory://catalog`. Inspect the memory requested by the
-user; otherwise inspect `default`. Read that memory's capabilities and current
-ontology using the guide's URI, plus `memory://schema/current`, once. There is no
-active selection and an unavailable name must not fall back to default.
+Read `memory://catalog`. Inspect the memory requested by the user; otherwise
+inspect `default`. Read its summary first. There is no active selection and an
+unavailable name must not fall back to default. An empty default does not imply
+that named memories are empty.
+
+Read full resources only when the request needs them:
+
+- capabilities for operation availability, provider details, or full limits;
+- ontology for fields, privacy, coverage, or relation declarations;
+- `memory://schema/current` for the structural contract or fingerprint;
+- `memory://guide` for an unfamiliar workflow.
 
 Report only the information relevant to the request:
 

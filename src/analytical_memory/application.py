@@ -346,6 +346,7 @@ class MemoryApplication:
                 )
                 return {
                     **existing.result,
+                    "contract_fingerprint": self.schema.fingerprint,
                     "evidence_availability": evidence_status["availability"],
                     "evidence_verification": evidence_status["verification"],
                     "replayed": True,

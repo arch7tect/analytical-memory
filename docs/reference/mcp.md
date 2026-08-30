@@ -87,6 +87,7 @@ cannot be deleted.
 | `memory://schema/queries` | Convenience query contracts |
 | `memory://capabilities/current` | Backend, limits, operations, and readiness |
 | `memory://catalog` | Default and configured named-memory targets, without secrets |
+| `memory://memories/{memory}/summary` | Compact readiness, graph counts, namespace, entity-type, and relation hints for one memory |
 | `memory://memories/{memory}/capabilities/current` | Capabilities for one memory |
 | `memory://memories/{memory}/schema/ontology/current` | Current ontology for one memory |
 | `memory://memories/{memory}/schema/ontology/{namespace}` | Namespace-filtered ontology for one memory |
@@ -126,6 +127,21 @@ It returns `{action, memory, result}`. Payload validation errors link back to
 the exact specification. Successful results and expected errors echo the
 resolved or requested memory name.
 
+The persisted catalog remains the version-1 backend address book used by the
+CLI. The MCP catalog is an additive agent projection: it preserves those
+non-secret coordinates and adds direct summary, capabilities, and ontology
+links without opening any configured target. Summary reads resolve exactly one
+memory and never fan out across the catalog. They preserve every namespace,
+entity-type, and relation name and description while omitting field, join-key,
+and provenance detail available from the ontology resource. An empty default
+does not establish that named memories are empty.
+
+Write payloads retain the `contract_fingerprint` field for compatibility. Its
+value must equal `schema_fingerprint` from `memory://schema/current`. Exact lazy
+specifications distinguish server-derived idempotency keys from the optional
+caller-provided join key and include targeted recovery for stale schema or
+lifecycle state.
+
 The only raw-evidence surface is the bounded read tool. Ordinary query,
 ontology, search, and explanation responses never contain evidence bytes. The
 MCP surface exposes no arbitrary SQL, migration, snapshot, retention, or network
@@ -141,11 +157,11 @@ attaching a named memory.
 ## Agent contract and errors
 
 Tool inputs and outputs are strict typed objects; unknown members are rejected.
-An agent should begin at `memory://guide`, choose a name from
-`memory://catalog`, resolve an operation through `memory://operations`, and read
-its exact specification before calling the routed manager. Manager schemas stay
-compact; operation resources carry complete payload/result descriptions and
-examples. Exact general-query syntax remains authoritative at
+An agent should begin at `memory://guide` and `memory://catalog`, choose one
+memory, and use the selected tool's action-to-spec link. The full
+`memory://operations` index is a fallback when the operation is not known.
+Manager schemas stay compact; operation resources carry complete payload/result
+descriptions and examples. Exact general-query syntax remains authoritative at
 `memory://schema/query-ir/current`; the shorter `memory://schema/queries`
 resource only describes saved convenience queries.
 

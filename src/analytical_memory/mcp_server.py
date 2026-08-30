@@ -65,8 +65,8 @@ MemorySelection = Annotated[
     str | None,
     Field(
         description=(
-            "Configured memory name from memory://catalog. Omit or use 'default' "
-            "for the environment-selected default; an explicit unknown name fails."
+            "Name from memory://catalog; omit for default. Unknown names fail and "
+            "there is no active selection."
         )
     ),
 ]
@@ -74,8 +74,9 @@ ContractFingerprint = Annotated[
     str,
     Field(
         description=(
-            "Exact schema_fingerprint from memory://schema/current. Refresh that "
-            "resource and retry if the server returns schema_changed."
+            "This payload field is named contract_fingerprint; its value must equal "
+            "the exact schema_fingerprint from memory://schema/current. Refresh that "
+            "resource and retry once if the server returns schema_changed."
         )
     ),
 ]
@@ -119,12 +120,79 @@ ResolvedMemory = Annotated[
 ManagerPayload = Annotated[
     dict[str, Any],
     Field(
-        description=(
-            "Operation payload. Read the exact schema and example from the operation "
-            "URI listed by memory://operations before calling."
-        )
+        description="Payload matching the selected action's exact spec URI."
     ),
 ]
+
+def memory_summary_document(
+    application: MemoryApplication, memory: str
+) -> dict[str, Any]:
+    status = application.status()
+    result: dict[str, Any] = {
+        "evidence_store": {
+            "initialized": status["evidence_store"]["initialized"],
+            "provider": status["evidence_store"]["provider"],
+        },
+        "memory": memory,
+        "ready": status["ready"],
+        "schema_fingerprint": status["schema_fingerprint"],
+        "storage": {
+            "backend": status["storage"]["backend"],
+            "initialized": status["storage"]["initialized"],
+            "migration_version": status["storage"]["migration_version"],
+        },
+    }
+    if not status["ready"]:
+        return {
+            **result,
+            "content_status": "uninitialized",
+            "entity_types": [],
+            "namespaces": [],
+            "ontology_fingerprint": None,
+            "relations": [],
+            "statistics": None,
+        }
+    ontology = application.ontology()
+    document = ontology["document"]
+    namespaces = [
+        {"description": item["description"], "name": item["name"]}
+        for item in document["namespaces"]
+    ]
+    entity_types = [
+        {"description": item["description"], "type": item["type"]}
+        for item in document["entities"]
+    ]
+    relations = [
+        {
+            "description": item["description"],
+            "enabled": item["enabled"],
+            "from": item["from"]["type"],
+            "name": item["name"],
+            "relation": item["relation"],
+            "to": item["to"]["type"],
+        }
+        for item in document["relations"]
+    ]
+    statistics = document["statistics"]
+    has_graph_data = any(int(value) > 0 for value in statistics.values())
+    has_ontology = bool(
+        document["namespaces"] or document["entities"] or document["relations"]
+    )
+    if has_graph_data:
+        content_status = "populated_current_graph"
+    elif has_ontology:
+        content_status = "ontology_only"
+    else:
+        content_status = "no_current_graph_data"
+    return {
+        **result,
+        "content_status": content_status,
+        "entity_types": entity_types,
+        "namespaces": namespaces,
+        "ontology_fingerprint": ontology["ontology_fingerprint"],
+        "relations": relations,
+        "statistics": statistics,
+    }
 
 
 def agent_guide_document() -> dict[str, Any]:
@@ -146,18 +214,23 @@ def agent_guide_document() -> dict[str, Any]:
             ),
             "named_capabilities": ("memory://memories/{memory}/capabilities/current"),
             "named_ontology": ("memory://memories/{memory}/schema/ontology/current"),
+            "summary": "memory://memories/{memory}/summary",
         },
         "workflow": [
             {
                 "step": 1,
-                "action": "Read memory://catalog and choose default or a named memory.",
+                "action": (
+                    "Read memory://catalog and choose default or a named memory. For "
+                    "content discovery, read its summary; an empty default does not "
+                    "imply that named memories are empty."
+                ),
             },
             {
                 "step": 2,
                 "action": (
-                    "Read capabilities for that memory; confirm storage and evidence "
-                    "are initialized and the required operation is enabled. Read "
-                    "memory://operations to resolve its manager, action, and spec."
+                    "Read capabilities or ontology only when the task needs them. Tool "
+                    "descriptions link actions to exact specs; read "
+                    "memory://operations only when the operation is not yet known."
                 ),
             },
             {
@@ -170,8 +243,8 @@ def agent_guide_document() -> dict[str, Any]:
             {
                 "step": 4,
                 "action": (
-                    "Read the selected memory ontology before imports, joins, "
-                    "searches, or queries. Refresh it after any shape-changing write."
+                    "Read memory://schema/current only for writes and pass its "
+                    "schema_fingerprint as the payload contract_fingerprint."
                 ),
             },
             {
@@ -184,18 +257,17 @@ def agent_guide_document() -> dict[str, Any]:
             {
                 "step": 6,
                 "action": (
-                    "For writes, pass schema_fingerprint from memory://schema/current; "
-                    "this structural contract is shared by all memories."
+                    "Read the selected ontology before imports, joins, or queries and "
+                    "refresh it after shape-changing writes."
                 ),
             },
         ],
         "operations": {
             "configure": (
-                "memory_configure create initializes a new/empty target; attach only "
-                "validates an existing target. SQLite needs database and "
-                "evidence_root. "
-                "PostgreSQL needs connection_env, schema, and evidence_root. Paths are "
-                "absolute; connection_env names a per-user .env variable, never a DSN."
+                "memory_configure create initializes and attach validates. SQLite "
+                "requires database/evidence_root; PostgreSQL requires connection_env/"
+                "schema/evidence_root. Paths are absolute; connection_env names a DSN "
+                "variable, not its value."
             ),
             "import": (
                 "memory_ingest_manage action=jsonl_import reads a server-local JSONL "
@@ -207,12 +279,9 @@ def agent_guide_document() -> dict[str, Any]:
                 "and validation. Imports may introduce undeclared fields and types."
             ),
             "join": (
-                "memory_relation_manage action=materialize explicitly connects Nodes "
-                "by equal typed field tuples. Source array fields contribute unique "
-                "non-null scalar elements, and multiple source arrays form a "
-                "Cartesian product. Target fields must be scalar. Matching tuples "
-                "create one deduplicated Relation per source-target Node pair. Joins "
-                "are never inferred or rerun automatically."
+                "memory_relation_manage action=materialize creates exact typed joins. "
+                "Source arrays expand unique non-null values and Cartesian products; "
+                "targets stay scalar. Joins are never inferred or rerun automatically."
             ),
             "query": (
                 "memory_query_manage action=execute is the general relational/graph "
@@ -230,10 +299,9 @@ def agent_guide_document() -> dict[str, Any]:
         },
         "results": {
             "common": (
-                "Every tool result includes memory. Fingerprints identify the "
-                "structural "
-                "or ontology contract used. source_id, batch_id, run_id, fragment_id, "
-                "and evidence_digest are provenance identities, not business keys."
+                "Every tool result includes memory. Fingerprints identify its "
+                "contract. source_id, batch_id, run_id, fragment_id, and "
+                "evidence_digest are provenance identities, not business keys."
             ),
             "replay": (
                 "replayed=true means the same idempotent operation was already "
@@ -494,15 +562,8 @@ def create_mcp_server(
         "analytical-memory",
         version=__version__,
         instructions=(
-            "Start with memory://guide, memory://catalog, then memory://operations. "
-            "Omit the optional "
-            "memory argument for default or pass one catalog name consistently; there "
-            "is no active selection. Read the exact operation spec, capabilities, and "
-            "ontology for that memory. Read Query IR before general queries. Writes "
-            "require schema_fingerprint from memory://schema/current. Refresh ontology "
-            "after imports, declarations, or joins. Raw evidence is available only "
-            "through bounded evidence tools; arbitrary database operations are not "
-            "exposed."
+            "Start with memory://guide and memory://catalog. Use one memory name "
+            "consistently; there is no active selection."
         ),
     )
 
@@ -635,13 +696,29 @@ def create_mcp_server(
         "memory://catalog",
         name="memory-catalog",
         description=(
-            "Available memory names and non-secret targets. Omit memory for default; "
-            "reading this resource never changes an active selection."
+            "Available memories, non-secret targets, and direct discovery links. Read "
+            "a summary before claiming whether a memory contains data."
         ),
         mime_type="application/json",
     )
     def memory_catalog() -> str:
-        return resource_document(None, memory_router.catalog)
+        return resource_document(None, memory_router.agent_catalog)
+
+    @server.resource(
+        "memory://memories/{memory}/summary",
+        name="memory-summary",
+        description=(
+            "Compact readiness, graph counts, namespace, entity-type, and relation "
+            "hints for one explicit memory name, including default."
+        ),
+        mime_type="application/json",
+    )
+    def named_memory_summary(memory: str) -> str:
+        def document() -> dict[str, Any]:
+            selected, selected_application = memory_router.resolve(memory)
+            return memory_summary_document(selected_application, selected)
+
+        return resource_document(memory, document)
 
     @server.resource(
         "memory://memories/{memory}/capabilities/current",
@@ -691,10 +768,8 @@ def create_mcp_server(
     @server.tool(
         name="memory_configure",
         description=(
-            "Create a new/empty named memory or read-only attach an existing "
-            "compatible "
-            "one. This records only non-secret target coordinates; it does not select "
-            "the memory for later calls."
+            "Create/attach a named target without selecting it. Spec: "
+            "memory://operations/memory_configure."
         ),
         annotations=ToolAnnotations(
             read_only_hint=False,
@@ -709,8 +784,8 @@ def create_mcp_server(
             Literal["create", "attach"],
             Field(
                 description=(
-                    "create initializes a new/empty target; attach only validates an "
-                    "already initialized target and never migrates or repairs it."
+                    "create initializes an empty target; attach validates without "
+                    "migration or repair."
                 )
             ),
         ],
@@ -718,8 +793,7 @@ def create_mcp_server(
             str,
             Field(
                 description=(
-                    "New lowercase catalog alias. 'default' is reserved; configuring a "
-                    "name that already exists fails."
+                    "New lowercase alias; 'default' and existing names are rejected."
                 )
             ),
         ],
@@ -731,8 +805,8 @@ def create_mcp_server(
             str,
             Field(
                 description=(
-                    "Absolute path to this memory's local evidence directory. It must "
-                    "not equal, contain, or be contained by another evidence root."
+                    "Absolute evidence directory, disjoint from every other evidence "
+                    "root."
                 )
             ),
         ],
@@ -740,8 +814,7 @@ def create_mcp_server(
             str | None,
             Field(
                 description=(
-                    "Absolute SQLite database path. Required only for backend=sqlite; "
-                    "omit for PostgreSQL."
+                    "Absolute SQLite database path; omit for PostgreSQL."
                 )
             ),
         ] = None,
@@ -749,8 +822,8 @@ def create_mcp_server(
             str | None,
             Field(
                 description=(
-                    "Name of a per-user environment variable containing the PostgreSQL "
-                    "URL. Required only for PostgreSQL; never pass the URL itself."
+                    "Environment variable containing the PostgreSQL URL; never pass "
+                    "the URL itself."
                 )
             ),
         ] = None,
@@ -758,8 +831,7 @@ def create_mcp_server(
             str | None,
             Field(
                 description=(
-                    "PostgreSQL schema dedicated to this memory. Required only for "
-                    "backend=postgresql; omit for SQLite."
+                    "Dedicated PostgreSQL schema; omit for SQLite."
                 )
             ),
         ] = None,
@@ -782,9 +854,8 @@ def create_mcp_server(
     @server.tool(
         name="memory_lifecycle_manage",
         description=(
-            "Inspect lifecycle guard counts, wipe one explicitly named memory, or "
-            "delete a named target. Wipe/delete require the exact status counts; "
-            "default can be wiped but cannot be deleted."
+            "Status/wipe/delete a memory; mutations need exact status counts and "
+            "default cannot be deleted. Spec: memory://operations/memory_lifecycle."
         ),
         annotations=ToolAnnotations(
             read_only_hint=False,
@@ -799,8 +870,8 @@ def create_mcp_server(
             Literal["status", "wipe", "delete"],
             Field(
                 description=(
-                    "status returns guard counts; wipe resets storage and evidence; "
-                    "delete also removes a named target and catalog entry."
+                    "status reads guards; wipe resets data; delete also removes a "
+                    "named target."
                 )
             ),
         ],
@@ -808,8 +879,7 @@ def create_mcp_server(
             str,
             Field(
                 description=(
-                    "Explicit configured memory name. Pass 'default' explicitly when "
-                    "wiping default; delete default is forbidden."
+                    "Explicit memory name; use 'default' only for status or wipe."
                 )
             ),
         ],
@@ -1344,9 +1414,8 @@ def create_mcp_server(
     @server.tool(
         name="memory_node_delete",
         description=(
-            "Delete one current Node and cascade its current attributes, relation "
-            "edges, "
-            "embeddings, and search documents. Immutable evidence remains retained."
+            "Delete one Node and its current derived records; immutable evidence "
+            "remains. Spec: memory://operations/delete_node."
         ),
         annotations=ToolAnnotations(
             read_only_hint=False,
@@ -1868,8 +1937,9 @@ def create_mcp_server(
     @server.tool(
         name="memory_ontology_manage",
         description=(
-            "Manage ontology declarations. Actions: declare_entity, "
-            "declare_namespace. Read memory://operations first for exact payloads."
+            "Ontology writes. Specs: declare_entity=memory://operations/"
+            "entity_declaration; declare_namespace=memory://operations/"
+            "namespace_declaration."
         ),
         annotations=ToolAnnotations(
             read_only_hint=False,
@@ -1882,7 +1952,7 @@ def create_mcp_server(
     def manage_ontology(
         action: Annotated[
             Literal["declare_entity", "declare_namespace"],
-            Field(description="Ontology action selected from memory://operations."),
+            Field(description="Selected ontology action."),
         ],
         payload: ManagerPayload,
         memory: MemorySelection = None,
@@ -1918,8 +1988,9 @@ def create_mcp_server(
     @server.tool(
         name="memory_ingest_manage",
         description=(
-            "Ingest source or analytical information. Actions: jsonl_import, "
-            "analytical_attribute, analytical_metric. Read memory://operations first."
+            "Ingest data. Specs: jsonl_import=memory://operations/jsonl_import; "
+            "analytical_attribute=memory://operations/analytical_attribute_write; "
+            "analytical_metric=memory://operations/analytical_metric_write."
         ),
         annotations=ToolAnnotations(
             read_only_hint=False,
@@ -1932,7 +2003,7 @@ def create_mcp_server(
     def manage_ingest(
         action: Annotated[
             Literal["jsonl_import", "analytical_attribute", "analytical_metric"],
-            Field(description="Ingestion action selected from memory://operations."),
+            Field(description="Selected ingestion action."),
         ],
         payload: ManagerPayload,
         memory: MemorySelection = None,
@@ -1990,8 +2061,8 @@ def create_mcp_server(
     @server.tool(
         name="memory_relation_manage",
         description=(
-            "Manage current directed relations. Actions: materialize, deactivate. "
-            "Read memory://operations first for exact payloads."
+            "Relation changes. Specs: materialize=memory://operations/"
+            "join_materialize; deactivate=memory://operations/relation_deactivate."
         ),
         annotations=ToolAnnotations(
             read_only_hint=False,
@@ -2004,7 +2075,7 @@ def create_mcp_server(
     def manage_relation(
         action: Annotated[
             Literal["materialize", "deactivate"],
-            Field(description="Relation action selected from memory://operations."),
+            Field(description="Selected relation action."),
         ],
         payload: ManagerPayload,
         memory: MemorySelection = None,
@@ -2037,8 +2108,9 @@ def create_mcp_server(
     @server.tool(
         name="memory_query_manage",
         description=(
-            "Run bounded local reads. Actions: execute, current_metric, traverse. "
-            "Read memory://operations first for exact payloads."
+            "Bounded reads. Specs: execute=memory://operations/query_execute; "
+            "current_metric=memory://operations/query_current_metric; "
+            "traverse=memory://operations/traverse_relations."
         ),
         annotations=ToolAnnotations(
             read_only_hint=True,
@@ -2051,7 +2123,7 @@ def create_mcp_server(
     def manage_query(
         action: Annotated[
             Literal["execute", "current_metric", "traverse"],
-            Field(description="Query action selected from memory://operations."),
+            Field(description="Selected query action."),
         ],
         payload: ManagerPayload,
         memory: MemorySelection = None,
@@ -2092,8 +2164,7 @@ def create_mcp_server(
     @server.tool(
         name="memory_search_manage",
         description=(
-            "Search current public text locally. Action: text. Read "
-            "memory://operations/search_text for the exact payload."
+            "Local public-text search. Spec: text=memory://operations/search_text."
         ),
         annotations=ToolAnnotations(
             read_only_hint=True,
@@ -2120,8 +2191,9 @@ def create_mcp_server(
     @server.tool(
         name="memory_semantic_manage",
         description=(
-            "Manage semantic retrieval. Actions: search, embedding_status. The search "
-            "action sends public query text to the configured external provider."
+            "Semantic reads. Specs: search=memory://operations/search_semantic; "
+            "embedding_status=memory://operations/embedding_status. Search sends "
+            "public query text to the configured provider."
         ),
         annotations=ToolAnnotations(
             read_only_hint=True,
@@ -2166,8 +2238,9 @@ def create_mcp_server(
     @server.tool(
         name="memory_explain_manage",
         description=(
-            "Explain direct provenance. Actions: attribute, relation, metric. Read "
-            "memory://operations first for exact payloads."
+            "Explain provenance. Specs: attribute=memory://operations/"
+            "explain_attribute; relation=memory://operations/explain_relation; "
+            "metric=memory://operations/explain_metric."
         ),
         annotations=ToolAnnotations(
             read_only_hint=True,
@@ -2211,8 +2284,8 @@ def create_mcp_server(
     @server.tool(
         name="memory_evidence_read_manage",
         description=(
-            "Inspect or read evidence without mutation. Actions: status, read. Read "
-            "memory://operations first for exact payloads and byte limits."
+            "Read evidence. Specs: status=memory://operations/evidence_status; "
+            "read=memory://operations/evidence_read."
         ),
         annotations=ToolAnnotations(
             read_only_hint=True,
@@ -2251,8 +2324,8 @@ def create_mcp_server(
     @server.tool(
         name="memory_evidence_manage",
         description=(
-            "Verify evidence and append verification history. Actions: verify, audit. "
-            "These actions never delete evidence."
+            "Verify without deletion. Specs: verify=memory://operations/"
+            "evidence_verify; audit=memory://operations/evidence_audit."
         ),
         annotations=ToolAnnotations(
             read_only_hint=False,

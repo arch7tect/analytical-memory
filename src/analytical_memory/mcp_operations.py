@@ -38,8 +38,9 @@ ContractFingerprint = Annotated[
     str,
     Field(
         description=(
-            "Exact schema_fingerprint from memory://schema/current. Refresh and retry "
-            "if the server returns schema_changed."
+            "This payload field is named contract_fingerprint; its value must equal "
+            "the exact schema_fingerprint from memory://schema/current. Refresh and "
+            "retry once if the server returns schema_changed."
         )
     ),
 ]
@@ -252,8 +253,17 @@ class TraverseRelationsRequest(APIModel):
     direction: Literal["outbound", "inbound", "both"] = Field(
         default="outbound", description="Edge direction relative to the start Node."
     )
-    max_depth: int = Field(default=3, description="Maximum graph hops.")
-    limit: int = Field(default=100, description="Maximum returned traversal items.")
+    max_depth: int = Field(
+        default=3,
+        description="Maximum graph hops; see capabilities.limits.traversal_depth.",
+    )
+    limit: int = Field(
+        default=100,
+        description=(
+            "Maximum returned items; see capabilities.limits.traversal_results and "
+            "check result.truncated."
+        ),
+    )
     states: list[Literal["active"]] | None = Field(
         default=None, description="Optional lifecycle filter; V1 supports active."
     )
@@ -261,7 +271,10 @@ class TraverseRelationsRequest(APIModel):
 
 class SearchTextRequest(APIModel):
     query: str = Field(description="Non-empty words or numbers for local text search.")
-    limit: int = Field(default=20, description="Maximum returned matches.")
+    limit: int = Field(
+        default=20,
+        description="Maximum matches; see capabilities.limits.search_results.",
+    )
 
 
 class EmbeddingStatusRequest(APIModel):
@@ -285,7 +298,10 @@ class SearchSemanticRequest(APIModel):
     privacy_ceiling: Literal["public"] | None = Field(
         default=None, description="Optional explicit public-only privacy ceiling."
     )
-    limit: int = Field(default=20, description="Maximum returned matches.")
+    limit: int = Field(
+        default=20,
+        description="Maximum matches; see capabilities.limits.search_results.",
+    )
 
 
 class ExplainAttributeRequest(APIModel):
@@ -309,7 +325,13 @@ class EvidenceStatusRequest(APIModel):
 class EvidenceReadRequest(APIModel):
     digest: EvidenceDigest
     offset: int = Field(default=0, description="Zero-based evidence byte offset.")
-    limit: int = Field(default=65536, description="Maximum bytes to return.")
+    limit: int = Field(
+        default=65536,
+        description=(
+            "Maximum bytes; see capabilities.evidence.raw_read.max_bytes and check "
+            "result.eof."
+        ),
+    )
 
 
 class EvidenceVerifyRequest(APIModel):
@@ -317,7 +339,13 @@ class EvidenceVerifyRequest(APIModel):
 
 
 class EvidenceAuditRequest(APIModel):
-    limit: int = Field(default=1000, description="Maximum catalog objects to inspect.")
+    limit: int = Field(
+        default=1000,
+        description=(
+            "Maximum objects; see capabilities.limits.validated_evidence_objects and "
+            "check result.complete and result.truncated."
+        ),
+    )
 
 
 class NodeDeleteRequest(APIModel):
@@ -413,6 +441,7 @@ class OperationDefinition:
     idempotent: bool
     preconditions: tuple[str, ...]
     example_payload: dict[str, Any]
+    idempotency: dict[str, Any] | None = None
 
     @property
     def spec_uri(self) -> str:
@@ -444,7 +473,7 @@ class OperationDefinition:
                 "memory": "default",
                 "payload": self.example_payload,
             }
-        return {
+        document = {
             **self.index_document(),
             "contract_fingerprint": contract_fingerprint,
             "errors": {
@@ -460,6 +489,28 @@ class OperationDefinition:
             "preconditions": list(self.preconditions),
             "spec_version": "1",
         }
+        if self.idempotency is not None:
+            document["idempotency"] = self.idempotency
+        recovery = []
+        if "memory://schema/current" in self.preconditions:
+            recovery.append(
+                {
+                    "code": "schema_changed",
+                    "next": "memory://schema/current",
+                    "action": "refresh_and_retry_once",
+                }
+            )
+        if self.operation == "memory_lifecycle":
+            recovery.append(
+                {
+                    "code": "memory_state_changed",
+                    "next": "memory_lifecycle_manage action=status",
+                    "action": "refresh_expected_state",
+                }
+            )
+        if recovery:
+            document["recovery"] = recovery
+        return document
 
 
 def _definition(
@@ -475,6 +526,7 @@ def _definition(
     preconditions: tuple[str, ...] = ("memory://catalog",),
     destructive: bool = False,
     external_call: bool = False,
+    idempotency: dict[str, Any] | None = None,
 ) -> OperationDefinition:
     return OperationDefinition(
         operation,
@@ -488,6 +540,7 @@ def _definition(
         idempotent,
         preconditions,
         example,
+        idempotency,
     )
 
 
@@ -568,6 +621,10 @@ OPERATION_DEFINITIONS = (
             "key": [{"field": "id", "type": "string"}],
             "contract_fingerprint": "<schema_fingerprint>",
         },
+        idempotency={
+            "key_source": "server-derived",
+            "basis": ["entity_type", "key", "content_hash"],
+        },
     ),
     _definition(
         "analytical_attribute_write",
@@ -584,6 +641,10 @@ OPERATION_DEFINITIONS = (
             "value": "excellent",
             "method": "review-v1",
             "contract_fingerprint": "<schema_fingerprint>",
+        },
+        idempotency={
+            "key_source": "server-derived",
+            "basis": ["node_id", "attribute_name", "value", "method"],
         },
     ),
     _definition(
@@ -603,6 +664,22 @@ OPERATION_DEFINITIONS = (
             "method_version": "1",
             "contract_fingerprint": "<schema_fingerprint>",
         },
+        idempotency={
+            "key_source": "server-derived",
+            "basis": [
+                "definition_version",
+                "value",
+                "dimensions",
+                "method",
+                "method_version",
+                "coverage",
+                "complete",
+                "unit",
+                "numerator",
+                "denominator",
+                "privacy",
+            ],
+        },
     ),
     _definition(
         "join_materialize",
@@ -619,6 +696,10 @@ OPERATION_DEFINITIONS = (
             "from": {"type": "example.Session", "fields": ["id"]},
             "to": {"type": "example.Message", "fields": ["session_id"]},
             "contract_fingerprint": "<schema_fingerprint>",
+        },
+        idempotency={
+            "key_source": "optional-caller",
+            "when_omitted": "server-generated-random",
         },
     ),
     _definition(
