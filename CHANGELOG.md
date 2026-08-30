@@ -2,6 +2,10 @@
 
 All notable changes to Analytical Memory are documented here.
 
+## 0.5.3 - 2026-08-30
+
+- Applied the canonical Ruff formatting required by the complete CI gate.
+
 ## 0.5.2 - 2026-08-30
 
 - Reduced the always-visible MCP instruction and tool surface while linking

@@ -65,13 +65,13 @@ Build the Python wheel, source distribution, three host archives, and their
 SHA-256 file locally:
 
 ```console
-uv run python scripts/build_release.py --tag v0.5.2
+uv run python scripts/build_release.py --tag v0.5.3
 ```
 
 Artifacts are written to `dist/release/`. In GitHub Actions, every pull request
 and main-branch push builds both the unpacked plugin bundles and a complete
 release candidate. Pushing a tag that matches the project version, such as
-`v0.5.2`, rebuilds the same artifacts and publishes them to a GitHub Release.
+`v0.5.3`, rebuilds the same artifacts and publishes them to a GitHub Release.
 
 For the normal publishing path, open the `Release` workflow in GitHub Actions,
 select `Run workflow` on `main`, and start it. The workflow reads

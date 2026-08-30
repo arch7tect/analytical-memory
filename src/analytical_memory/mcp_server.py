@@ -119,10 +119,9 @@ ResolvedMemory = Annotated[
 ]
 ManagerPayload = Annotated[
     dict[str, Any],
-    Field(
-        description="Payload matching the selected action's exact spec URI."
-    ),
+    Field(description="Payload matching the selected action's exact spec URI."),
 ]
+
 
 def memory_summary_document(
     application: MemoryApplication, memory: str
@@ -812,11 +811,7 @@ def create_mcp_server(
         ],
         database: Annotated[
             str | None,
-            Field(
-                description=(
-                    "Absolute SQLite database path; omit for PostgreSQL."
-                )
-            ),
+            Field(description=("Absolute SQLite database path; omit for PostgreSQL.")),
         ] = None,
         connection_env: Annotated[
             str | None,
@@ -829,11 +824,7 @@ def create_mcp_server(
         ] = None,
         schema: Annotated[
             str | None,
-            Field(
-                description=(
-                    "Dedicated PostgreSQL schema; omit for SQLite."
-                )
-            ),
+            Field(description=("Dedicated PostgreSQL schema; omit for SQLite.")),
         ] = None,
     ) -> MemoryConfigureResponse:
         try:

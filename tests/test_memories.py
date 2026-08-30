@@ -857,9 +857,12 @@ async def test_mcp_configures_and_routes_named_memory(tmp_path: Path) -> None:
             operation_documents["join_materialize"]["idempotency"]["when_omitted"]
             == "server-generated-random"
         )
-        assert "operation-specific" in operation_documents["jsonl_import"][
-            "output_schema"
-        ]["properties"]["idempotency_key"]["description"]
+        assert (
+            "operation-specific"
+            in operation_documents["jsonl_import"]["output_schema"]["properties"][
+                "idempotency_key"
+            ]["description"]
+        )
         for definition in OPERATION_DEFINITIONS:
             if "memory://schema/current" in definition.preconditions:
                 assert operation_documents[definition.operation]["recovery"] == [
@@ -869,11 +872,12 @@ async def test_mcp_configures_and_routes_named_memory(tmp_path: Path) -> None:
                         "next": "memory://schema/current",
                     }
                 ]
-                assert "schema_fingerprint" in operation_documents[
-                    definition.operation
-                ]["input_schema"]["properties"]["contract_fingerprint"][
-                    "description"
-                ]
+                assert (
+                    "schema_fingerprint"
+                    in operation_documents[definition.operation]["input_schema"][
+                        "properties"
+                    ]["contract_fingerprint"]["description"]
+                )
         assert operation_documents["memory_lifecycle"]["recovery"] == [
             {
                 "action": "refresh_expected_state",
@@ -919,16 +923,19 @@ async def test_mcp_configures_and_routes_named_memory(tmp_path: Path) -> None:
         assert serialized_tool_sizes["memory_configure"] <= 2_900
         assert serialized_tool_sizes["memory_lifecycle_manage"] <= 5_700
         assert serialized_tool_sizes["memory_node_delete"] <= 1_800
-        assert max(
-            size
-            for name, size in serialized_tool_sizes.items()
-            if name
-            not in {
-                "memory_configure",
-                "memory_lifecycle_manage",
-                "memory_node_delete",
-            }
-        ) <= 1_600
+        assert (
+            max(
+                size
+                for name, size in serialized_tool_sizes.items()
+                if name
+                not in {
+                    "memory_configure",
+                    "memory_lifecycle_manage",
+                    "memory_node_delete",
+                }
+            )
+            <= 1_600
+        )
         assert len(guide_resource.contents[0].text) <= 5_100
         assert len(default_capabilities.contents[0].text) <= 10_000
         assert len(default_summary.contents[0].text) <= 800
