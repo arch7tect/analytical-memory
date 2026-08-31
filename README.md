@@ -68,6 +68,8 @@ uv run memory query execute --document examples/quickstart/query.json
 The commands write local state under the ignored `.local/` directory. Import
 keys are lookup expressions, not persistent identity records. Repeating the
 same import is idempotent; a later record patches only the fields it contains.
+Declared required fields are enforced when a record creates a Node, while an
+update may omit them and retain the current values.
 
 ## MCP
 

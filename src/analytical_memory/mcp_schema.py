@@ -122,7 +122,7 @@ _OUTPUT_FIELD_DESCRIPTIONS = {
     "relations": "Current relation definitions or affected edges for this result.",
     "replayed": "Whether an earlier committed idempotent operation was returned.",
     "reproduced_digest": "Digest reproduced from current evidence bytes.",
-    "required": "Whether a declared field must be present on imported records.",
+    "required": "Whether a declared field must be present when import creates a Node.",
     "results": "Ordered result items returned by the operation.",
     "retired": "Whether the evidence object is marked retired.",
     "rows": "Ordered Query IR rows; absent for count queries.",

@@ -371,6 +371,117 @@ def test_declaration_import_patch_replay_and_ontology(m5: tuple[Any, ...]) -> No
     assert projections[1]["value"] == 42
 
 
+def test_required_fields_apply_only_when_import_creates_node(
+    m5: tuple[Any, ...], tmp_path: Path
+) -> None:
+    application, _, _ = m5
+    application.declare_entity(
+        "calls.Session",
+        fields={
+            "id": {"type": "string", "required": True, "nullable": False},
+            "status": {
+                "type": "string",
+                "required": True,
+                "nullable": False,
+            },
+            "note": {"type": "string", "nullable": True},
+        },
+        contract_fingerprint=application.schema.fingerprint,
+    )
+    _import(
+        application,
+        _write(tmp_path / "required-source.jsonl", [{"id": "s1", "status": "ok"}]),
+        "calls.Session",
+    )
+
+    patched = _import(
+        application,
+        _write(tmp_path / "required-patch.jsonl", [{"id": "s1", "note": "kept"}]),
+        "calls.Session",
+    )
+    assert patched["updated_nodes"] == 1
+    attributes = {
+        item["attribute_name"]: json.loads(item["value_json"])
+        for item in application.memory_store.snapshot_records()["node_attribute"]
+    }
+    assert attributes["status"] == "ok"
+    assert attributes["note"] == "kept"
+
+    with pytest.raises(ImportValidationError, match="field 'status' is not nullable"):
+        _import(
+            application,
+            _write(
+                tmp_path / "required-null-patch.jsonl",
+                [{"id": "s1", "status": None}],
+            ),
+            "calls.Session",
+        )
+
+    before = application.memory_store.snapshot_records()
+    with pytest.raises(
+        ImportValidationError,
+        match=r"line 2: new node is missing required field\(s\): 'status'",
+    ):
+        _import(
+            application,
+            _write(
+                tmp_path / "required-mixed.jsonl",
+                [
+                    {"id": "s1", "note": "rolled back"},
+                    {"id": "s2", "note": "incomplete"},
+                ],
+            ),
+            "calls.Session",
+        )
+    after = application.memory_store.snapshot_records()
+    assert after == before
+
+
+def test_required_redeclaration_is_prospective(
+    m5: tuple[Any, ...], tmp_path: Path
+) -> None:
+    application, _, _ = m5
+    fingerprint = application.schema.fingerprint
+    application.declare_entity(
+        "calls.Session",
+        fields={"id": {"type": "string", "required": True, "nullable": False}},
+        contract_fingerprint=fingerprint,
+    )
+    _import(
+        application,
+        _write(tmp_path / "legacy.jsonl", [{"id": "legacy"}]),
+        "calls.Session",
+    )
+    application.declare_entity(
+        "calls.Session",
+        fields={
+            "id": {"type": "string", "required": True, "nullable": False},
+            "status": {
+                "type": "string",
+                "required": True,
+                "nullable": False,
+            },
+        },
+        contract_fingerprint=fingerprint,
+    )
+
+    patched = _import(
+        application,
+        _write(tmp_path / "legacy-patch.jsonl", [{"id": "legacy", "note": "ok"}]),
+        "calls.Session",
+    )
+    assert patched["updated_nodes"] == 1
+    with pytest.raises(
+        ImportValidationError,
+        match=r"line 1: new node is missing required field\(s\): 'status'",
+    ):
+        _import(
+            application,
+            _write(tmp_path / "future-create.jsonl", [{"id": "new"}]),
+            "calls.Session",
+        )
+
+
 def test_import_rejects_duplicates_types_and_credentials_without_writes(
     m5: tuple[Any, ...], tmp_path: Path
 ) -> None:

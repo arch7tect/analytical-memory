@@ -40,7 +40,9 @@ Observed shape and declared constraints are separate. A user or agent may create
 an entity declaration through API or MCP before import, but declaration is not
 required. The shortest declaration contains only a namespaced entity type and
 privacy. An extended declaration may constrain field types, required presence,
-and nullability and assign field-level privacy. Fields absent from the
+and nullability and assign field-level privacy. Required presence applies when
+an import creates a Node; updates may omit the field and retain its current
+value. Fields absent from the
 declaration are always accepted, inherit entity-level privacy, and become part
 of observed ontology. Import key selection is not part of the declaration.
 
@@ -51,9 +53,11 @@ Ontology Document combines any declared constraints with observed shape and
 works when either side is absent.
 
 V1 stores one current declaration per entity type. Replacement first validates
-current rows transactionally and leaves the earlier declaration active on
-failure. Declaration revision history is deferred; canonical declaration
-evidence and the operation record preserve provenance.
+current values against type and nullability changes transactionally and leaves
+the earlier declaration active on failure. Required-on-create changes apply to
+future Node creation without retroactively invalidating current Nodes.
+Declaration revision history is deferred; canonical declaration evidence and
+the operation record preserve provenance.
 
 ### Use JSONL as the first general ingestion format
 

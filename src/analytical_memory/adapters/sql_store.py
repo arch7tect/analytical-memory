@@ -1083,11 +1083,6 @@ class SqlMemoryStore(MemoryStore):
                 else str(declaration_row["privacy_class"])
             )
             for name, specification in declaration_fields.items():
-                if (
-                    specification["required"]
-                    and scan.present_counts.get(name, 0) != scan.record_count
-                ):
-                    raise ImportValidationError(f"required field {name!r} is missing")
                 if not specification["nullable"] and name in scan.null_fields:
                     raise ImportValidationError(f"field {name!r} is not nullable")
                 expected = specification.get("type")
@@ -1112,6 +1107,14 @@ class SqlMemoryStore(MemoryStore):
                     raise ImportValidationError(
                         f"field {name!r} already has type {row['json_type']}"
                     )
+            key_fields = {selector.field for selector in request.key}
+            required_on_create = tuple(
+                sorted(
+                    name
+                    for name, specification in declaration_fields.items()
+                    if specification["required"] and name not in key_fields
+                )
+            )
 
             connection.execute(
                 "INSERT INTO ingestion_batch "
@@ -1184,6 +1187,15 @@ class SqlMemoryStore(MemoryStore):
                     node_id = str(matches[0]["id"])
                     updated_nodes += 1
                 else:
+                    missing_required = [
+                        name for name in required_on_create if name not in record
+                    ]
+                    if missing_required:
+                        fields = ", ".join(repr(name) for name in missing_required)
+                        raise ImportValidationError(
+                            f"line {line_number}: new node is missing required "
+                            f"field(s): {fields}"
+                        )
                     node_id = str(uuid.uuid4())
                     created_nodes += 1
                     connection.execute(

@@ -2,6 +2,15 @@
 
 All notable changes to Analytical Memory are documented here.
 
+## 0.5.4 - 2026-08-31
+
+- Defined declared required fields as required when an import creates a Node,
+  while updates may omit them and retain their current values.
+- Kept required-field declaration changes prospective so schema evolution does
+  not retroactively invalidate or lock existing Nodes.
+- Added regression coverage for partial updates, atomic rollback on incomplete
+  creation, explicit nullability, and required-field schema migration.
+
 ## 0.5.3 - 2026-08-30
 
 - Applied the canonical Ruff formatting required by the complete CI gate.

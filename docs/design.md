@@ -402,8 +402,8 @@ representation.
   may exist before any entity in that namespace and carries direct provenance.
 - `EntityDeclaration`: optional logical schema that may be created before
   import. It records entity type, optional entity and field descriptions,
-  declared fields and JSON types, required and nullable flags, entity and field
-  privacy, provenance, and contract
+  declared fields and JSON types, required-on-create and nullable flags, entity
+  and field privacy, provenance, and contract
   fingerprint. It may describe an entity with zero rows and never rejects
   undeclared fields. Import key selection is not part of this record.
 - `OntologyDeclaration`: a provenance-bearing join declaration with an optional
@@ -543,9 +543,10 @@ A user or agent may create an EntityDeclaration through API, CLI, or MCP before
 import, but this step is optional. A declaration exists independently from data
 and immediately appears in the Current Ontology Document. Its shortest form
 contains a namespaced entity `type` and optional privacy. Every field may declare
-its allowed JSON types, required presence, nullability, and a description. An
-entity may also have a description. An explicit namespace declaration requires
-a description. Description metadata is
+its allowed JSON types, presence required when an import creates a Node,
+nullability, and a description. Updates may omit required fields and preserve
+their current values. An entity may also have a description. An explicit
+namespace declaration requires a description. Description metadata is
 replaced by each declaration; omitting an optional entity, field, or join
 description clears it. Descriptions must explain meaning without embedding
 credentials, PII, or example records, and do not change privacy classification.
@@ -593,18 +594,21 @@ key selector, and JSONL content hash. An exact retry returns the stored result
 without applying the records again.
 
 Fields absent from a declaration are always accepted and add their inferred
-effective types to the ontology. Required, type, and nullability constraints apply only to
-declared fields and are validated before any canonical write. Without a
-declaration, explicit non-key JSON null is an accepted current value. Key
-comparison uses canonical, type-strict tuples, so string `"42"` and number `42`
-are different. A missing or null key component, a non-scalar key value, or a
-duplicate composite key within one source rejects the complete import with its
-line number.
+effective types to the ontology. Type and nullability constraints apply only to
+supplied declared fields. Required fields must be present only when the import
+key does not match a current Node and the record creates one; an update may omit
+them and retains their current values. Without a declaration, explicit non-key
+JSON null is an accepted current value. Key comparison uses canonical,
+type-strict tuples, so string `"42"` and number `42` are different. A missing or
+null key component, a non-scalar key value, or a duplicate composite key within
+one source rejects the complete import with its line number.
 
-Replacing field constraints validates all current records of that entity type
-before the replacement becomes active. Failure leaves the previous declaration
-active. Successful replacement changes the ontology fingerprint without
-changing the generic physical tables. Declaration revision history is deferred.
+Replacing type and nullability constraints validates current values of that
+entity type before the replacement becomes active. A required-on-create change
+is prospective and does not retroactively invalidate or lock existing Nodes
+that omit the field. Failure leaves the previous declaration active. Successful
+replacement changes the ontology fingerprint without changing the generic
+physical tables. Declaration revision history is deferred.
 
 Import is atomic and streaming. The first pass validates JSONL, calculates its
 content hash, writes a temporary evidence object, retains only bounded schema
