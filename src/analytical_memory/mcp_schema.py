@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from analytical_memory.agent_texts import agent_text
+
 _OUTPUT_FIELD_DESCRIPTIONS = {
     "active": "Whether the current relation is active.",
     "active_edges": "Number of active relation edges in this scope.",
@@ -122,7 +124,7 @@ _OUTPUT_FIELD_DESCRIPTIONS = {
     "relations": "Current relation definitions or affected edges for this result.",
     "replayed": "Whether an earlier committed idempotent operation was returned.",
     "reproduced_digest": "Digest reproduced from current evidence bytes.",
-    "required": "Whether a declared field must be present when import creates a Node.",
+    "required": agent_text("field_declaration", "required"),
     "results": "Ordered result items returned by the operation.",
     "retired": "Whether the evidence object is marked retired.",
     "rows": "Ordered Query IR rows; absent for count queries.",

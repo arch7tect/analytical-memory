@@ -1,0 +1,74 @@
+{
+  "field_declaration": {
+    "description": "Human-readable field meaning.",
+    "nullable": "Allow an explicitly present JSON null value.",
+    "privacy": "Optional field privacy override; otherwise inherit entity privacy.",
+    "required": "Whether a declared field must be present when an import creates a Node; key-matched updates may omit it and retain the current value.",
+    "searchable": "Index public string values for memory_search_manage action=text.",
+    "type": "Optional enforced JSON type; omit to keep the field dynamic."
+  },
+  "guide": {
+    "errors": "Expected failures are JSON objects with code, message, details, and retryable. Never silently switch memories after an error.",
+    "guide_version": "1",
+    "operations": {
+      "analysis": "memory_ingest_manage writes analytical attributes and metrics. Use a Node ID from query bindings; metrics are immutable observations.",
+      "configure": "memory_configure create initializes and attach validates. SQLite requires database/evidence_root; PostgreSQL requires connection_env/schema/evidence_root. Paths are absolute; connection_env names a DSN variable, not its value.",
+      "describe": "memory_ontology_manage declares optional namespace/entity metadata and validation. Imports may introduce undeclared fields and types.",
+      "import": "memory_ingest_manage action=jsonl_import reads a server-local JSONL file, one JSON object per line. key is an ordered typed tuple used to find a current Node. Required declared fields must be present when a record creates a Node; key-matched updates patch only present fields and may omit required fields.",
+      "join": "memory_relation_manage action=materialize creates exact typed joins. Source arrays expand unique non-null values and Cartesian products; targets stay scalar. Joins are never inferred or rerun automatically.",
+      "provenance": "Search/query results return record/source/run/fragment identifiers. Use memory_explain_manage for provenance and evidence managers for bounded raw-byte status, reads, or verification.",
+      "query": "memory_query_manage action=execute is the general relational/graph read surface. Non-count rows bind aliases to canonical Node IDs."
+    },
+    "purpose": "Use Analytical Memory through MCP without database access or source-code knowledge. Resources describe current data shape; tools perform bounded typed operations.",
+    "results": {
+      "common": "Every tool result includes memory. Fingerprints identify its contract. source_id, batch_id, run_id, fragment_id, and evidence_digest are provenance identities, not business keys.",
+      "evidence": "availability is present or missing; verification is unverified, verified, or corrupt. Read data_base64 until eof; audit complete=false or truncated=true means the requested bound did not cover the catalog.",
+      "import": "records is accepted line count; created_nodes and updated_nodes split upserts; attributes_written counts present fields; ontology_delta names newly observed shape.",
+      "join": "created_relations is new active edges. skipped_unmatched and skipped_null_or_missing explain non-materialized source nodes.",
+      "query": "rows contain alias-to-Node-ID bindings and projections with direct provenance. count is used only for count queries. truncated means more rows exist beyond the requested limit.",
+      "replay": "replayed=true means the same idempotent operation was already committed; returned IDs and counts describe that canonical operation.",
+      "search": "results contain current target IDs and provenance. coverage reports eligible versus indexed facts and whether indexing is complete.",
+      "traversal": "nodes and edges carry depth; truncated means the result limit stopped the traversal. relation_id can be explained or deactivated."
+    },
+    "safety": {
+      "correction": "memory_relation_deactivate corrects current graph state without deleting provenance. Evidence verify/audit append verification history.",
+      "destructive": "memory_node_delete cascades current attributes, relations, embeddings, and search documents but retains immutable evidence/provenance records.",
+      "privacy": "public is the default. private data is excluded from public export and external embedding. Semantic query text is sent to the configured commercial embedding provider."
+    },
+    "selection": {
+      "catalog": "memory://catalog",
+      "default": "Omit memory on every tool to use the environment-selected default.",
+      "named": "Pass the same explicit memory name on every related tool call. There is no process-wide active selection and no fallback for unknown names.",
+      "named_capabilities": "memory://memories/{memory}/capabilities/current",
+      "named_ontology": "memory://memories/{memory}/schema/ontology/current",
+      "summary": "memory://memories/{memory}/summary"
+    },
+    "workflow": [
+      {
+        "action": "Read memory://catalog and choose default or a named memory. For content discovery, read its summary; an empty default does not imply that named memories are empty.",
+        "step": 1
+      },
+      {
+        "action": "Read capabilities or ontology only when the task needs them. Tool descriptions link actions to exact specs; read memory://operations only when the operation is not yet known.",
+        "step": 2
+      },
+      {
+        "action": "Read the selected operation spec before calling a manager; use its exact payload schema and example.",
+        "step": 3
+      },
+      {
+        "action": "Read memory://schema/current only for writes and pass its schema_fingerprint as the payload contract_fingerprint.",
+        "step": 4
+      },
+      {
+        "action": "Read memory://schema/query-ir/current before action=execute on memory_query_manage. Use ontology names exactly.",
+        "step": 5
+      },
+      {
+        "action": "Read the selected ontology before imports, joins, or queries and refresh it after shape-changing writes.",
+        "step": 6
+      }
+    ]
+  },
+  "server_instructions": "Start with memory://guide and memory://catalog. Use one memory name consistently; there is no active selection."
+}

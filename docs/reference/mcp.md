@@ -121,6 +121,12 @@ namespace declaration requires a non-empty description.
 They should describe meaning, not contain PII, credentials, or example records.
 Redeclaration replaces them; omitted optional descriptions are cleared.
 
+The packaged `resources/agent/texts.json` file is the source of truth for the
+MCP server instruction, `memory://guide`, and field-declaration descriptions.
+Python loads and validates those texts but does not duplicate their semantics.
+Skill workflows remain Markdown under `plugin/skills/` and are copied unchanged
+into the host-specific release bundles.
+
 Every data tool accepts optional `memory`. A manager receives `action`, a
 `payload` conforming to that operation's lazy specification, and `memory`.
 It returns `{action, memory, result}`. Payload validation errors link back to

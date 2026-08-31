@@ -2,6 +2,15 @@
 
 All notable changes to Analytical Memory are documented here.
 
+## 0.5.5 - 2026-08-31
+
+- Corrected the agent-visible `required` description to match the
+  required-on-create import contract introduced in 0.5.4.
+- Moved the MCP server instruction, complete agent guide, and shared
+  field-declaration descriptions into one packaged JSON resource.
+- Added contract tests that keep input and output schemas aligned with the
+  packaged agent guidance and verify its presence in distributions.
+
 ## 0.5.4 - 2026-08-31
 
 - Defined declared required fields as required when an import creates a Node,

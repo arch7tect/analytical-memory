@@ -4,6 +4,7 @@ from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from analytical_memory.agent_texts import agent_text
 from analytical_memory.limits import (
     MAX_QUERY_PATTERN_EDGES,
     MAX_QUERY_PATTERN_NODES,
@@ -46,27 +47,29 @@ QUERY_OPERATORS = frozenset(
 
 class FieldDeclarationInput(APIModel):
     description: str | None = Field(
-        default=None, min_length=1, description="Human-readable field meaning."
+        default=None,
+        min_length=1,
+        description=agent_text("field_declaration", "description"),
     )
     type: DeclaredJsonType | None = Field(
         default=None,
-        description="Optional enforced JSON type; omit to keep the field dynamic.",
+        description=agent_text("field_declaration", "type"),
     )
     required: bool = Field(
-        default=False, description="Require the field on every imported record."
+        default=False,
+        description=agent_text("field_declaration", "required"),
     )
     nullable: bool = Field(
-        default=True, description="Allow an explicitly present JSON null value."
+        default=True,
+        description=agent_text("field_declaration", "nullable"),
     )
     privacy: PrivacyClass | None = Field(
         default=None,
-        description=(
-            "Optional field privacy override; otherwise inherit entity privacy."
-        ),
+        description=agent_text("field_declaration", "privacy"),
     )
     searchable: bool = Field(
         default=False,
-        description="Index public string values for memory_search_manage action=text.",
+        description=agent_text("field_declaration", "searchable"),
     )
 
 
