@@ -599,15 +599,22 @@ def test_ambiguous_import_rolls_back_and_reports_orphan_evidence(
     assert object_path.is_file()
 
 
-def test_declaration_tightens_privacy_and_rejects_loosening(
+def test_declaration_reclassifies_current_data_in_both_directions(
     m5: tuple[Any, ...], tmp_path: Path
 ) -> None:
-    application, database, _ = m5
+    application, _, _ = m5
     source = _write(tmp_path / "sessions.jsonl", [{"id": "s1", "status": "ok"}])
     _import(application, source, "calls.Session")
     application.declare_entity(
         "calls.Session",
-        privacy="private",
+        privacy="public",
+        fields={
+            "status": {
+                "type": "string",
+                "privacy": "private",
+                "searchable": True,
+            }
+        },
         contract_fingerprint=application.schema.fingerprint,
     )
     node_id = application.execute_query(
@@ -617,13 +624,98 @@ def test_declaration_tightens_privacy_and_rejects_loosening(
             "return": [{"field": "session.id"}],
         }
     )["rows"][0]["bindings"]["session"]
+    assert application.memory_store.get_node(node_id)["privacy_class"] == "public"
+    assert application.search_text("ok", 10)["results"][0]["privacy_class"] == (
+        "private"
+    )
+    private_export = tmp_path / "field-private.json"
+    application.sanitized_export(private_export)
+    assert {
+        item["attribute_name"]
+        for item in json.loads(private_export.read_text(encoding="utf-8"))["attributes"]
+    } == {"id"}
+
+    application.declare_entity(
+        "calls.Session",
+        privacy="public",
+        fields={"status": {"type": "string", "searchable": True}},
+        contract_fingerprint=application.schema.fingerprint,
+    )
+
+    assert application.memory_store.get_node(node_id)["privacy_class"] == "public"
+    records = application.memory_store.snapshot_records()
+    assert {
+        item["privacy_class"]
+        for item in records["node_attribute"]
+        if item["node_id"] == node_id
+    } == {"public"}
+    assert application.search_text("ok", 10)["results"][0]["privacy_class"] == (
+        "public"
+    )
+
+    application.declare_entity(
+        "calls.Session",
+        privacy="private",
+        fields={"status": {"type": "string", "searchable": True}},
+        contract_fingerprint=application.schema.fingerprint,
+    )
     assert application.memory_store.get_node(node_id)["privacy_class"] == "private"
-    with pytest.raises(OntologyConflictError, match="cannot be loosened"):
-        application.declare_entity(
-            "calls.Session",
-            privacy="public",
-            contract_fingerprint=application.schema.fingerprint,
-        )
+    assert application.search_text("ok", 10)["results"][0]["privacy_class"] == (
+        "private"
+    )
+
+    application.declare_entity(
+        "calls.Session",
+        privacy="public",
+        fields={"status": {"type": "string", "searchable": True}},
+        contract_fingerprint=application.schema.fingerprint,
+    )
+    exported = tmp_path / "reclassified-public.json"
+    application.sanitized_export(exported)
+    assert json.loads(exported.read_text(encoding="utf-8"))["nodes"]
+
+
+def test_declaration_reclassifies_current_relations(
+    m5: tuple[Any, ...], tmp_path: Path
+) -> None:
+    application, _, _ = m5
+    _import(
+        application,
+        _write(tmp_path / "sessions.jsonl", [{"id": "s1", "customer_id": "c1"}]),
+        "calls.Session",
+    )
+    _import(
+        application,
+        _write(tmp_path / "customers.jsonl", [{"id": "c1"}]),
+        "crm.Customer",
+    )
+    application.materialize_join(
+        name="session-customer",
+        relation="BELONGS_TO",
+        from_={"type": "calls.Session", "fields": ["customer_id"]},
+        to={"type": "crm.Customer", "fields": ["id"]},
+        contract_fingerprint=application.schema.fingerprint,
+    )
+
+    application.declare_entity(
+        "crm.Customer",
+        privacy="private",
+        contract_fingerprint=application.schema.fingerprint,
+    )
+    assert (
+        application.memory_store.snapshot_records()["relation"][0]["privacy_class"]
+        == "private"
+    )
+
+    application.declare_entity(
+        "crm.Customer",
+        privacy="public",
+        contract_fingerprint=application.schema.fingerprint,
+    )
+    assert (
+        application.memory_store.snapshot_records()["relation"][0]["privacy_class"]
+        == "public"
+    )
 
 
 def test_reused_evidence_privacy_only_tightens(
@@ -1017,7 +1109,7 @@ def test_withdrawn_unobserved_declaration_does_not_pin_type(
     )
     withdrawn = application.ontology()["document"]["entities"][0]["fields"]["future"]
     assert withdrawn["type"] == "unresolved"
-    assert withdrawn["privacy"] == "private"
+    assert withdrawn["privacy"] == "public"
 
     application.declare_entity(
         "calls.Session",
@@ -1533,6 +1625,16 @@ def test_text_semantic_snapshot_and_public_export(tmp_path: Path) -> None:
     text = application.search_text("failed", 10)
     assert text["results"][0]["source_id"] == imported["source_id"]
     assert text["results"][0]["fragment_id"] == imported["fragment_id"]
+    private_text = application.search_text("private note", 10)
+    assert private_text["results"][0]["value"] == "private note"
+    assert private_text["results"][0]["privacy_class"] == "private"
+
+    note_profile = application.embedding_profile_create("note")["profile"]
+    assert application.embedding_rebuild(note_profile["id"])["coverage"] == {
+        "eligible_count": 0,
+        "indexed_count": 0,
+        "complete": True,
+    }
 
     profile = application.embedding_profile_create("status")["profile"]
     rebuilt = application.embedding_rebuild(profile["id"])

@@ -753,12 +753,6 @@ class SqlMemoryStore(MemoryStore):
                 else set(self._declaration_fields(str(existing["fields_json"])))
             )
             omitted_fields = sorted(previously_declared - set(fields))
-            if (
-                existing is not None
-                and str(existing["privacy_class"]) == "private"
-                and declaration.privacy == "public"
-            ):
-                raise OntologyConflictError("entity privacy cannot be loosened")
             observed_rows = connection.execute(
                 "SELECT * FROM observed_field WHERE entity_type = ?",
                 (declaration.entity_type,),
@@ -784,13 +778,6 @@ class SqlMemoryStore(MemoryStore):
                 }:
                     raise OntologyConflictError(
                         f"searchable field {name!r} already has type {known_type}"
-                    )
-                if (
-                    str(row["privacy_class"]) == "private"
-                    and specification["privacy"] == "public"
-                ):
-                    raise OntologyConflictError(
-                        f"field {name!r} privacy cannot be loosened"
                     )
                 if not specification["nullable"]:
                     null_row = connection.execute(
@@ -901,9 +888,7 @@ class SqlMemoryStore(MemoryStore):
                     "description = excluded.description, "
                     "json_type = CASE WHEN observed_field.json_type = 'unresolved' "
                     "THEN excluded.json_type ELSE observed_field.json_type END, "
-                    "privacy_class = CASE WHEN "
-                    "observed_field.privacy_class = 'private' "
-                    "THEN 'private' ELSE excluded.privacy_class END, "
+                    "privacy_class = excluded.privacy_class, "
                     "required = excluded.required, nullable = excluded.nullable, "
                     "searchable = excluded.searchable, declared = 1",
                     (
@@ -930,46 +915,67 @@ class SqlMemoryStore(MemoryStore):
                     searchable=bool(specification["searchable"]),
                     recorded_at=recorded_at,
                 )
-            if declaration.privacy == "private":
-                namespace, node_type = split_entity_type(declaration.entity_type)
+            namespace, node_type = split_entity_type(declaration.entity_type)
+            connection.execute(
+                "UPDATE node SET privacy_class = ?, updated_at = ? "
+                "WHERE namespace = ? AND type = ?",
+                (declaration.privacy, recorded_at, namespace, node_type),
+            )
+            connection.execute(
+                "UPDATE node_attribute SET privacy_class = ?, updated_at = ? "
+                "WHERE node_id IN "
+                "(SELECT id FROM node WHERE namespace = ? AND type = ?)",
+                (declaration.privacy, recorded_at, namespace, node_type),
+            )
+            connection.execute(
+                "UPDATE observed_field SET privacy_class = ? WHERE entity_type = ?",
+                (declaration.privacy, declaration.entity_type),
+            )
+            for name, specification in fields.items():
                 connection.execute(
-                    "UPDATE node SET privacy_class = 'private', updated_at = ? "
-                    "WHERE namespace = ? AND type = ?",
-                    (recorded_at, namespace, node_type),
+                    "UPDATE observed_field SET privacy_class = ? "
+                    "WHERE entity_type = ? AND field_name = ?",
+                    (specification["privacy"], declaration.entity_type, name),
                 )
                 connection.execute(
-                    "UPDATE node_attribute SET privacy_class = 'private', "
-                    "updated_at = ? WHERE node_id IN "
-                    "(SELECT id FROM node WHERE namespace = ? AND type = ?)",
-                    (recorded_at, namespace, node_type),
-                )
-                connection.execute(
-                    "UPDATE relation SET privacy_class = 'private', updated_at = ? "
-                    "WHERE source_node_id IN "
-                    "(SELECT id FROM node WHERE namespace = ? AND type = ?) "
-                    "OR target_node_id IN "
+                    "UPDATE node_attribute SET privacy_class = ?, updated_at = ? "
+                    "WHERE attribute_name = ? AND node_id IN "
                     "(SELECT id FROM node WHERE namespace = ? AND type = ?)",
                     (
+                        specification["privacy"],
                         recorded_at,
-                        namespace,
-                        node_type,
+                        name,
                         namespace,
                         node_type,
                     ),
                 )
-            for name, specification in fields.items():
-                if specification["privacy"] == "private":
-                    connection.execute(
-                        "UPDATE node_attribute SET privacy_class = 'private', "
-                        "updated_at = ? "
-                        "WHERE attribute_name = ? AND node_id IN "
-                        "(SELECT id FROM node WHERE namespace || '.' || type = ?)",
-                        (recorded_at, name, declaration.entity_type),
-                    )
             connection.execute(
-                "UPDATE search_document SET privacy_class = 'private' "
-                "WHERE target_id IN "
-                "(SELECT id FROM node_attribute WHERE privacy_class = 'private')"
+                "UPDATE relation SET privacy_class = CASE WHEN "
+                "(SELECT privacy_class FROM node "
+                "WHERE id = relation.source_node_id) = 'private' OR "
+                "(SELECT privacy_class FROM node "
+                "WHERE id = relation.target_node_id) = 'private' "
+                "THEN 'private' ELSE 'public' END, updated_at = ? "
+                "WHERE source_node_id IN "
+                "(SELECT id FROM node WHERE namespace = ? AND type = ?) "
+                "OR target_node_id IN "
+                "(SELECT id FROM node WHERE namespace = ? AND type = ?)",
+                (
+                    recorded_at,
+                    namespace,
+                    node_type,
+                    namespace,
+                    node_type,
+                ),
+            )
+            connection.execute(
+                "UPDATE search_document SET privacy_class = "
+                "(SELECT privacy_class FROM node_attribute "
+                "WHERE id = search_document.target_id) "
+                "WHERE target_kind = 'node_attribute' AND target_id IN "
+                "(SELECT id FROM node_attribute WHERE node_id IN "
+                "(SELECT id FROM node WHERE namespace = ? AND type = ?))",
+                (namespace, node_type),
             )
             connection.execute(
                 "UPDATE evidence_fragment SET privacy_class = 'private' "

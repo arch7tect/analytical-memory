@@ -197,8 +197,9 @@ derived records and relations. Credentials and other content that may not be
 stored are rejected before entering memory rather than represented by a third
 stored privacy class.
 
-Privacy may tighten from `public` to `private` in place. Loosening privacy on an
-existing record is rejected in V1 because its evidence may remain private.
+Redeclaring an entity may reclassify its current Nodes and attributes in either
+direction. Evidence privacy remains monotonic and is not loosened by a current
+entity declaration.
 
 ### Make the Query IR a core contract
 

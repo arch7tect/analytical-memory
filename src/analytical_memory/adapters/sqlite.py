@@ -87,7 +87,6 @@ class SqliteMemoryStore(SqlMemoryStore):
                     ON node_attribute.id = search_document.target_id
                 WHERE search_document_fts MATCH ?
                   AND search_document.lifecycle = 'active'
-                  AND search_document.privacy_class = 'public'
                   AND node_attribute.searchable = 1
                 ORDER BY rank, search_document.id
                 LIMIT ?
@@ -97,7 +96,7 @@ class SqliteMemoryStore(SqlMemoryStore):
             eligible_count = int(
                 connection.execute(
                     "SELECT COUNT(*) FROM node_attribute WHERE searchable = 1 "
-                    "AND json_type = 'string' AND privacy_class = 'public'"
+                    "AND json_type = 'string'"
                 ).fetchone()[0]
             )
             indexed_count = int(
@@ -110,10 +109,8 @@ class SqliteMemoryStore(SqlMemoryStore):
                     JOIN search_document_fts
                         ON search_document_fts.document_id = search_document.id
                     WHERE search_document.lifecycle = 'active'
-                      AND search_document.privacy_class = 'public'
                       AND node_attribute.searchable = 1
                       AND node_attribute.json_type = 'string'
-                      AND node_attribute.privacy_class = 'public'
                     """
                 ).fetchone()[0]
             )

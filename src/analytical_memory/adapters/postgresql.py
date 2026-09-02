@@ -455,7 +455,6 @@ class PostgresMemoryStore(SqlMemoryStore):
                 "JOIN node_attribute ON node_attribute.id = search_document.target_id "
                 "WHERE search_document_fts.content_tsv @@ to_tsquery('simple', ?) "
                 "AND search_document.lifecycle = 'active' "
-                "AND search_document.privacy_class = 'public' "
                 "AND node_attribute.searchable = 1 "
                 "ORDER BY rank, search_document.id LIMIT ?",
                 (tsquery, tsquery, limit),
@@ -463,7 +462,7 @@ class PostgresMemoryStore(SqlMemoryStore):
             eligible_count = int(
                 connection.execute(
                     "SELECT COUNT(*) FROM node_attribute WHERE searchable = 1 "
-                    "AND json_type = 'string' AND privacy_class = 'public'"
+                    "AND json_type = 'string'"
                 ).fetchone()[0]
             )
             indexed_count = int(
@@ -474,10 +473,8 @@ class PostgresMemoryStore(SqlMemoryStore):
                     "search_document.target_id "
                     "JOIN search_document_fts ON search_document_fts.document_id = "
                     "search_document.id WHERE search_document.lifecycle = 'active' "
-                    "AND search_document.privacy_class = 'public' "
                     "AND node_attribute.searchable = 1 "
-                    "AND node_attribute.json_type = 'string' "
-                    "AND node_attribute.privacy_class = 'public'"
+                    "AND node_attribute.json_type = 'string'"
                 ).fetchone()[0]
             )
         return {

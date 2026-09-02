@@ -315,7 +315,8 @@ Approved v1 contract: OpenAI `text-embedding-3-small`, 1536 dimensions,
 `unicode-nfc-lines-v1` preprocessing, cosine similarity, float responses, and
 an API key loaded from a gitignored `.env`. The default provider privacy ceiling
 is `restricted`, so all content except explicitly `forbidden` text is eligible.
-Privacy classes on existing graph and search records are immutable in V1.
+Privacy classes on current graph and search records follow the latest entity
+declaration. Evidence privacy remains monotonic.
 
 ## Milestone 5: Dynamic ontology and JSON Query IR
 
@@ -364,8 +365,8 @@ Status: implemented.
 - a two-class privacy contract with `public` as default, optional `private`
   schema annotations, public-only shareable export and external processing, and
   pre-commit rejection of credentials and other prohibited stored content;
-- in-place privacy tightening from public to private, rejected loosening, and a
-  fixed public-only ceiling for external embedding providers;
+- in-place privacy reclassification in either direction through entity
+  redeclaration, and public-only external embedding inputs;
 - rollback compensation that removes temporary and exclusively newly installed
   evidence and preserves pre-existing deduplicated objects; crash-window orphan
   cleanup remains an evidence-audit concern;

@@ -77,7 +77,7 @@ _OPERATION_DESCRIPTIONS = {
     "retention": "Report, plan, release, or retire evidence through the CLI.",
     "sanitized_export": "Export current public data without raw evidence bytes.",
     "search_semantic": "Rank public facts by exact local vector similarity.",
-    "search_text": "Full-text search current public searchable string attributes.",
+    "search_text": "Full-text search current searchable string attributes.",
     "snapshot": "Create, verify, or restore a complete local snapshot.",
     "transfer": "Export or import canonical records across supported backends.",
     "traverse_relations": "Traverse bounded active relation paths from one Node.",

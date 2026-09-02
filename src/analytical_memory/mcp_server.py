@@ -747,7 +747,8 @@ def create_mcp_server(
         name="memory_ontology_declare_entity",
         description=(
             "Create or replace optional descriptions, privacy, and field validation "
-            "metadata for one entity type. Undeclared fields may still be imported."
+            "metadata for one entity type. Redeclaration reclassifies current data; "
+            "undeclared fields may still be imported."
         ),
         annotations=ToolAnnotations(
             read_only_hint=False,
@@ -1374,8 +1375,8 @@ def create_mcp_server(
     @_internal_handler(
         name="memory_search_text",
         description=(
-            "Full-text search current public searchable string attributes in the "
-            "selected memory and return direct provenance and coverage."
+            "Full-text search current searchable string attributes in the selected "
+            "memory and return direct provenance and coverage."
         ),
         annotations=ToolAnnotations(
             read_only_hint=True,
@@ -1988,7 +1989,7 @@ def create_mcp_server(
     @server.tool(
         name="memory_search_manage",
         description=(
-            "Local public-text search. Spec: text=memory://operations/search_text."
+            "Local full-text search. Spec: text=memory://operations/search_text."
         ),
         annotations=ToolAnnotations(
             read_only_hint=True,

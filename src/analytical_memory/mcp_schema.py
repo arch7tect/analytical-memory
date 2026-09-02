@@ -134,7 +134,7 @@ _OUTPUT_FIELD_DESCRIPTIONS = {
     "schema_fingerprint": "Structural schema fingerprint used to produce the result.",
     "score": "Exact similarity score, where a larger value is a better match.",
     "search_documents": "Number of current search documents affected.",
-    "searchable": "Whether the field participates in public text search.",
+    "searchable": "Whether the field participates in local text search.",
     "selected_count": "Number of metric observations selected after exact filtering.",
     "similarity": "Similarity function fixed by the embedding profile.",
     "skipped_null_or_missing": "Source Nodes skipped for null or absent join fields.",

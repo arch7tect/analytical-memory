@@ -2,6 +2,14 @@
 
 All notable changes to Analytical Memory are documented here.
 
+## 0.6.0 - 2026-09-02
+
+- Made local full-text search depend only on the field's `searchable` flag,
+  while keeping public export and external embeddings privacy-filtered.
+- Allowed entity redeclaration to reclassify current Nodes, attributes,
+  relations, and search documents between public and private in either
+  direction without changing evidence privacy history.
+
 ## 0.5.5 - 2026-08-31
 
 - Corrected the agent-visible `required` description to match the

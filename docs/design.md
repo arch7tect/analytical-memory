@@ -106,13 +106,12 @@ Clients read that ontology, construct a query against it, execute the query,
 and receive results with provenance and the ontology fingerprint used for
 interpretation.
 
-### Privacy is conservative and identity-bound
+### Privacy is owner-declared for current data
 
-V1 has only `public` and `private`, with `public` as the default. Derived records
-inherit `private` when any input is private. Lowering a class requires a
-separately materialized sanitizer output with a new content identity. Existing
-records may tighten from `public` to `private` in place. Loosening an existing
-record is rejected because its evidence may remain private.
+V1 has only `public` and `private`, with `public` as the default. Evidence
+records retain the strictest class seen across acquisitions. Current entities
+and fields use the latest EntityDeclaration and can be reclassified in either
+direction without changing their identity.
 
 ### Repeated work is idempotent
 
@@ -864,17 +863,16 @@ exports and configured external processors. Private records are excluded from
 both. Private restore snapshots remain controlled portability artifacts rather
 than shareable exports and may contain both classes.
 
-An EntityDeclaration may set entity-level privacy and override individual
-declared fields to `private`. Undeclared fields inherit the entity-level class.
-Without a declaration, imported fields are public. A field may tighten but not
-weaken the entity-level class.
+An EntityDeclaration sets entity-level privacy and may override individual
+declared fields in either direction. Undeclared fields inherit the entity-level
+class. Without a declaration, imported fields are public. Redeclaration applies
+the new classes to current Nodes, attributes, relations, and search documents.
 
-The effective class of a derived record is the maximum of its declared class
-and every input source, acquisition, object, fragment, and target. The class of
-an existing source, node, attribute, relation, or search document is immutable
-in V1. Evidence privacy may only tighten when a new acquisition is recorded.
-Sanitization creates a distinct derived object, records the derivation, and
-assigns a new digest.
+Evidence objects, fragments, acquisitions, and sources retain monotonic privacy:
+their effective class may tighten when a private acquisition is recorded but is
+not loosened by entity redeclaration. Shareable export and external embeddings
+use the current entity and field classes. Local full-text search instead uses
+only the field's `searchable` declaration and may return private values.
 
 Automation is not a trust boundary. Structured write tools validate the same
 schemas and permissions as the Python API. Evidence reads are bounded and

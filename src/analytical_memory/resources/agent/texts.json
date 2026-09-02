@@ -4,7 +4,7 @@
     "nullable": "Allow an explicitly present JSON null value.",
     "privacy": "Optional field privacy override; otherwise inherit entity privacy.",
     "required": "Whether a declared field must be present when an import creates a Node; key-matched updates may omit it and retain the current value.",
-    "searchable": "Index public string values for memory_search_manage action=text.",
+    "searchable": "Index string values for local memory_search_manage action=text, independent of privacy.",
     "type": "Optional enforced JSON type; omit to keep the field dynamic."
   },
   "guide": {
