@@ -11,6 +11,14 @@ from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_WHEEL_SUFFIXES = (
+    "analytical_memory/analytics.py",
+    "analytical_memory/native_store.py",
+    "analytical_memory/resources/schema/legacy-0.6.1.json",
+    "analytical_memory/resources/examples/retail/orders.jsonl",
+    "analytical_memory/resources/examples/retail/query.json",
+    "analytical_memory/resources/examples/retail/analysis.json",
+    "analytical_memory/resources/migrations/sqlite/010_native_analytics.sql",
+    "analytical_memory/resources/migrations/postgresql/010_native_analytics.sql",
     "analytical_memory/sqlite_migrations.py",
     "analytical_memory/postgresql_migrations.py",
     "analytical_memory/resources/agent/texts.json",

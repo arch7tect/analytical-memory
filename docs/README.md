@@ -1,16 +1,16 @@
 # Documentation
 
-These guides describe the current implementation. Commands assume a source
-checkout unless a guide explicitly describes a release plugin. Start with the
-workflow you need; no architecture background is required for installation.
+User guides run from a downloaded, verified release bundle. Source checkout
+commands are for contribution and release work. The quickstart is a human
+walkthrough with commands and results. The root README links
+directly to plugin installation for assistants arriving via the GitHub repository.
 
 ## Get started
 
 | Guide | Use it to |
 | --- | --- |
-| [Getting started](getting-started.md) | Install from source and import, connect, and query sample data |
-| [MCP installation](mcp-installation.md) | Connect the standalone local MCP server to an assistant |
-| [Plugin installation](plugin-installation.md) | Install the server and skills together for Claude Code, Kimi Code, or Codex |
+| [Getting started](getting-started.md) | Use a bundle: import, connect, aggregate and drill with commands and results |
+| [Plugin installation](plugin-installation.md) | Install the complete plugin for Claude, Kimi, Codex, or a generic host such as OpenCode |
 
 ## Use and operate the memory
 
@@ -38,6 +38,15 @@ workflow you need; no architecture background is required for installation.
 - [Implementation history](implementation-plan.md) retains completed milestone
   acceptance criteria. Milestones 0–4 describe a superseded ingestion model;
   use the current guides for commands and behavior.
+
+## Native analytics
+
+- [Native analytics reference](reference/native-analytics.md): v2 queries,
+  bundles, observations, freshness and exact detail.
+- [ADR 0002](decisions/0002-native-analytics-observations.md): accepted decisions.
+- [Delivery record](native-analytics-delivery.md): slices, verification and limits.
+- [Accepted proposal](proposals/native-analytics-and-quickstart.md): original
+  requirements and fixture expectations; the reference defines current syntax.
 
 ## Documentation maintenance
 

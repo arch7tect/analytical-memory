@@ -1,0 +1,16 @@
+{"ticket_id": "T01", "order_id": "O-101", "issue_code": "late_delivery", "message": "Synthetic support contact 1: late_delivery."}
+{"ticket_id": "T02", "order_id": "O-104", "issue_code": "late_delivery", "message": "Synthetic support contact 2: late_delivery."}
+{"ticket_id": "T03", "order_id": "O-104", "issue_code": "late_delivery", "message": "Synthetic support contact 3: late_delivery."}
+{"ticket_id": "T04", "order_id": "O-104", "issue_code": "late_delivery", "message": "Synthetic support contact 4: late_delivery."}
+{"ticket_id": "T05", "order_id": "O-104", "issue_code": "late_delivery", "message": "Synthetic support contact 5: late_delivery."}
+{"ticket_id": "T06", "order_id": "O-107", "issue_code": "late_delivery", "message": "Synthetic support contact 6: late_delivery."}
+{"ticket_id": "T07", "order_id": "O-108", "issue_code": "damaged", "message": "Synthetic support contact 7: damaged."}
+{"ticket_id": "T08", "order_id": "O-110", "issue_code": "late_delivery", "message": "Synthetic support contact 8: late_delivery."}
+{"ticket_id": "T09", "order_id": "O-111", "issue_code": "damaged", "message": "Synthetic support contact 9: damaged."}
+{"ticket_id": "T10", "order_id": "O-112", "issue_code": "late_delivery", "message": "Synthetic support contact 10: late_delivery."}
+{"ticket_id": "T11", "order_id": "O-102", "issue_code": "billing", "message": "Synthetic support contact 11: billing."}
+{"ticket_id": "T12", "order_id": "O-105", "issue_code": "billing", "message": "Synthetic support contact 12: billing."}
+{"ticket_id": "T13", "order_id": "O-109", "issue_code": "billing", "message": "Synthetic support contact 13: billing."}
+{"ticket_id": "T14", "order_id": "O-112", "issue_code": "billing", "message": "Synthetic support contact 14: billing."}
+{"ticket_id": "T15", "order_id": "O-999", "issue_code": "late_delivery", "message": "Synthetic support contact 15: late_delivery."}
+{"ticket_id": "T16", "issue_code": "damaged", "message": "Synthetic support contact 16: damaged."}

@@ -2,6 +2,23 @@
 
 All notable changes to Analytical Memory are documented here.
 
+## 0.7.0 - 2026-10-17
+
+- Add Query IR v2 native optional groups, identity-aware counts and integer sums,
+  exact ratios, stable group IDs and named consistent analysis bundles.
+- Add generation/revision guards, live and immutable saved drill-down, explicit
+  analytical capture, native Metric separation and freshness/privacy checks.
+- Add additive SQLite/PostgreSQL migrations, snapshot format 2 with verified
+  0.6.1 restore compatibility, and transfer format 2 with native manifests.
+- Replace the default quickstart with an orders/support delivery walkthrough;
+  retain the original smoke example under `memory-quickstart --smoke`.
+- Make installation bundle-first and add a command-by-command quickstart with
+  actual result excerpts and evolving ontology diagrams; link plugin
+  installation directly from the product README.
+- Unify installation around the complete plugin, add a generic bundle and
+  OpenCode 2 configuration generator for its skills and included MCP server,
+  and include PostgreSQL dependencies in every host launch.
+
 ## 0.6.1 - 2026-10-17
 
 - Reorganized human documentation around a product README, a guide index,

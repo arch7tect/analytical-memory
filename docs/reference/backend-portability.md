@@ -5,23 +5,24 @@ backend selected without changing application, CLI, MCP request, or result
 shapes.
 
 For initial setup, see [getting started](../getting-started.md) or
-[MCP installation](../mcp-installation.md). The base plugin runtime does not
-install the PostgreSQL extra; use the standalone source route for PostgreSQL.
+[plugin installation](../plugin-installation.md). Every plugin launch installs
+the PostgreSQL dependency extra; backend selection uses the same plugin.
 
 ## Select a backend
 
 SQLite needs no additional dependency:
 
 ```console
-uv run memory init
+uv run --frozen --no-dev memory init
 ```
 
 For local PostgreSQL, use the included [Docker Compose service](../../compose.yaml).
 Install Docker with Compose support and start the Docker engine, then run these
-commands from the repository root:
+commands from the unpacked `PAYLOAD_ROOT` (see
+[bundle preparation](../plugin-installation.md#download-and-unpack)):
 
 ```console
-uv sync --locked --extra postgres
+uv sync --frozen --no-dev --no-editable --extra postgres --python 3.12
 docker compose up --wait --wait-timeout 60 postgres
 docker compose exec -T postgres pg_isready -U postgres -d analytical_memory
 ```
@@ -32,7 +33,10 @@ database only on `127.0.0.1:54329`. The bundled development database is
 `analytical_memory_test`. These are local development credentials, also used
 by the test suite.
 
-Add the following to the ignored `.env` for this Docker database:
+Add the following to the private per-user `.env` described in
+[plugin data configuration](../plugin-installation.md#local-data) for this Docker
+database. Also set `ANALYTICAL_MEMORY_EVIDENCE_ROOT` to a permanent absolute
+host path outside the installation directory:
 
 ```dotenv
 ANALYTICAL_MEMORY_BACKEND=postgresql
@@ -45,8 +49,8 @@ Initialize and verify the selected backend:
 ```console
 docker compose exec -T postgres psql -U postgres -d analytical_memory \
   -v ON_ERROR_STOP=1 -c 'CREATE SCHEMA IF NOT EXISTS analytical_memory;'
-uv run --extra postgres memory init
-uv run --extra postgres memory status
+uv run --frozen --no-dev --no-editable --extra postgres --python 3.12 memory init
+uv run --frozen --no-dev --no-editable --extra postgres --python 3.12 memory status
 ```
 
 `memory init` creates and migrates tables inside an existing schema; it does
@@ -54,7 +58,7 @@ not create the schema container. The database role must have permission to
 create tables there. The bundled Docker role can create the dedicated schema
 with the command above; for another deployment, have its owner create it first.
 
-Keep this environment and the same evidence root when launching the MCP server.
+Keep this environment and the same evidence root when the plugin starts its server.
 The database runs in Docker; the CLI, MCP process, and evidence directory remain
 on the host. For an independently managed PostgreSQL 17 deployment, substitute
 its connection URL and schema in `.env`.
@@ -84,7 +88,8 @@ migration in one transaction.
 
 ## Local PostgreSQL conformance
 
-Use Docker for the complete SQLite and PostgreSQL test run. A separate Compose
+This subsection is for developers in a source checkout, which includes the
+test suite. Use Docker for the complete SQLite and PostgreSQL test run. A separate Compose
 project keeps test containers apart from the normal local installation. Port
 54329 must be available; if the normal local Compose service is already running,
 reuse that service and skip the test-container startup command.
@@ -120,7 +125,7 @@ local service.
 Export reads the source only and writes a new canonical artifact:
 
 ```console
-uv run memory transfer export memory-transfer.json
+uv run --frozen --no-dev memory transfer export memory-transfer.json
 ```
 
 The artifact preserves canonical IDs, timestamps, provenance, current values,
@@ -136,11 +141,11 @@ as described above:
 ```console
 ANALYTICAL_MEMORY_BACKEND=postgresql \
 ANALYTICAL_MEMORY_POSTGRES_SCHEMA=analytical_memory \
-uv run memory init
+uv run --frozen --no-dev --no-editable --extra postgres --python 3.12 memory init
 
 ANALYTICAL_MEMORY_BACKEND=postgresql \
 ANALYTICAL_MEMORY_POSTGRES_SCHEMA=analytical_memory \
-uv run memory transfer import memory-transfer.json
+uv run --frozen --no-dev --no-editable --extra postgres --python 3.12 memory transfer import memory-transfer.json
 ```
 
 Import verifies the artifact before writing, then writes canonical records and

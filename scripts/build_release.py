@@ -45,7 +45,7 @@ def build_release(tag: str | None = None) -> list[Path]:
     ]
     if not all(path.is_file() for path in artifacts):
         raise RuntimeError("uv build did not create the expected distributions")
-    for host in ("claude", "kimi", "openai"):
+    for host in plugin_bundles.HOSTS:
         filename = f"{plugin_bundles.PLUGIN_NAME}-{version}-{host}.tar.gz"
         destination = RELEASE_OUTPUT / filename
         _archive(

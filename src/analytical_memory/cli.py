@@ -112,7 +112,16 @@ def _parser() -> argparse.ArgumentParser:
     query = subcommands.add_parser("query")
     query.add_argument(
         "query_name",
-        choices=("current-metric", "execute"),
+        choices=(
+            "current-metric",
+            "execute",
+            "analysis-execute",
+            "analysis-capture",
+            "drill-down",
+            "analysis-read",
+            "relation-inspect",
+            "data-state",
+        ),
     )
     query.add_argument("--definition-version")
     query.add_argument("--dimensions", default="{}")
@@ -371,6 +380,22 @@ def _execute(arguments: argparse.Namespace) -> dict[str, Any]:
             arguments.description,
         ).model_dump(mode="json")
     if arguments.command == "query":
+        if arguments.query_name == "data-state":
+            return api.data_state().model_dump(mode="json")
+        if arguments.query_name not in {"execute", "current-metric"}:
+            if arguments.document is None:
+                raise ValueError("--document is required for native operations")
+            document = strict_json_loads(arguments.document.read_text(encoding="utf-8"))
+            if not isinstance(document, dict):
+                raise ValueError("operation document must be a JSON object")
+            operation = {
+                "analysis-execute": "analysis_execute",
+                "analysis-capture": "analysis_capture",
+                "drill-down": "query_drill_down",
+                "analysis-read": "analysis_read",
+                "relation-inspect": "relation_inspect",
+            }[arguments.query_name]
+            return api.native_operation(operation, document).model_dump(mode="json")
         if arguments.query_name == "execute":
             if arguments.document is None:
                 raise ValueError("--document is required for query execute")

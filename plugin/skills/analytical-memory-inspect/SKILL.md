@@ -34,3 +34,16 @@ initialized ontology and from an unsupported capability.
 Do not import data, declare ontology, materialize joins, run queries, inspect raw
 evidence, or call any other mutating tool. Keep the summary concise and use the
 current metadata descriptions rather than inferring business meaning from names.
+
+
+## Native analytics discovery
+
+When asked about analytical capabilities, report native grouping, identity
+counts, integer sums, exact ratios, analysis bundles, saved observations and
+live/saved drill-down from the current capability and operation metadata.
+Distinguish a saved result's recorded state from current memory facts and
+explain freshness states from the documented contract.
+
+This inspection workflow does not execute analyses, drill into records or
+capture observations. For a request to calculate or inspect actual analytical
+results, use the `analytical-memory` skill and the selected operation's spec.

@@ -74,6 +74,29 @@
     ],
     "dimensions": "canonical_json_object"
   },
+  "native_analytics": {
+    "limits": {
+      "binding_work": 100000,
+      "facts": 50000,
+      "members": 16,
+      "seconds": 10
+    },
+    "numeric": "safe_integer_and_exact_ratio",
+    "observations": "immutable_evidence_manifest",
+    "query_ir_versions": [
+      "1",
+      "2"
+    ],
+    "semantics": "native-analytics-1",
+    "state": "generation_uuid_and_monotonic_fact_revision",
+    "unsupported": [
+      "avg",
+      "having",
+      "nested_optional",
+      "independent_optional_branches",
+      "fractional_sum"
+    ]
+  },
   "ontology": {
     "declarations_optional": true,
     "field_identity": [
@@ -143,7 +166,9 @@
     "EmbeddingProfile",
     "EmbeddingRecord",
     "IngestionBatch",
-    "SchemaMigration"
+    "SchemaMigration",
+    "MemoryState",
+    "AnalysisObservation"
   ],
   "relation": {
     "directions": [
@@ -312,8 +337,8 @@
       ]
     }
   },
-  "schema_document_version": "8",
-  "schema_fingerprint": "3176355e7b7637b312c768bef5a11f299d2cb144cff8645dc0d5c306eb099b39",
+  "schema_document_version": "9",
+  "schema_fingerprint": "073e47608393613bec0dd411f192010e17fb3787adc484c2ca70b4ba2a53ee2a",
   "search_document": {
     "coverage": "active_indexed_documents_vs_searchable_attributes",
     "fts_engine": "sqlite-fts5",
@@ -323,7 +348,10 @@
   },
   "snapshot": {
     "artifact_kind": "private-restore-snapshot",
-    "format_version": "1",
+    "format_version": "2",
+    "legacy_readers": [
+      "0.6.1-format-1-verified-adapter"
+    ],
     "projections_excluded": [
       "search_document_fts",
       "embedding_index"

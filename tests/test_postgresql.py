@@ -269,17 +269,17 @@ def test_postgresql_applies_each_manifest_migration(
     assert isinstance(postgres_store, PostgresMemoryStore)
     migrations = tmp_path / "postgresql-migrations"
     shutil.copytree(default_postgresql_migrations_directory(), migrations)
-    tenth = migrations / "010_probe.sql"
+    tenth = migrations / "011_probe.sql"
     tenth.write_text(
         "CREATE TABLE migration_probe (id INTEGER PRIMARY KEY);\n",
         encoding="utf-8",
     )
     manifest_path = migrations / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["schema_version"] = 10
+    manifest["schema_version"] = 11
     manifest["migrations"].append(
         {
-            "version": 10,
+            "version": 11,
             "file": tenth.name,
             "checksum": sha256_bytes(tenth.read_bytes()),
             "target_fingerprint": load_schema().fingerprint,
@@ -295,13 +295,14 @@ def test_postgresql_applies_each_manifest_migration(
     store.initialize()
     store.initialize()
 
-    assert store.status().schema_version == 10
+    assert store.status().schema_version == 11
     assert [row["version"] for row in store.integrity()["migrations"]] == [
         6,
         7,
         8,
         9,
         10,
+        11,
     ]
     with store._connect() as connection:
         relation = connection.execute(

@@ -3,8 +3,8 @@
 This reference covers integrity checks, backup and restore, backend transfer,
 evidence verification, and retention for a local v1 installation.
 
-For installation and path selection, see [MCP installation](../mcp-installation.md).
-Plugin and standalone defaults differ; every command below must use the same
+For installation and path selection, see [plugin installation](../plugin-installation.md).
+Plugin runtime and direct CLI defaults differ; every command below must use the same
 target configuration as the server. To operate on a named memory, place
 `--memory <name>` before the command group, for example
 `uv run memory --memory research validate`.

@@ -10,6 +10,7 @@ from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field, ValidationError
 
 from analytical_memory.agent_texts import agent_document, agent_text
+from analytical_memory.analytics import AnalyticsResponse
 from analytical_memory.api import MemoryAPI
 from analytical_memory.api_models import (
     AnalyticalAttributeResponse,
@@ -29,7 +30,6 @@ from analytical_memory.api_models import (
     KeyFieldInput,
     MetricExplanationResponse,
     OntologyResponse,
-    QueryIRDocument,
     QueryIRResponse,
     RelationExplanationResponse,
     SearchResponse,
@@ -64,12 +64,7 @@ from analytical_memory.version import __version__
 
 MemorySelection = Annotated[
     str | None,
-    Field(
-        description=(
-            "Name from memory://catalog; omit for default. Unknown names fail and "
-            "there is no active selection."
-        )
-    ),
+    Field(description=("Memory from memory://catalog; omitted=default. No fallback.")),
 ]
 ContractFingerprint = Annotated[
     str,
@@ -224,6 +219,10 @@ class MemoryJoinMaterializationResponse(
 
 
 class MemoryQueryIRResponse(DescribedMCPResponse, QueryIRResponse):
+    memory: ResolvedMemory
+
+
+class MemoryAnalyticsResponse(DescribedMCPResponse, AnalyticsResponse):
     memory: ResolvedMemory
 
 
@@ -1166,7 +1165,7 @@ def create_mcp_server(
     @_internal_handler(
         name="memory_query_execute",
         description=(
-            "Execute one bounded read-only Query IR v1 relational/graph request. Read "
+            "Execute one bounded read-only Query IR v1/v2 request. Read "
             "the selected ontology and memory://schema/query-ir/current first."
         ),
         annotations=ToolAnnotations(
@@ -1179,23 +1178,24 @@ def create_mcp_server(
     )
     def execute_query(
         document: Annotated[
-            QueryIRDocument,
+            dict[str, Any],
             Field(
                 description=(
-                    "Query IR v1 document. Entity, attribute, and relation names must "
-                    "come from the selected ontology; exact syntax and examples are in "
+                    "Query IR v1/v2. Use entity, field and relation names from the "
+                    "selected ontology; syntax and examples are in "
                     "memory://schema/query-ir/current."
                 )
             ),
         ],
         memory: MemorySelection = None,
-    ) -> MemoryQueryIRResponse:
+    ) -> MemoryQueryIRResponse | MemoryAnalyticsResponse:
         try:
             selected, api = selected_api(memory)
-            query = document.model_dump(mode="json", by_alias=True, exclude_unset=True)
-            return _tag_response(
-                api.execute_query(query), selected, MemoryQueryIRResponse
-            )
+            query = document
+            response = api.execute_query(query)
+            if query.get("query_ir_version") == "2":
+                return _tag_response(response, selected, MemoryAnalyticsResponse)
+            return _tag_response(response, selected, MemoryQueryIRResponse)
         except (MemoryErrorBase, OSError, ValueError) as exc:
             raise _tool_error(exc, memory) from exc
 
@@ -1815,7 +1815,8 @@ def create_mcp_server(
         description=(
             "Ingest data. Specs: jsonl_import=memory://operations/jsonl_import; "
             "analytical_attribute=memory://operations/analytical_attribute_write; "
-            "analytical_metric=memory://operations/analytical_metric_write."
+            "analytical_metric=memory://operations/analytical_metric_write; "
+            "analysis_capture=memory://operations/analysis_capture."
         ),
         annotations=ToolAnnotations(
             read_only_hint=False,
@@ -1827,12 +1828,31 @@ def create_mcp_server(
     )
     def manage_ingest(
         action: Annotated[
-            Literal["jsonl_import", "analytical_attribute", "analytical_metric"],
+            Literal[
+                "jsonl_import",
+                "analytical_attribute",
+                "analytical_metric",
+                "analysis_capture",
+            ],
             Field(description="Selected ingestion action."),
         ],
         payload: ManagerPayload,
         memory: MemorySelection = None,
     ) -> ManagerResponse:
+        if action == "analysis_capture":
+
+            def capture_handler(request: Any) -> MemoryAnalyticsResponse:
+                try:
+                    selected, api = selected_api(memory)
+                    return _tag_response(
+                        api.analysis_capture(request.document),
+                        selected,
+                        MemoryAnalyticsResponse,
+                    )
+                except (MemoryErrorBase, OSError, ValueError) as exc:
+                    raise _tool_error(exc, memory) from exc
+
+            return _invoke_managed("analysis_capture", payload, memory, capture_handler)
         if action == "jsonl_import":
             return _invoke_managed(
                 "jsonl_import",
@@ -1933,9 +1953,14 @@ def create_mcp_server(
     @server.tool(
         name="memory_query_manage",
         description=(
-            "Bounded reads. Specs: execute=memory://operations/query_execute; "
-            "current_metric=memory://operations/query_current_metric; "
-            "traverse=memory://operations/traverse_relations."
+            "Specs: memory://operations/query_execute; "
+            "memory://operations/query_current_metric; "
+            "memory://operations/traverse_relations; "
+            "memory://operations/analysis_execute; "
+            "memory://operations/query_drill_down; "
+            "memory://operations/relation_inspect; "
+            "memory://operations/analysis_read; "
+            "memory://operations/data_state."
         ),
         annotations=ToolAnnotations(
             read_only_hint=True,
@@ -1947,12 +1972,41 @@ def create_mcp_server(
     )
     def manage_query(
         action: Annotated[
-            Literal["execute", "current_metric", "traverse"],
+            Literal[
+                "execute",
+                "current_metric",
+                "traverse",
+                "analysis_execute",
+                "query_drill_down",
+                "relation_inspect",
+                "analysis_read",
+                "data_state",
+            ],
             Field(description="Selected query action."),
         ],
         payload: ManagerPayload,
         memory: MemorySelection = None,
     ) -> ManagerResponse:
+        if action in {
+            "analysis_execute",
+            "query_drill_down",
+            "relation_inspect",
+            "analysis_read",
+            "data_state",
+        }:
+
+            def native_handler(request: Any) -> MemoryAnalyticsResponse:
+                try:
+                    selected, api = selected_api(memory)
+                    return _tag_response(
+                        api.native_operation(action, request.document),
+                        selected,
+                        MemoryAnalyticsResponse,
+                    )
+                except (MemoryErrorBase, OSError, ValueError) as exc:
+                    raise _tool_error(exc, memory) from exc
+
+            return _invoke_managed(action, payload, memory, native_handler)
         if action == "execute":
             return _invoke_managed(
                 "query_execute",

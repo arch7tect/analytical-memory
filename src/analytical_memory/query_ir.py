@@ -14,9 +14,36 @@ DEFAULT_QUERY_OFFSET = 0
 
 
 def query_ir_contract_document(schema_fingerprint: str) -> dict[str, Any]:
+    from analytical_memory.analytics import (
+        SEMANTICS,
+        AnalyticsResponse,
+        QueryIRV2Document,
+    )
     from analytical_memory.api_models import QueryIRDocument, QueryIRResponse
 
     return {
+        "supported_versions": ["1", "2"],
+        "v2": {
+            "input_schema": QueryIRV2Document.model_json_schema(by_alias=True),
+            "result_schema": AnalyticsResponse.model_json_schema(by_alias=True),
+            "semantics_version": SEMANTICS,
+            "numeric": (
+                "safe integers; exact numerator/denominator; 12-place half-even decimal"
+            ),
+            "optional": (
+                "one anchored node; filters inside optional; active exact logical_key"
+            ),
+            "pagination": (
+                "complete input; output only; stable population and group IDs"
+            ),
+            "errors": [
+                "analytics_error",
+                "analytics_limit_exceeded",
+                "analytics_integrity_error",
+                "stale_query_result",
+                "observation_unavailable",
+            ],
+        },
         "contract_document_version": "1",
         "query_ir_version": QUERY_IR_VERSION,
         "schema_fingerprint": schema_fingerprint,

@@ -8,9 +8,19 @@
     "idempotency": "entity_type_key_selector_content_hash",
     "semantics": "atomic_patch_upsert"
   },
-  "json_types": ["unresolved", "string", "number", "boolean", "object", "array"],
+  "json_types": [
+    "unresolved",
+    "string",
+    "number",
+    "boolean",
+    "object",
+    "array"
+  ],
   "ontology_version": "2.0.0",
-  "privacy_classes": ["public", "private"],
+  "privacy_classes": [
+    "public",
+    "private"
+  ],
   "record_types": [
     "Source",
     "AnalyticalRun",
@@ -33,11 +43,17 @@
     "EmbeddingProfile",
     "EmbeddingRecord",
     "IngestionBatch",
-    "SchemaMigration"
+    "SchemaMigration",
+    "MemoryState",
+    "AnalysisObservation"
   ],
   "relation": {
-    "directions": ["outbound", "inbound", "both"],
+    "directions": [
+      "outbound",
+      "inbound",
+      "both"
+    ],
     "properties_allowed": false
   },
-  "schema_document_version": "8"
+  "schema_document_version": "9"
 }

@@ -15,7 +15,7 @@ from analytical_memory.ports import EvidenceStore, MemoryStore
 from analytical_memory.schema_contract import SchemaContract
 
 SNAPSHOT_KIND = "private-restore-snapshot"
-SNAPSHOT_VERSION = "1"
+SNAPSHOT_VERSION = "2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +61,9 @@ def create_snapshot(
         if row["provider"] == "local-filesystem" and row["root_id"] == "default"
     }
     retired = {str(row["evidence_object_id"]) for row in records["evidence_retirement"]}
+    required_manifests = {
+        row["manifest_digest"] for row in records.get("analysis_observation", [])
+    }
     members: dict[str, bytes] = {
         "records.json": records_bytes,
         "schema.json": schema_bytes,
@@ -88,6 +91,12 @@ def create_snapshot(
                 "digest": digest,
                 "state": state,
             }
+            if digest in required_manifests and (
+                state != "present" or provider_status.verification != "verified"
+            ):
+                raise SnapshotError(
+                    "native observation manifest must be present and verified"
+                )
             if state == "present":
                 member = _member_name(digest)
                 projected_size = sum(len(data) for data in members.values()) + int(
@@ -172,9 +181,24 @@ def load_snapshot(source: Path, expected_fingerprint: str) -> SnapshotPayload:
                 raise SnapshotError("snapshot manifest must be an object")
             if manifest.get("artifact_kind") != SNAPSHOT_KIND:
                 raise SnapshotError("artifact is not a private restore snapshot")
-            if manifest.get("format_version") != SNAPSHOT_VERSION:
+            import json
+
+            from analytical_memory.resources import resource_path
+
+            legacy_schema = json.loads(
+                resource_path("schema", "legacy-0.6.1.json").read_text()
+            )
+            legacy = (
+                manifest.get("format_version") == "1"
+                and manifest.get("schema_fingerprint")
+                == legacy_schema["schema_fingerprint"]
+            )
+            source_fingerprint = (
+                legacy_schema["schema_fingerprint"] if legacy else expected_fingerprint
+            )
+            if not legacy and manifest.get("format_version") != SNAPSHOT_VERSION:
                 raise SnapshotError("snapshot format version is unsupported")
-            if manifest.get("schema_fingerprint") != expected_fingerprint:
+            if manifest.get("schema_fingerprint") != source_fingerprint:
                 raise SnapshotError("snapshot schema fingerprint does not match")
             identity_body = dict(manifest)
             snapshot_id = identity_body.pop("snapshot_id", None)
@@ -216,9 +240,11 @@ def load_snapshot(source: Path, expected_fingerprint: str) -> SnapshotPayload:
         raise SnapshotError("snapshot canonical rows must be objects")
     if (
         not isinstance(schema_document, dict)
-        or schema_document.get("schema_fingerprint") != expected_fingerprint
+        or schema_document.get("schema_fingerprint") != source_fingerprint
     ):
         raise SnapshotError("snapshot schema document does not match")
+    if legacy and schema_document != legacy_schema:
+        raise SnapshotError("legacy snapshot schema is not the verified 0.6.1 contract")
     row_counts = manifest.get("row_counts")
     if row_counts != {table: len(rows) for table, rows in sorted(records.items())}:
         raise SnapshotError("snapshot row counts do not match")
@@ -260,6 +286,19 @@ def load_snapshot(source: Path, expected_fingerprint: str) -> SnapshotPayload:
         raise SnapshotError("snapshot object manifest does not match canonical records")
     if set(member_bytes) != {"records.json", "schema.json", *object_members}:
         raise SnapshotError("snapshot contains unreferenced object members")
+    required = {
+        row["manifest_digest"] for row in records.get("analysis_observation", [])
+    }
+    if not required <= set(object_bytes):
+        raise SnapshotError("native snapshot has a missing analysis manifest")
+    if legacy:
+        from analytical_memory.adapters.sql_store import SNAPSHOT_TABLES
+
+        if set(records) != set(SNAPSHOT_TABLES) - {"analysis_observation"}:
+            raise SnapshotError("legacy snapshot table set does not match 0.6.1")
+        records["analysis_observation"] = []
+        for row in records["metric"]:
+            row["origin"] = "caller"
     return SnapshotPayload(manifest, records, object_bytes)
 
 

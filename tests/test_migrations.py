@@ -22,7 +22,7 @@ def test_fresh_database_reaches_m51_schema(tmp_path: Path) -> None:
 
     integrity = store.integrity()
     assert store.status().initialized is True
-    assert integrity["schema_version"] == 9
+    assert integrity["schema_version"] == 10
     assert [item["version"] for item in integrity["migrations"]] == [
         1,
         2,
@@ -33,6 +33,7 @@ def test_fresh_database_reaches_m51_schema(tmp_path: Path) -> None:
         7,
         8,
         9,
+        10,
     ]
     with sqlite3.connect(database) as connection:
         tables = {
@@ -69,7 +70,7 @@ def test_m5_clean_break_reinitializes_legacy_current_tables(tmp_path: Path) -> N
     SqliteMemoryStore(database).initialize()
 
     with sqlite3.connect(database) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 9
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 10
         assert connection.execute("SELECT COUNT(*) FROM node").fetchone()[0] == 0
 
 
@@ -153,7 +154,7 @@ def test_manifest_targets_current_logical_fingerprint() -> None:
         manifest["migrations"][-2]["target_fingerprint"]
         != manifest["migrations"][-1]["target_fingerprint"]
     )
-    assert schema["schema_document_version"] == "8"
+    assert schema["schema_document_version"] == "9"
 
 
 def test_sqlite_integrity_reports_missing_tables_and_tampered_ledger(

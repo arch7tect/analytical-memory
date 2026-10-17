@@ -1,7 +1,14 @@
 {
   "evidence": {
-    "audit_outcomes": ["verified", "corrupt", "missing"],
-    "availability_states": ["present", "missing"],
+    "audit_outcomes": [
+      "verified",
+      "corrupt",
+      "missing"
+    ],
+    "availability_states": [
+      "present",
+      "missing"
+    ],
     "fragment_locator_kinds": [
       "whole_object",
       "structured",
@@ -13,20 +20,37 @@
     ],
     "privacy_propagation": "strictest_acquisition_wins",
     "retention_release_audit": {
-      "fields": ["released_at", "release_reason"],
+      "fields": [
+        "released_at",
+        "release_reason"
+      ],
       "semantics": "first_release_per_acquisition_wins"
     },
-    "retention_states": ["active", "expired", "retired"],
-    "verification_states": ["unverified", "verified", "corrupt"]
-  },
-  "snapshot": {
-    "artifact_kind": "private-restore-snapshot",
-    "format_version": "1",
-    "projections_excluded": ["search_document_fts", "embedding_index"]
+    "retention_states": [
+      "active",
+      "expired",
+      "retired"
+    ],
+    "verification_states": [
+      "unverified",
+      "verified",
+      "corrupt"
+    ]
   },
   "sanitized_export": {
     "artifact_kind": "sanitized-export",
     "format_version": "1",
     "restore_compatible": false
+  },
+  "snapshot": {
+    "artifact_kind": "private-restore-snapshot",
+    "format_version": "2",
+    "legacy_readers": [
+      "0.6.1-format-1-verified-adapter"
+    ],
+    "projections_excluded": [
+      "search_document_fts",
+      "embedding_index"
+    ]
   }
 }

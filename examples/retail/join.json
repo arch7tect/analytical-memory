@@ -1,0 +1,16 @@
+{
+  "name": "ticket_to_order",
+  "relation": "order",
+  "from": {
+    "type": "shop.Ticket",
+    "fields": [
+      "order_id"
+    ]
+  },
+  "to": {
+    "type": "shop.Order",
+    "fields": [
+      "order_id"
+    ]
+  }
+}

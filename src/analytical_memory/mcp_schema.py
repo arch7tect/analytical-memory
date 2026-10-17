@@ -5,6 +5,8 @@ from typing import Any
 from analytical_memory.agent_texts import agent_text
 
 _OUTPUT_FIELD_DESCRIPTIONS = {
+    "format_version": "Version of the native operation result envelope.",
+    "result": "Native result with exact values, revision guards and provenance.",
     "active": "Whether the current relation is active.",
     "active_edges": "Number of active relation edges in this scope.",
     "active_relations": "Total number of active relations in the ontology scope.",

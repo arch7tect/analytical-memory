@@ -1,0 +1,105 @@
+{
+  "query_ir_version": "2",
+  "match": {
+    "nodes": [
+      {
+        "type": "shop.Order",
+        "as": "o"
+      }
+    ]
+  },
+  "optional_match": [
+    {
+      "nodes": [
+        {
+          "type": "shop.Ticket",
+          "as": "t"
+        }
+      ],
+      "edges": [
+        {
+          "type": "order",
+          "from": "t",
+          "to": "o",
+          "logical_key": "ticket_to_order"
+        }
+      ],
+      "where": [
+        {
+          "left": {
+            "field": "t.issue_code"
+          },
+          "op": "in",
+          "right": {
+            "values": [
+              "late_delivery",
+              "damaged"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "group_by": [
+    {
+      "field": "o.carrier",
+      "as": "carrier"
+    },
+    {
+      "field": "o.region",
+      "as": "region"
+    }
+  ],
+  "measures": [
+    {
+      "as": "orders",
+      "op": "count_distinct",
+      "node": "o"
+    },
+    {
+      "as": "delivery_tickets",
+      "op": "count_distinct",
+      "node": "t"
+    },
+    {
+      "as": "affected_orders",
+      "op": "count_distinct",
+      "node": "o",
+      "when": {
+        "bound": "t"
+      }
+    },
+    {
+      "as": "affected_order_value",
+      "op": "sum",
+      "field": "o.amount_cents",
+      "distinct_on": "o",
+      "when": {
+        "bound": "t"
+      }
+    }
+  ],
+  "derive": [
+    {
+      "as": "complaint_rate",
+      "op": "ratio",
+      "numerator": "affected_orders",
+      "denominator": "orders",
+      "zero_denominator": "null"
+    }
+  ],
+  "order_by": [
+    {
+      "result": "complaint_rate",
+      "direction": "desc"
+    },
+    {
+      "result": "carrier",
+      "direction": "asc"
+    },
+    {
+      "result": "region",
+      "direction": "asc"
+    }
+  ]
+}

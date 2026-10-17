@@ -5,8 +5,24 @@ to their sources. It keeps structured data, explicit relationships, analytical
 results, and the evidence behind them in a memory you control locally.
 
 Use it with an MCP-compatible assistant, from the command line, or through its
-Python API. SQLite works out of the box; PostgreSQL 17 is available for a
-separate database deployment.
+Python API. SQLite works out of the box; the included Docker setup runs
+PostgreSQL 17 when you need a separate database.
+
+## Install and try
+
+**[Plugin installation instructions](docs/plugin-installation.md)** — the entry
+point for installing Analytical Memory with an assistant. Give your assistant
+this repository's GitHub URL and ask it to follow that guide. One release bundle
+includes the MCP server, shared skills, documentation, and examples.
+
+- [Claude Code, Kimi Code, and Codex](docs/plugin-installation.md) use their host
+  plugin installation.
+- [Generic environments, with OpenCode](docs/plugin-installation.md#generic-environments-opencode)
+  connect the same plugin's skills and included server in one configuration.
+- [Quickstart for people](docs/getting-started.md) shows commands, returned data,
+  and diagrams of the evolving structure.
+- [Documentation](docs/README.md) covers configuration, querying, operations,
+  architecture, and development.
 
 ## What you can do
 
@@ -14,7 +30,7 @@ separate database deployment.
   matching records through explicit join rules.
 - **Explore what is available.** Discover entity types, fields, relationships,
   and descriptions as the memory grows.
-- **Ask precise questions.** Filter and count records, follow relationships,
+- **Ask precise questions.** Filter, group, sum and count distinct entities, follow relationships,
   search text, and optionally find semantically related content.
 - **Inspect the evidence.** Trace current values and analytical results to
   their source data and recorded method.
@@ -23,24 +39,15 @@ separate database deployment.
 - **Back up your work.** Verify evidence, create private restore snapshots,
   and export public data for sharing.
 
-For example, import sessions and messages from two files, connect each message
-to its session, and find the messages associated with failed sessions. The
+For example, import orders and support tickets separately, connect them, compare
+delivery complaint rates, and drill into the exact orders behind one result. The
 [getting started guide](docs/getting-started.md) walks through this example.
-
-## Start here
-
-- [Install the MCP server](docs/mcp-installation.md) to connect your assistant.
-- [Install a plugin](docs/plugin-installation.md) for Claude Code, Kimi Code,
-  or Codex, including the MCP server and bundled workflows.
-- [Try the command-line walkthrough](docs/getting-started.md) with synthetic
-  sample data.
-- [Browse the documentation](docs/README.md) for configuration, querying,
-  operations, architecture, and development.
 
 ## What to expect
 
 The current implementation supports atomic JSONL imports, explicit graph joins,
-structured read-only queries, local full-text search, optional semantic search,
+structured queries with native aggregates and exact drill-down, saved analytical
+observations with freshness checks, local full-text search, optional semantic search,
 and verified snapshots. See the [release history](CHANGELOG.md) for changes.
 
 Your database and evidence stay on your machine or your chosen PostgreSQL
@@ -52,7 +59,8 @@ sensitive data. Public/private labels govern sharing and external processing;
 local queries can read private data. See [data handling and privacy](docs/getting-started.md#data-handling-and-privacy).
 
 The memory keeps current values and source evidence. It does not automatically
-infer relationships or reconstruct earlier values. It is a local tool without
+infer relationships. Explicitly saved analyses retain their original input
+values for historical drill-down; other current values have no general history. It is a local tool without
 multi-user authentication or a hosted HTTP service.
 
 ## Contributing and license

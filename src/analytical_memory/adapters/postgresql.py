@@ -128,6 +128,7 @@ class PostgresMemoryStore(SqlMemoryStore):
             except Exception:
                 connection.close()
                 raise
+        connection.commit()
         return wrapped
 
     def _lock_for_lifecycle(self, connection: PostgresConnection) -> None:
@@ -138,6 +139,10 @@ class PostgresMemoryStore(SqlMemoryStore):
         connection = self._raw_connect()
         try:
             migrate_postgresql(connection, self.migrations_directory)
+            from analytical_memory.native_store import initialize_state
+
+            initialize_state(PostgresConnection(connection, self.dialect))
+            connection.commit()
         finally:
             connection.close()
 
@@ -147,8 +152,7 @@ class PostgresMemoryStore(SqlMemoryStore):
         if set(records) != set(SNAPSHOT_TABLES):
             raise SnapshotError("snapshot canonical table set does not match")
         counts: dict[str, int] = {}
-        with self._write_connection() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+        with self._write_connection(track_revision=False) as connection:
             connection.execute("PRAGMA defer_foreign_keys = ON")
             nonempty = [
                 table
@@ -193,6 +197,13 @@ class PostgresMemoryStore(SqlMemoryStore):
                         tuple(canonical_row[column] for column in columns),
                     )
                 counts[table] = len(rows)
+            import uuid
+
+            connection.execute(
+                "UPDATE memory_state SET generation = ?, data_revision = 0 "
+                "WHERE singleton = 1",
+                (str(uuid.uuid4()),),
+            )
             connection.execute("DELETE FROM search_document_fts")
             connection.execute(
                 "INSERT INTO search_document_fts(document_id, content) "
@@ -212,6 +223,7 @@ class PostgresMemoryStore(SqlMemoryStore):
             actual_tables = {str(row["table_name"]) for row in table_rows}
             expected_tables = {
                 *SNAPSHOT_TABLES,
+                "memory_state",
                 "embedding_profile",
                 "embedding_record",
                 "schema_migration",

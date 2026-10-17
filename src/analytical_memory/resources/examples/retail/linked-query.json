@@ -1,0 +1,54 @@
+{
+  "query_ir_version": "1",
+  "match": {
+    "nodes": [
+      {
+        "type": "shop.Order",
+        "as": "o"
+      },
+      {
+        "type": "shop.Ticket",
+        "as": "t"
+      }
+    ],
+    "edges": [
+      {
+        "type": "order",
+        "from": "t",
+        "to": "o",
+        "logical_key": "ticket_to_order"
+      }
+    ]
+  },
+  "where": [
+    {
+      "left": {
+        "field": "t.issue_code"
+      },
+      "op": "in",
+      "right": {
+        "values": [
+          "late_delivery",
+          "damaged"
+        ]
+      }
+    }
+  ],
+  "return": [
+    {
+      "field": "o.order_id"
+    },
+    {
+      "field": "o.carrier"
+    },
+    {
+      "field": "o.region"
+    },
+    {
+      "field": "t.ticket_id"
+    },
+    {
+      "field": "t.issue_code"
+    }
+  ]
+}

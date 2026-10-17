@@ -91,6 +91,15 @@ class EvidenceStore(ABC):
 
 
 class MemoryStore(ABC):
+    def analytics_operation(
+        self,
+        operation: str,
+        document: dict[str, Any],
+        evidence_store: Any = None,
+        contract_fingerprint: str = "",
+    ) -> dict[str, Any]:
+        raise NotImplementedError
+
     @abstractmethod
     def initialize(self) -> None:
         raise NotImplementedError

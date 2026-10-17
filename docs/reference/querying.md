@@ -1,10 +1,14 @@
 # Querying Reference
 
+For native grouping, optional matches, exact sums, ratios, saved observations and
+drill-down, use the [Query IR v2 reference](native-analytics.md). The v1 contract
+below remains supported unchanged.
+
 Analytical Memory exposes a backend-neutral, read-only JSON Query IR. An agent
 can discover the complete machine-readable contract at
 `memory://schema/query-ir/current` and the current data ontology at
 `memory://schema/ontology/current`. For installation, see the
-[MCP guide](../mcp-installation.md); for a runnable example, see
+[plugin installation](../plugin-installation.md); for a runnable example, see
 [getting started](../getting-started.md).
 
 ## Planning a query

@@ -10,6 +10,7 @@ PLUGIN_NAME = "analytical-memory"
 MARKETPLACE_NAME = "analytical-memory-local"
 ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / "dist" / "plugins"
+HOSTS = ("claude", "kimi", "openai", "generic")
 
 
 def project_version() -> str:
@@ -40,11 +41,17 @@ def _copy_payload(destination: Path, *, host: str) -> None:
     ):
         shutil.copy2(ROOT / name, destination / name)
     shutil.copytree(ROOT / "docs", destination / "docs")
+    shutil.copytree(ROOT / "examples", destination / "examples")
     (destination / "scripts").mkdir()
     shutil.copy2(
         ROOT / "scripts" / "plugin_runtime.py",
         destination / "scripts" / "plugin_runtime.py",
     )
+    if host == "generic":
+        shutil.copy2(
+            ROOT / "scripts" / "configure_opencode.py",
+            destination / "scripts" / "configure_opencode.py",
+        )
     shutil.copytree(
         ROOT / "src" / "analytical_memory",
         destination / "src" / "analytical_memory",
@@ -79,6 +86,8 @@ def _server(host: str) -> dict[str, Any]:
         "--frozen",
         "--no-dev",
         "--no-editable",
+        "--extra",
+        "postgres",
         "--python",
         "3.12",
         "python",
@@ -219,18 +228,52 @@ def _build_openai(output: Path, version: str) -> None:
     )
 
 
+def _build_generic(output: Path, version: str) -> None:
+    plugin = output / "generic" / PLUGIN_NAME
+    _copy_payload(plugin, host="generic")
+    _write_json(
+        plugin / "plugin.json",
+        {
+            **_common_manifest(version),
+            "skills": "./skills/",
+            "mcpServers": "./.mcp.json",
+        },
+    )
+    _write_json(plugin / ".mcp.json", _server("generic"))
+
+
 def build_bundles(output: Path = OUTPUT) -> None:
-    for host in ("claude", "kimi", "openai"):
+    for host in HOSTS:
         shutil.rmtree(output / host, ignore_errors=True)
     version = project_version()
     _build_claude(output, version)
     _build_kimi(output, version)
     _build_openai(output, version)
+    _build_generic(output, version)
+    for host in HOSTS:
+        payload = (
+            "plugins/analytical-memory" if host == "openai" else "analytical-memory"
+        )
+        (output / host / "README.md").write_text(
+            "# Analytical Memory bundle\n\n"
+            f"[Plugin installation]({payload}/docs/plugin-installation.md) "
+            "is the installation entry point for people and assistants. "
+            "The plugin includes its skills and MCP server.\n\n"
+            f"[Generic environments / OpenCode]({payload}/docs/"
+            "plugin-installation.md#generic-environments-opencode) explains "
+            "how to connect both components in other hosts.\n\n"
+            f"[Quickstart for people]({payload}/docs/getting-started.md) shows "
+            "commands, returned data, and the evolving structure.\n\n"
+            f"The application payload is `{payload}/`: it contains `pyproject.toml`, "
+            "`uv.lock`, `src/`, `docs/`, and `examples/`. Run application commands "
+            "from that directory, not this marketplace root.\n",
+            encoding="utf-8",
+        )
 
 
 def main() -> None:
     build_bundles()
-    print(f"Built Claude, Kimi, and Codex plugins in {OUTPUT}")
+    print(f"Built Claude, Kimi, Codex, and generic plugins in {OUTPUT}")
 
 
 if __name__ == "__main__":

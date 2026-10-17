@@ -36,51 +36,41 @@ _ENTRY_KEYS = {
 }
 
 _OPERATION_DESCRIPTIONS = {
-    "analytical_attribute_write": (
-        "Write one current analytical Node attribute with run provenance."
-    ),
-    "analytical_metric_write": (
-        "Append one immutable analytical metric observation with exact scope."
-    ),
-    "delete_node": (
-        "Delete one current Node and cascade current graph/search projections."
-    ),
-    "embedding_rebuild": "Create or rebuild stored embeddings through the CLI.",
-    "embedding_status": "Inspect embedding profile coverage and provider readiness.",
-    "entity_declaration": (
-        "Declare optional entity descriptions, privacy, and field validation."
-    ),
-    "evidence_audit": (
-        "Boundedly verify evidence, report orphans, and append check history."
-    ),
-    "evidence_read": "Read one bounded evidence byte range as base64.",
-    "evidence_status": "Inspect evidence availability, privacy, and verification.",
-    "evidence_verify": "Verify one evidence object and append check history.",
-    "explain_attribute": "Resolve one current attribute to direct provenance.",
-    "explain_metric": "Resolve one metric observation to run and provenance.",
-    "explain_relation": "Resolve one current relation to direct provenance.",
-    "join_materialize": (
-        "Explicitly create directed relations by exact typed field equality."
-    ),
-    "jsonl_import": "Stream and atomically patch/upsert one JSONL entity dataset.",
-    "memory_configure": "Create or attach one named memory target.",
-    "memory_lifecycle": (
-        "Wipe a selected memory or delete a named memory with an exact state guard."
-    ),
-    "namespace_declaration": "Declare a human-readable namespace description.",
-    "ontology": "Discover current entity, field, relation, and description shape.",
-    "query_current_metric": "Select the deterministic metric for an exact scope.",
-    "query_execute": "Execute a bounded read-only Query IR document.",
-    "relation_deactivate": (
-        "Correct current graph state by deactivating one relation."
-    ),
-    "retention": "Report, plan, release, or retire evidence through the CLI.",
-    "sanitized_export": "Export current public data without raw evidence bytes.",
-    "search_semantic": "Rank public facts by exact local vector similarity.",
-    "search_text": "Full-text search current searchable string attributes.",
-    "snapshot": "Create, verify, or restore a complete local snapshot.",
-    "transfer": "Export or import canonical records across supported backends.",
-    "traverse_relations": "Traverse bounded active relation paths from one Node.",
+    "analysis_execute": "Execute analysis bundle.",
+    "analysis_capture": "Capture native observation.",
+    "query_drill_down": "Explain group membership.",
+    "analysis_read": "Read verified observation.",
+    "relation_inspect": "Inspect join coverage.",
+    "data_state": "Read generation/revision.",
+    "analytical_attribute_write": "Write attributed field.",
+    "analytical_metric_write": "Write caller metric.",
+    "delete_node": "Delete a Node.",
+    "embedding_rebuild": "Rebuild embeddings.",
+    "embedding_status": "Inspect embedding readiness.",
+    "entity_declaration": "Declare entity metadata.",
+    "evidence_audit": "Audit bounded evidence.",
+    "evidence_read": "Read evidence bytes.",
+    "evidence_status": "Inspect evidence state.",
+    "evidence_verify": "Verify evidence.",
+    "explain_attribute": "Explain field provenance.",
+    "explain_metric": "Explain metric provenance.",
+    "explain_relation": "Explain edge provenance.",
+    "join_materialize": "Materialize explicit join.",
+    "jsonl_import": "Import atomic JSONL patches.",
+    "memory_configure": "Configure named memory.",
+    "memory_lifecycle": "Guarded wipe/delete.",
+    "namespace_declaration": "Describe a namespace.",
+    "ontology": "Discover current data shape.",
+    "query_current_metric": "Read current caller metric.",
+    "query_execute": "Execute Query IR.",
+    "relation_deactivate": "Deactivate an edge.",
+    "retention": "Manage evidence retention.",
+    "sanitized_export": "Export public facts.",
+    "search_semantic": "Search public embeddings.",
+    "search_text": "Search local text.",
+    "snapshot": "Back up/restore memory.",
+    "transfer": "Transfer between backends.",
+    "traverse_relations": "Traverse active edges.",
 }
 
 
@@ -89,7 +79,7 @@ def contextual_capabilities(
 ) -> dict[str, Any]:
     result = application.capabilities()
     result.pop("runtime_fingerprint")
-    result["capabilities_document_version"] = "5"
+    result["capabilities_document_version"] = "6"
     result["memory"] = memory
     result["operations"] = {
         **result["operations"],
@@ -110,6 +100,10 @@ def contextual_capabilities(
         route = MCP_ROUTES.get(name)
         if route is not None:
             operation.update(route)
+    result["operation_defaults"] = {"interfaces": ["python", "cli", "mcp"]}
+    for operation in result["operations"].values():
+        if operation.get("interfaces") == result["operation_defaults"]["interfaces"]:
+            operation.pop("interfaces")
     result["discovery"] = {
         "agent_guide": "memory://guide",
         "catalog": "memory://catalog",

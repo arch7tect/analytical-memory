@@ -1145,3 +1145,11 @@ when it changes an architectural contract.
 
 Deferred capabilities must preserve canonical IDs, current-state semantics,
 provenance, privacy propagation, and exact-query conformance.
+
+## Native analytics extension
+
+[ADR 0002](decisions/0002-native-analytics-observations.md) adds Query IR v2,
+transactional fact revisions, exact aggregation, analysis bundles, immutable
+observations and live/saved drill-down. The [native reference](reference/native-analytics.md)
+defines limits, freshness, native privacy gates and snapshot compatibility.
+Current-value storage and Query IR v1 remain supported.

@@ -1,7 +1,7 @@
 # Release guide
 
 This guide is for maintainers. End-user setup is in
-[plugin installation](plugin-installation.md) and [MCP installation](mcp-installation.md).
+[plugin installation](plugin-installation.md).
 
 ## Prepare and verify
 
@@ -10,7 +10,7 @@ and record user-visible changes in [CHANGELOG.md](../CHANGELOG.md). Run the full
 [contributor verification sequence](../CONTRIBUTING.md#verification), including
 PostgreSQL conformance, before publishing.
 
-Build the wheel, source distribution, three host archives, and checksum file:
+Build the wheel, source distribution, four plugin archives (Claude, Kimi, Codex, and generic), and checksum file:
 
 ```console
 uv run --locked python scripts/build_release.py

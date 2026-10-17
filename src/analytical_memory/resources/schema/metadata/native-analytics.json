@@ -1,0 +1,25 @@
+{
+  "native_analytics": {
+    "query_ir_versions": [
+      "1",
+      "2"
+    ],
+    "semantics": "native-analytics-1",
+    "state": "generation_uuid_and_monotonic_fact_revision",
+    "observations": "immutable_evidence_manifest",
+    "numeric": "safe_integer_and_exact_ratio",
+    "limits": {
+      "facts": 50000,
+      "binding_work": 100000,
+      "seconds": 10,
+      "members": 16
+    },
+    "unsupported": [
+      "avg",
+      "having",
+      "nested_optional",
+      "independent_optional_branches",
+      "fractional_sum"
+    ]
+  }
+}

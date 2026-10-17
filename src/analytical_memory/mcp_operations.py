@@ -3,8 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, RootModel
 
+from analytical_memory.analytics import AnalyticsResponse
 from analytical_memory.api_models import (
     AnalyticalAttributeResponse,
     AnalyticalMetricResponse,
@@ -25,7 +26,6 @@ from analytical_memory.api_models import (
     MetricExplanationResponse,
     NodeDeleteResponse,
     OntologyResponse,
-    QueryIRDocument,
     QueryIRResponse,
     RelationExplanationResponse,
     SearchResponse,
@@ -231,8 +231,21 @@ class RelationDeactivateRequest(APIModel):
 
 
 class QueryExecuteRequest(APIModel):
-    document: QueryIRDocument = Field(
-        description="Query IR v1 document using the selected memory ontology."
+    document: dict[str, Any] = Field(
+        description="Query IR v1 or v2 document using the selected memory ontology."
+    )
+
+
+class QueryOperationResponse(RootModel[QueryIRResponse | AnalyticsResponse]):
+    pass
+
+
+class NativeRequest(APIModel):
+    document: dict[str, Any] = Field(
+        description=(
+            "Versioned native operation document; see the native ana"
+            "lytics reference and operation specification."
+        )
     )
 
 
@@ -418,13 +431,10 @@ class MemoryNodeDeleteResponse(NodeDeleteResponse):
 
 
 class ManagerResponse(APIModel):
-    action: str = Field(description="Action executed by the manager tool.")
-    memory: str = Field(description="Memory that handled the operation.")
+    action: str = Field(description="Executed action.")
+    memory: str = Field(description="Resolved memory name.")
     result: dict[str, Any] = Field(
-        description=(
-            "Operation result conforming to output_schema in the selected operation "
-            "specification."
-        )
+        description=("Result conforming to the operation output_schema.")
     )
 
 
@@ -489,6 +499,12 @@ class OperationDefinition:
             "preconditions": list(self.preconditions),
             "spec_version": "1",
         }
+        from analytical_memory.analytics import NATIVE_DOCUMENT_MODELS
+
+        if self.operation in NATIVE_DOCUMENT_MODELS:
+            document["document_schema"] = NATIVE_DOCUMENT_MODELS[
+                self.operation
+            ].model_json_schema(by_alias=True)
         if self.idempotency is not None:
             document["idempotency"] = self.idempotency
         recovery = []
@@ -547,7 +563,7 @@ def _definition(
 _SCHEMA_PRECONDITIONS = ("memory://catalog", "memory://schema/current")
 _ONTOLOGY_PRECONDITIONS = ("memory://catalog", "selected-memory ontology")
 
-OPERATION_DEFINITIONS = (
+OPERATION_DEFINITIONS: tuple[OperationDefinition, ...] = (
     _definition(
         "memory_configure",
         "memory_configure",
@@ -717,7 +733,7 @@ OPERATION_DEFINITIONS = (
         "memory_query_manage",
         "execute",
         QueryExecuteRequest,
-        QueryIRResponse,
+        QueryOperationResponse,
         mutating=False,
         idempotent=True,
         preconditions=(
@@ -872,6 +888,32 @@ OPERATION_DEFINITIONS = (
     ),
 )
 
+OPERATION_DEFINITIONS = (
+    *OPERATION_DEFINITIONS,
+    *(
+        _definition(
+            operation,
+            "memory_ingest_manage"
+            if operation == "analysis_capture"
+            else "memory_query_manage",
+            operation,
+            NativeRequest,
+            AnalyticsResponse,
+            mutating=operation == "analysis_capture",
+            idempotent=True,
+            example={"document": {}},
+        )
+        for operation in (
+            "analysis_execute",
+            "analysis_capture",
+            "query_drill_down",
+            "relation_inspect",
+            "analysis_read",
+            "data_state",
+        )
+    ),
+)
+
 OPERATIONS = {definition.operation: definition for definition in OPERATION_DEFINITIONS}
 MCP_ROUTES = {}
 for definition in OPERATION_DEFINITIONS:
@@ -884,9 +926,15 @@ for definition in OPERATION_DEFINITIONS:
 def operations_index_document() -> dict[str, Any]:
     return {
         "operations": [
-            definition.index_document() for definition in OPERATION_DEFINITIONS
+            {
+                key: value
+                for key, value in definition.index_document().items()
+                if key != "effects"
+            }
+            for definition in OPERATION_DEFINITIONS
         ],
-        "operations_version": "2",
+        "operations_version": "3",
+        "effects_location": "individual operation specification",
     }
 
 

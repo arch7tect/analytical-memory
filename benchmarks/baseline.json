@@ -9,6 +9,7 @@
     "ontology_fingerprint": "0d46c47c99b090705bc3563a64256be6aed5d85b8a45177add2bf43f9a59770d",
     "record_count": 1000,
     "row_counts": {
+      "analysis_observation": 0,
       "analytical_run": 3,
       "entity_declaration": 0,
       "evidence_acquisition": 3,
@@ -29,7 +30,7 @@
       "search_document": 0,
       "source": 3
     },
-    "schema_fingerprint": "3176355e7b7637b312c768bef5a11f299d2cb144cff8645dc0d5c306eb099b39"
+    "schema_fingerprint": "073e47608393613bec0dd411f192010e17fb3787adc484c2ca70b4ba2a53ee2a"
   },
   "observed": {
     "backend": "sqlite",

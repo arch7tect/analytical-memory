@@ -54,6 +54,12 @@
       "file": "009_ontology_descriptions.sql",
       "target_fingerprint": "3176355e7b7637b312c768bef5a11f299d2cb144cff8645dc0d5c306eb099b39",
       "version": 9
+    },
+    {
+      "checksum": "b2d3d7618dd4b922eaf1554970c7a01e65a811d1c4982318b65799fddb915274",
+      "file": "010_native_analytics.sql",
+      "target_fingerprint": "073e47608393613bec0dd411f192010e17fb3787adc484c2ca70b4ba2a53ee2a",
+      "version": 10
     }
   ]
 }

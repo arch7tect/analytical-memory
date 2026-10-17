@@ -36,3 +36,23 @@ for evidence. If a write fails with `schema_changed`, refresh the structural
 schema once and retry once. Never fall back to another memory after an error.
 Return the result, resolved memory, and relevant entity, relation, or Node IDs
 concisely.
+
+
+## Native analytics
+
+Read `memory://schema/query-ir/current` for separate v1 and v2 schemas. Use v2
+for native grouping, identity counts, integer sums and exact ratios. For named
+analysis members and coverage, read `memory://operations/analysis_execute` and
+call the query manager with `payload={"document": ...}`. Never aggregate returned
+pages in the client to reconstruct totals.
+
+For exact live detail use `query_drill_down` with its original typed group key,
+query, measure and unchanged expected generation/revision on every page.
+Saved detail uses `observation_id` and `query_name` and represents observation-time
+values. Read freshness with `analysis_read`; do not substitute a stale result.
+
+When the user asks to save native analysis, read the explicit mutating
+`memory://operations/analysis_capture` spec and call `memory_ingest_manage action=analysis_capture`.
+Pass the original analysis, a definition version and expected state. The server
+computes values; never provide invented totals. Refresh stale computations
+before a new capture. Use `public=true` for native public reuse.

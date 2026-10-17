@@ -1,0 +1,332 @@
+{
+  "compatibility": {
+    "minimum_reader": "1"
+  },
+  "embedding": {
+    "canonical_encoding": "finite-little-endian-float32",
+    "exact_search": "application-cosine",
+    "first_provider": {
+      "dimensions": 1536,
+      "model": "text-embedding-3-small",
+      "preprocessing_version": "unicode-nfc-lines-v1",
+      "provider": "openai"
+    },
+    "privacy_enforcement": "public-only-external-provider",
+    "profile_scope": "node_attribute_name"
+  },
+  "evidence": {
+    "audit_outcomes": [
+      "verified",
+      "corrupt",
+      "missing"
+    ],
+    "availability_states": [
+      "present",
+      "missing"
+    ],
+    "fragment_locator_kinds": [
+      "whole_object",
+      "structured",
+      "record_key",
+      "byte_range",
+      "line_range",
+      "time_interval",
+      "sample_interval"
+    ],
+    "privacy_propagation": "strictest_acquisition_wins",
+    "retention_release_audit": {
+      "fields": [
+        "released_at",
+        "release_reason"
+      ],
+      "semantics": "first_release_per_acquisition_wins"
+    },
+    "retention_states": [
+      "active",
+      "expired",
+      "retired"
+    ],
+    "verification_states": [
+      "unverified",
+      "verified",
+      "corrupt"
+    ]
+  },
+  "ingestion_batch": {
+    "format": "jsonl",
+    "format_version": "5",
+    "idempotency": "entity_type_key_selector_content_hash",
+    "semantics": "atomic_patch_upsert"
+  },
+  "json_types": [
+    "unresolved",
+    "string",
+    "number",
+    "boolean",
+    "object",
+    "array"
+  ],
+  "metric": {
+    "current_selection": [
+      "run_recorded_at_desc",
+      "run_id_desc",
+      "metric_id_desc"
+    ],
+    "dimensions": "canonical_json_object"
+  },
+  "ontology": {
+    "declarations_optional": true,
+    "field_identity": [
+      "entity_type",
+      "field_name"
+    ],
+    "fingerprint_excludes": [
+      "counts",
+      "coverage",
+      "import_key_selectors"
+    ],
+    "fingerprint_includes": [
+      "namespaces",
+      "entity_types",
+      "field_names",
+      "effective_types",
+      "descriptions",
+      "declared_constraints",
+      "active_relation_declarations"
+    ]
+  },
+  "ontology_version": "2.0.0",
+  "privacy_classes": [
+    "public",
+    "private"
+  ],
+  "query_ir": {
+    "contract_document_version": "1",
+    "mutation_allowed": false,
+    "operators": [
+      "eq",
+      "ne",
+      "lt",
+      "lte",
+      "gt",
+      "gte",
+      "in",
+      "exists"
+    ],
+    "pagination": [
+      "limit",
+      "offset"
+    ],
+    "pattern_connectivity": "connected",
+    "result_bindings": "node_alias_to_node_id",
+    "version": "1"
+  },
+  "record_types": [
+    "Source",
+    "AnalyticalRun",
+    "Node",
+    "NodeAttribute",
+    "Relation",
+    "Metric",
+    "NamespaceDeclaration",
+    "EntityDeclaration",
+    "ObservedField",
+    "OntologyDeclaration",
+    "EvidenceObject",
+    "EvidenceAcquisition",
+    "EvidenceDerivation",
+    "EvidenceLocation",
+    "EvidenceFragment",
+    "EvidenceVerification",
+    "EvidenceRetirement",
+    "SearchDocument",
+    "EmbeddingProfile",
+    "EmbeddingRecord",
+    "IngestionBatch",
+    "SchemaMigration"
+  ],
+  "relation": {
+    "directions": [
+      "outbound",
+      "inbound",
+      "both"
+    ],
+    "properties_allowed": false
+  },
+  "sanitized_export": {
+    "artifact_kind": "sanitized-export",
+    "format_version": "1",
+    "restore_compatible": false
+  },
+  "saved_queries": {
+    "current-metric": {
+      "parameters": [
+        {
+          "name": "definition_version",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "dimensions",
+          "required": true,
+          "type": "object"
+        }
+      ],
+      "result_fields": [
+        {
+          "name": "metric",
+          "type": "metric|null"
+        },
+        {
+          "name": "coverage",
+          "type": "object"
+        }
+      ]
+    },
+    "search-semantic": {
+      "ordering": [
+        "score_desc",
+        "document_id"
+      ],
+      "parameters": [
+        {
+          "name": "profile_id",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "query",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "default": null,
+          "name": "namespace",
+          "required": false,
+          "type": "string|null"
+        },
+        {
+          "default": null,
+          "name": "node_type",
+          "required": false,
+          "type": "string|null"
+        },
+        {
+          "default": 20,
+          "name": "limit",
+          "required": false,
+          "type": "integer"
+        }
+      ],
+      "result_fields": [
+        {
+          "name": "results",
+          "type": "array"
+        },
+        {
+          "name": "coverage",
+          "type": "object"
+        },
+        {
+          "name": "status",
+          "type": "string"
+        }
+      ]
+    },
+    "search-text": {
+      "parameters": [
+        {
+          "name": "query",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "default": 20,
+          "name": "limit",
+          "required": false,
+          "type": "integer"
+        }
+      ],
+      "result_fields": [
+        {
+          "name": "results",
+          "type": "array"
+        },
+        {
+          "name": "coverage",
+          "type": "object"
+        }
+      ]
+    },
+    "traverse-relations": {
+      "parameters": [
+        {
+          "name": "start_node_id",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "default": null,
+          "name": "relation_types",
+          "required": false,
+          "type": "array|null"
+        },
+        {
+          "default": "outbound",
+          "name": "direction",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "default": 3,
+          "name": "max_depth",
+          "required": false,
+          "type": "integer"
+        },
+        {
+          "default": 100,
+          "name": "limit",
+          "required": false,
+          "type": "integer"
+        },
+        {
+          "default": null,
+          "name": "states",
+          "required": false,
+          "type": "array[active]|null"
+        }
+      ],
+      "result_fields": [
+        {
+          "name": "nodes",
+          "type": "array"
+        },
+        {
+          "name": "edges",
+          "type": "array"
+        },
+        {
+          "name": "truncated",
+          "type": "boolean"
+        }
+      ]
+    }
+  },
+  "schema_document_version": "8",
+  "schema_fingerprint": "3176355e7b7637b312c768bef5a11f299d2cb144cff8645dc0d5c306eb099b39",
+  "search_document": {
+    "coverage": "active_indexed_documents_vs_searchable_attributes",
+    "fts_engine": "sqlite-fts5",
+    "target_kinds": [
+      "node_attribute"
+    ]
+  },
+  "snapshot": {
+    "artifact_kind": "private-restore-snapshot",
+    "format_version": "1",
+    "projections_excluded": [
+      "search_document_fts",
+      "embedding_index"
+    ]
+  }
+}

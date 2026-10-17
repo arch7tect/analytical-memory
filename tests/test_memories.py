@@ -761,7 +761,7 @@ async def test_mcp_configures_and_routes_named_memory(tmp_path: Path) -> None:
             "runtime_fingerprint"
         )
         assert default_runtime_fingerprint == sha256_json(default_capability_document)
-        assert default_capability_document["capabilities_document_version"] == "5"
+        assert default_capability_document["capabilities_document_version"] == "6"
         assert set(default_capability_document["discovery"].values()) <= resource_uris
         assert all(
             operation.get("description")
@@ -830,7 +830,9 @@ async def test_mcp_configures_and_routes_named_memory(tmp_path: Path) -> None:
                 definition.request_model.model_json_schema(by_alias=True)
             )
             assert operation_document["input_schema"]["properties"]
-            assert operation_document["output_schema"]["properties"]
+            assert operation_document["output_schema"].get(
+                "properties"
+            ) or operation_document["output_schema"].get("anyOf")
             assert (
                 _missing_property_descriptions(operation_document["input_schema"]) == []
             )

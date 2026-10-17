@@ -125,7 +125,14 @@ class TransferError(MemoryErrorBase):
 
 
 def error_code_registry() -> list[dict[str, Any]]:
-    classes = MemoryErrorBase.__subclasses__()
+    def descendants(parent: type[MemoryErrorBase]) -> list[type[MemoryErrorBase]]:
+        return [
+            child
+            for subclass in parent.__subclasses__()
+            for child in [subclass, *descendants(subclass)]
+        ]
+
+    classes = descendants(MemoryErrorBase)
     return [
         {"code": error.code, "retryable": error.retryable}
         for error in sorted(classes, key=lambda item: item.code)

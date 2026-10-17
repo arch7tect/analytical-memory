@@ -752,8 +752,19 @@ require it:
 New ideas are recorded under `docs/decisions/` or a later milestone rather than
 expanding the active slice.
 
-## Immediate next action
+## Milestone 8: Native analytics and retail walkthrough
 
-The approved working-v1 plan is complete. New product behavior belongs in a
-new decision record and later milestone rather than expanding these completed
-acceptance gates.
+Accepted on 2026-10-17 through [ADR 0002](decisions/0002-native-analytics-observations.md).
+The implementation follows the [six delivery slices](proposals/native-analytics-and-quickstart.md)
+and preserves every completed milestone's behavior.
+
+1. V2 contracts and synthetic orders/tickets fixtures.
+2. Generation/revision state with transaction, replay and rollback guards.
+3. Native optional groups, exact measures, ratios and named analysis bundles.
+4. Live group detail and join coverage diagnostics.
+5. Immutable capture, native Metric origin, saved detail, freshness, privacy,
+   additive migrations and verified 0.6.1 snapshot compatibility.
+6. Human walkthrough, CLI/MCP/API integration and packaged resources.
+
+Verification and implementation tradeoffs are recorded in
+[the delivery record](native-analytics-delivery.md).

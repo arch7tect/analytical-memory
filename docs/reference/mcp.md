@@ -1,14 +1,15 @@
 # MCP Reference
 
-For client registration and connection troubleshooting, use
-[MCP installation](../mcp-installation.md). For bundled skills and automatic
-initialization, use [plugin installation](../plugin-installation.md).
+For installation, client registration and troubleshooting, use
+[plugin installation](../plugin-installation.md). The plugin includes this MCP
+server and its shared skills, and initializes the selected backend on startup.
 
-The standalone server runs locally over stdio through `memory-mcp`:
+The plugin starts its included stdio server automatically. For direct command-line
+diagnostics from the unpacked payload:
 
 ```console
-uv run memory init
-uv run memory-mcp
+uv run --frozen --no-dev memory init
+uv run --frozen --no-dev memory status
 ```
 
 Initialize the selected database and evidence root before using data tools.
@@ -26,7 +27,7 @@ Discovery remains available while a store is uninitialized.
 | `ANALYTICAL_MEMORY_SCHEMA` | packaged `schema/current.json` | Structural contract |
 | `ANALYTICAL_MEMORY_DATA_ROOT` | per-user platform data directory | Base for the named-memory catalog |
 | `ANALYTICAL_MEMORY_CATALOG` | `<data-root>/memories.json` | Explicit catalog override |
-| `ANALYTICAL_MEMORY_PLUGIN_DATA` | per-user platform data directory | Plugin launcher data root; does not change standalone paths |
+| `ANALYTICAL_MEMORY_PLUGIN_DATA` | per-user platform data directory | Plugin launcher data root; does not change direct CLI paths |
 | `OPENAI_API_KEY` | unset | Optional external embedding API credential |
 
 Standalone database and evidence defaults are relative to the working directory.
@@ -190,3 +191,18 @@ so consumers should parse from the first `{`. Error codes and retryability are
 discoverable under `errors` in `memory://capabilities/current`. Parameterized
 resources return the same envelope as their JSON document for an unknown or
 unavailable memory.
+
+## Native analytics
+
+`memory_query_manage` additionally exposes `analysis_execute`, `query_drill_down`,
+`relation_inspect`, `analysis_read`, and `data_state`. Each accepts
+`payload={"document": ...}`. `execute` accepts both Query IR versions.
+`memory_ingest_manage` action `analysis_capture` is an explicit mutation. Read each
+`memory://operations/<operation>` spec and the
+[native analytics reference](native-analytics.md). The compact operations index
+is version 3: full effects are in individual specifications.
+
+Contextual capabilities are version 6. `operation_defaults.interfaces` supplies
+shared Python/CLI/MCP availability; an operation's own `interfaces` overrides
+it. Full meanings and effects remain in the linked lazy operation specs. This
+keeps capability discovery bounded as the native actions are added.

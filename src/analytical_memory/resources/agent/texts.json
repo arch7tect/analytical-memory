@@ -8,65 +8,69 @@
     "type": "Optional enforced JSON type; omit to keep the field dynamic."
   },
   "guide": {
-    "errors": "Expected failures are JSON objects with code, message, details, and retryable. Never silently switch memories after an error.",
+    "errors": "Failures have code/message/details/retryable. Never silently change memories after an error.",
     "guide_version": "1",
     "operations": {
-      "analysis": "memory_ingest_manage writes analytical attributes and metrics. Use a Node ID from query bindings; metrics are immutable observations.",
-      "configure": "memory_configure create initializes and attach validates. SQLite requires database/evidence_root; PostgreSQL requires connection_env/schema/evidence_root. Paths are absolute; connection_env names a DSN variable, not its value.",
-      "describe": "memory_ontology_manage declares optional namespace/entity metadata and validation. Imports may introduce undeclared fields and types.",
-      "import": "memory_ingest_manage action=jsonl_import reads a server-local JSONL file, one JSON object per line. key is an ordered typed tuple used to find a current Node. Required declared fields must be present when a record creates a Node; key-matched updates patch only present fields and may omit required fields.",
-      "join": "memory_relation_manage action=materialize creates exact typed joins. Source arrays expand unique non-null values and Cartesian products; targets stay scalar. Joins are never inferred or rerun automatically.",
-      "provenance": "Search/query results return record/source/run/fragment identifiers. Use memory_explain_manage for provenance and evidence managers for bounded raw-byte status, reads, or verification.",
-      "query": "memory_query_manage action=execute is the general relational/graph read surface. Non-count rows bind aliases to canonical Node IDs."
+      "analysis": "memory_ingest_manage writes analytical attributes and caller metrics. Use canonical Node IDs; caller metrics are immutable.",
+      "configure": "memory_configure create initializes; attach validates. SQLite uses database/evidence_root. PostgreSQL uses connection_env/schema/evidence_root. Absolute paths; connection_env is a variable name, never a DSN value.",
+      "describe": "memory_ontology_manage declares descriptions, privacy and validation. Imports can introduce undeclared fields.",
+      "import": "memory_ingest_manage jsonl_import reads server-local JSONL objects. An ordered typed key matches current Nodes. Required declared fields must be present when a record creates a Node; key-matched updates may omit required fields and patch only present fields.",
+      "join": "memory_relation_manage materialize creates typed exact joins. Source arrays expand unique non-null values/combinations; targets are scalar. No inferred or automatic joins.",
+      "provenance": "Results carry record/source/run/fragment IDs. memory_explain_manage resolves provenance; evidence managers provide bounded status/reads/verification.",
+      "query": "memory_query_manage execute accepts v1/v2. Read memory://schema/query-ir/current; use exact ontology names.",
+      "native_analytics": "analysis_execute runs named queries/inspection in one snapshot. V2 has anchored optional groups, identity counts, integer sums and exact ratios. query_drill_down requires typed key, measure and original state on every live page.",
+      "capture": "Save only when requested: memory_ingest_manage analysis_capture takes analysis/definition_version/expected_state. Server computes values. analysis_read reports freshness; saved drill uses observation_id/query_name."
     },
-    "purpose": "Use Analytical Memory through MCP without database access or source-code knowledge. Resources describe current data shape; tools perform bounded typed operations.",
+    "purpose": "Use the local MCP memory without database access. Resources describe shape; typed tools perform bounded operations.",
     "results": {
-      "common": "Every tool result includes memory. Fingerprints identify its contract. source_id, batch_id, run_id, fragment_id, and evidence_digest are provenance identities, not business keys.",
-      "evidence": "availability is present or missing; verification is unverified, verified, or corrupt. Read data_base64 until eof; audit complete=false or truncated=true means the requested bound did not cover the catalog.",
-      "import": "records is accepted line count; created_nodes and updated_nodes split upserts; attributes_written counts present fields; ontology_delta names newly observed shape.",
-      "join": "created_relations is new active edges. skipped_unmatched and skipped_null_or_missing explain non-materialized source nodes.",
-      "query": "rows contain alias-to-Node-ID bindings and projections with direct provenance. count is used only for count queries. truncated means more rows exist beyond the requested limit.",
-      "replay": "replayed=true means the same idempotent operation was already committed; returned IDs and counts describe that canonical operation.",
-      "search": "results contain current target IDs and provenance. coverage reports eligible versus indexed facts and whether indexing is complete.",
-      "traversal": "nodes and edges carry depth; truncated means the result limit stopped the traversal. relation_id can be explained or deactivated."
+      "common": "Every tool result includes memory. Check it before reusing IDs. Fingerprints identify contracts; provenance IDs are not business keys.",
+      "evidence": "availability=present/missing; verification=unverified/verified/corrupt. Read base64 chunks until eof. Incomplete/truncated audits are bounded subsets.",
+      "import": "records counts lines; created_nodes/updated_nodes split upserts; attributes_written counts present fields; ontology_delta describes new shape.",
+      "join": "created_relations counts new edges; skipped_unmatched/skipped_null_or_missing explain omissions.",
+      "query": "V1 rows bind aliases and project values/provenance; count is separate. truncated means more output rows exist.",
+      "replay": "replayed=true returns the already committed canonical IDs/counts.",
+      "search": "Matches contain target IDs/provenance; coverage compares eligible and indexed facts.",
+      "traversal": "Nodes/edges carry depth; truncation is explicit. Explain or deactivate relation_id.",
+      "native_analytics": "Native envelopes use format_version/result. Complete input precedes output pagination; limits abort. Ratios retain exact integers; coverage references global measures, never caller counts."
     },
     "safety": {
-      "correction": "memory_relation_deactivate corrects current graph state without deleting provenance. Evidence verify/audit append verification history.",
-      "destructive": "memory_node_delete cascades current attributes, relations, embeddings, and search documents but retains immutable evidence/provenance records.",
-      "privacy": "public is the default. private data is excluded from public export and external embedding. Semantic query text is sent to the configured commercial embedding provider."
+      "correction": "Deactivate relations explicitly; evidence checks append history.",
+      "destructive": "Node deletion cascades current graph/search/embeddings, retaining immutable evidence.",
+      "privacy": "Data defaults public. Private facts are excluded from public export/external embedding; local reads can see them. Semantic query text is external.",
+      "native_observations": "Fact/provenance changes stale captures. Native public=true requires current verified public captured/current dependencies. Referenced manifests are mandatory. Restored observations have unknown freshness."
     },
     "selection": {
       "catalog": "memory://catalog",
-      "default": "Omit memory on every tool to use the environment-selected default.",
-      "named": "Pass the same explicit memory name on every related tool call. There is no process-wide active selection and no fallback for unknown names.",
+      "default": "Omit memory for the environment-selected default.",
+      "named": "Use the same explicit name on every call. No active selection or fallback.",
       "named_capabilities": "memory://memories/{memory}/capabilities/current",
       "named_ontology": "memory://memories/{memory}/schema/ontology/current",
       "summary": "memory://memories/{memory}/summary"
     },
     "workflow": [
       {
-        "action": "Read memory://catalog and choose default or a named memory. For content discovery, read its summary; an empty default does not imply that named memories are empty.",
-        "step": 1
+        "step": 1,
+        "action": "Read memory://catalog and choose one memory; read its summary for content discovery. Empty default does not imply empty named memories."
       },
       {
-        "action": "Read capabilities or ontology only when the task needs them. Tool descriptions link actions to exact specs; read memory://operations only when the operation is not yet known.",
-        "step": 2
+        "step": 2,
+        "action": "Read action-linked specs. Use memory://operations for unknown operations, capabilities for availability and ontology for data names."
       },
       {
-        "action": "Read the selected operation spec before calling a manager; use its exact payload schema and example.",
-        "step": 3
+        "step": 3,
+        "action": "Follow the exact payload schema and example from the selected operation spec."
       },
       {
-        "action": "Read memory://schema/current only for writes and pass its schema_fingerprint as the payload contract_fingerprint.",
-        "step": 4
+        "step": 4,
+        "action": "For writes, read memory://schema/current and pass schema_fingerprint as contract_fingerprint."
       },
       {
-        "action": "Read memory://schema/query-ir/current before action=execute on memory_query_manage. Use ontology names exactly.",
-        "step": 5
+        "step": 5,
+        "action": "For execute, read memory://schema/query-ir/current and use exact ontology names."
       },
       {
-        "action": "Read the selected ontology before imports, joins, or queries and refresh it after shape-changing writes.",
-        "step": 6
+        "step": 6,
+        "action": "Refresh the selected ontology after shape-changing writes."
       }
     ]
   },

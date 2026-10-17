@@ -41,13 +41,18 @@ class SqliteMemoryStore(SqlMemoryStore):
         return connection
 
     def _lock_for_lifecycle(self, connection: sqlite3.Connection) -> None:
-        connection.execute("BEGIN IMMEDIATE")
+        pass
 
     def initialize(self) -> None:
         self.database.parent.mkdir(parents=True, exist_ok=True)
         connection = self._connect(require_initialized=False)
         try:
             migrate_sqlite(connection, self.migrations_directory)
+            connection.execute("PRAGMA journal_mode = WAL")
+            from analytical_memory.native_store import initialize_state
+
+            with connection:
+                initialize_state(connection)
             rows = connection.execute(
                 "SELECT id, value_json FROM node_attribute "
                 "WHERE (json_type = 'string' AND "
@@ -151,8 +156,7 @@ class SqliteMemoryStore(SqlMemoryStore):
         if set(records) != set(SNAPSHOT_TABLES):
             raise SnapshotError("snapshot canonical table set does not match")
         counts: dict[str, int] = {}
-        with self._write_connection() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+        with self._write_connection(track_revision=False) as connection:
             connection.execute("PRAGMA defer_foreign_keys = ON")
             nonempty = [
                 table
@@ -184,6 +188,13 @@ class SqliteMemoryStore(SqlMemoryStore):
                         tuple(row[column] for column in columns),
                     )
                 counts[table] = len(rows)
+            import uuid
+
+            connection.execute(
+                "UPDATE memory_state SET generation = ?, data_revision = 0 "
+                "WHERE singleton = 1",
+                (str(uuid.uuid4()),),
+            )
             connection.execute("DELETE FROM search_document_fts")
             connection.execute(
                 """
@@ -205,6 +216,7 @@ class SqliteMemoryStore(SqlMemoryStore):
             actual_tables = {str(row["name"]) for row in table_rows}
             expected_tables = {
                 *SNAPSHOT_TABLES,
+                "memory_state",
                 "embedding_profile",
                 "embedding_record",
                 "schema_migration",

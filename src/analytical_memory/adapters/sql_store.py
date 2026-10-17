@@ -74,10 +74,12 @@ SNAPSHOT_TABLES = (
     "evidence_location",
     "evidence_verification",
     "evidence_retirement",
+    "analysis_observation",
 )
 SNAPSHOT_ORDER = {"observed_field": "entity_type, field_name"}
 
 LIFECYCLE_DELETE_TABLES = (
+    "analysis_observation",
     "embedding_record",
     "embedding_profile",
     "search_document",
@@ -189,22 +191,52 @@ class SqlMemoryStore(MemoryStore):
     def _read_connection(self) -> Iterator[Any]:
         connection = self._connect()
         try:
+            if self.dialect.profile == "sqlite":
+                connection.execute("BEGIN")
+            else:
+                connection.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
             yield connection
         finally:
             connection.close()
 
     @contextmanager
-    def _write_connection(self) -> Iterator[Any]:
+    def _write_connection(self, *, track_revision: bool = True) -> Iterator[Any]:
         connection = self._connect()
         try:
             with connection:
+                if self.dialect.profile == "sqlite":
+                    connection.execute("BEGIN IMMEDIATE")
+                else:
+                    connection.execute(
+                        "SELECT singleton FROM memory_state WHERE singleton = 1 "
+                        "FOR UPDATE"
+                    )
+                from analytical_memory.native_store import fact_digest
+
+                before = fact_digest(connection) if track_revision else None
                 yield connection
+                if track_revision and before != fact_digest(connection):
+                    connection.execute(
+                        "UPDATE memory_state SET data_revision = data_revision +"
+                        " 1 WHERE singleton = 1"
+                    )
         except self.dialect.integrity_errors as exc:
             raise BatchValidationError(
                 f"batch violates storage constraints: {exc}"
             ) from exc
         finally:
             connection.close()
+
+    def analytics_operation(
+        self,
+        operation: str,
+        document: dict[str, Any],
+        evidence_store: Any = None,
+        contract_fingerprint: str = "",
+    ) -> dict[str, Any]:
+        from analytical_memory.native_store import operate
+
+        return operate(self, operation, document, evidence_store, contract_fingerprint)
 
     @staticmethod
     def _lifecycle_state(connection: Any) -> dict[str, int | str]:
@@ -247,7 +279,7 @@ class SqlMemoryStore(MemoryStore):
         self, expected_state: dict[str, int | str], *, destroy: bool
     ) -> dict[str, int | str]:
         try:
-            with self._write_connection() as connection:
+            with self._write_connection(track_revision=False) as connection:
                 self._lock_for_lifecycle(connection)
                 state = self._lifecycle_state(connection)
                 if state != expected_state:
@@ -261,7 +293,15 @@ class SqlMemoryStore(MemoryStore):
                 connection.execute("DELETE FROM search_document_fts")
                 for table in LIFECYCLE_DELETE_TABLES:
                     connection.execute(f"DELETE FROM {table}")
+                connection.execute(
+                    (
+                        "UPDATE memory_state SET generation = ?, data_revision ="
+                        " 0 WHERE singleton = 1"
+                    ),
+                    (str(uuid.uuid4()),),
+                )
                 if destroy:
+                    connection.execute("DROP TABLE memory_state")
                     connection.execute("DROP TABLE search_document_fts")
                     for table in LIFECYCLE_DELETE_TABLES:
                         connection.execute(f"DROP TABLE {table}")
@@ -561,7 +601,12 @@ class SqlMemoryStore(MemoryStore):
             "analytical_run", "namespace-declaration", evidence.object.digest
         )
         with self._write_connection() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            previous = connection.execute(
+                "SELECT description FROM namespace_declaration WHERE name = ?",
+                (declaration.name,),
+            ).fetchone()
+            if previous is not None and previous["description"] == description:
+                return self._ontology_snapshot_connection(connection)
             self._upsert_provenance_entities(
                 connection,
                 source_id=source_id,
@@ -695,7 +740,15 @@ class SqlMemoryStore(MemoryStore):
         declaration_hash = sha256_json(declaration_document)
         recorded_at = _now()
         with self._write_connection() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            previous = connection.execute(
+                "SELECT declaration_hash FROM entity_declaration WHERE entity_type = ?",
+                (declaration.entity_type,),
+            ).fetchone()
+            if (
+                previous is not None
+                and previous["declaration_hash"] == declaration_hash
+            ):
+                return self._ontology_snapshot_connection(connection)
             source_id = stable_uuid(
                 "source", "entity-declaration", evidence.object.digest
             )
@@ -1061,7 +1114,6 @@ class SqlMemoryStore(MemoryStore):
             "key": [{"field": item.field, "type": item.type} for item in request.key],
         }
         with self._write_connection() as connection:
-            connection.execute("BEGIN IMMEDIATE")
             replay = connection.execute(
                 "SELECT input_hash, result_json FROM ingestion_batch "
                 "WHERE idempotency_key = ?",
@@ -1399,7 +1451,6 @@ class SqlMemoryStore(MemoryStore):
             "node_attribute", request.node_id, request.attribute_name
         )
         with self._write_connection() as connection:
-            connection.execute("BEGIN IMMEDIATE")
             node = connection.execute(
                 "SELECT namespace, type FROM node WHERE id = ?", (request.node_id,)
             ).fetchone()
@@ -1614,7 +1665,6 @@ class SqlMemoryStore(MemoryStore):
         from_namespace, from_type = split_entity_type(request.from_.type)
         to_namespace, to_type = split_entity_type(request.to.type)
         with self._write_connection() as connection:
-            connection.execute("BEGIN IMMEDIATE")
             replay = connection.execute(
                 "SELECT input_hash, result_json FROM ingestion_batch "
                 "WHERE idempotency_key = ?",
@@ -1728,7 +1778,7 @@ class SqlMemoryStore(MemoryStore):
                         recorded_at,
                     ),
                 )
-            else:
+            elif existing_declaration["description"] != description:
                 connection.execute(
                     "UPDATE ontology_declaration SET description = ?, source_id = ?, "
                     "fragment_id = ?, recorded_at = ? WHERE name = ?",
@@ -2165,7 +2215,6 @@ class SqlMemoryStore(MemoryStore):
 
     def deactivate_relation(self, relation_id: str) -> dict[str, Any]:
         with self._write_connection() as connection:
-            connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 "SELECT * FROM relation WHERE id = ?", (relation_id,)
             ).fetchone()
@@ -2197,7 +2246,6 @@ class SqlMemoryStore(MemoryStore):
 
     def delete_node(self, node_id: str) -> dict[str, int]:
         with self._write_connection() as connection:
-            connection.execute("BEGIN IMMEDIATE")
             if (
                 connection.execute(
                     "SELECT 1 FROM node WHERE id = ?", (node_id,)
@@ -2450,6 +2498,7 @@ class SqlMemoryStore(MemoryStore):
                 JOIN analytical_run ON analytical_run.id = metric.run_id
                 WHERE metric.definition_version = ?
                   AND metric.dimensions_hash = ?
+                  AND metric.origin = 'caller'
                   AND metric.complete = 1
                   AND metric.invalidated = 0
                 ORDER BY analytical_run.recorded_at DESC,
@@ -2493,7 +2542,6 @@ class SqlMemoryStore(MemoryStore):
             "metric", run_id, request.definition_version, dimensions_hash
         )
         with self._write_connection() as connection:
-            connection.execute("BEGIN IMMEDIATE")
             existing_run = connection.execute(
                 "SELECT id FROM analytical_run WHERE idempotency_key = ?",
                 (request.idempotency_key,),
@@ -2651,7 +2699,6 @@ class SqlMemoryStore(MemoryStore):
         method: str,
     ) -> dict[str, Any]:
         with self._write_connection() as connection:
-            connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 "SELECT id FROM evidence_object WHERE digest = ?", (digest,)
             ).fetchone()
@@ -2725,7 +2772,6 @@ class SqlMemoryStore(MemoryStore):
         method: str,
     ) -> None:
         with self._write_connection() as connection:
-            connection.execute("BEGIN IMMEDIATE")
             if (
                 connection.execute(
                     "SELECT 1 FROM evidence_fragment WHERE id = ?", (fragment_id,)
@@ -2775,7 +2821,6 @@ class SqlMemoryStore(MemoryStore):
             "evidence_verification", target_kind, target_id, checked_at, method
         )
         with self._write_connection() as connection:
-            connection.execute("BEGIN IMMEDIATE")
             connection.execute(
                 """
                 INSERT INTO evidence_verification (
@@ -2890,7 +2935,13 @@ class SqlMemoryStore(MemoryStore):
         self, digest: str, *, released_at: str, reason: str
     ) -> dict[str, Any]:
         with self._write_connection() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            if connection.execute(
+                "SELECT id FROM analysis_observation WHERE manifest_digest = ?",
+                (digest,),
+            ).fetchone():
+                raise RetentionBlockedError(
+                    "a native observation requires this manifest"
+                )
             evidence_object = connection.execute(
                 "SELECT evidence_object.id, evidence_retirement.retired_at "
                 "FROM evidence_object LEFT JOIN evidence_retirement ON "
@@ -2943,8 +2994,14 @@ class SqlMemoryStore(MemoryStore):
         retired_at: str,
     ) -> None:
         with self._write_connection() as connection:
-            connection.execute("BEGIN IMMEDIATE")
             for digest in digests:
+                if connection.execute(
+                    "SELECT id FROM analysis_observation WHERE manifest_digest = ?",
+                    (digest,),
+                ).fetchone():
+                    raise RetentionBlockedError(
+                        "a native observation requires this manifest"
+                    )
                 row = connection.execute(
                     """
                     SELECT evidence_object.id,

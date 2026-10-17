@@ -456,9 +456,33 @@ class MemoryApplication:
         return result
 
     def execute_query(self, document: dict[str, Any]) -> dict[str, Any]:
+        if document.get("query_ir_version") == "2":
+            return self.native_operation("query_execute_v2", document)
         result = self.memory_store.execute_query(parse_query_ir(document))
         result["contract_fingerprint"] = self.schema.fingerprint
         return result
+
+    def native_operation(
+        self, operation: str, document: dict[str, Any]
+    ) -> dict[str, Any]:
+        result = self.memory_store.analytics_operation(
+            operation, document, self.evidence_store, self.schema.fingerprint
+        )
+        return {
+            "format_version": "1",
+            "result": result
+            if operation == "data_state"
+            else {**result, "contract_fingerprint": self.schema.fingerprint},
+        }
+
+    def analysis_execute(self, document: dict[str, Any]) -> dict[str, Any]:
+        return self.native_operation("analysis_execute", document)
+
+    def analysis_capture(self, document: dict[str, Any]) -> dict[str, Any]:
+        return self.native_operation("analysis_capture", document)
+
+    def query_drill_down(self, document: dict[str, Any]) -> dict[str, Any]:
+        return self.native_operation("query_drill_down", document)
 
     def write_analytical_attribute(
         self,
@@ -1385,12 +1409,23 @@ class MemoryApplication:
             self.schema,
             destination,
             created_at or _now(),
+            self.evidence_store,
         )
 
     def transfer_import(self, source: Path) -> dict[str, Any]:
         document = load_transfer(source, self.schema.fingerprint)
         self.initialize()
         records = document["records"]
+        import base64
+
+        from analytical_memory.domain import EvidenceObjectRecord
+
+        objects = {row["digest"]: row for row in records["evidence_object"]}
+        for digest, encoded in document.get("analysis_manifests", {}).items():
+            self.evidence_store.put_bytes(
+                base64.b64decode(encoded, validate=True),
+                EvidenceObjectRecord(**objects[digest]),
+            )
         counts = self.memory_store.import_transfer_records(records)
         imported = self.memory_store.transfer_records()
         imported_hashes = {
@@ -1453,7 +1488,25 @@ class MemoryApplication:
     def capabilities(self) -> dict[str, Any]:
         memory_status = self.memory_store.status()
         evidence_status = self.evidence_store.status()
+        from analytical_memory.analytics import (
+            MAX_BINDINGS,
+            MAX_FACTS,
+            MAX_MEMBERS,
+            MAX_SECONDS,
+            SEMANTICS,
+        )
+
         document: dict[str, Any] = {
+            "native_analytics": {
+                "query_ir_versions": ["1", "2"],
+                "semantics": SEMANTICS,
+                "fact_limit": MAX_FACTS,
+                "binding_work_limit": MAX_BINDINGS,
+                "seconds": MAX_SECONDS,
+                "members": MAX_MEMBERS,
+                "manifest_bytes": 33554432,
+                "freshness": "memory-wide conservative revision",
+            },
             "capabilities_document_version": "2",
             "evidence_store": {
                 "initialized": evidence_status.initialized,
@@ -1462,7 +1515,7 @@ class MemoryApplication:
                     "enabled": True,
                     "max_bytes": MAX_EVIDENCE_READ_BYTES,
                 },
-                "snapshots": {"enabled": True, "format_version": "1"},
+                "snapshots": {"enabled": True, "format_version": "2"},
             },
             "limits": {
                 "evidence_ingest_bytes": MAX_EVIDENCE_INGEST_BYTES,
@@ -1482,6 +1535,21 @@ class MemoryApplication:
             "logical_schema_fingerprint": self.schema.fingerprint,
             "errors": error_code_registry(),
             "operations": {
+                **{
+                    name: {
+                        "enabled": True,
+                        "interfaces": ["python", "cli", "mcp"],
+                        "mutating": name == "analysis_capture",
+                    }
+                    for name in (
+                        "analysis_execute",
+                        "analysis_capture",
+                        "query_drill_down",
+                        "analysis_read",
+                        "relation_inspect",
+                        "data_state",
+                    )
+                },
                 "delete_node": {
                     "enabled": True,
                     "interfaces": ["python", "cli", "mcp"],

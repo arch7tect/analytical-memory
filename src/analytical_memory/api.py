@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from analytical_memory.analytics import AnalyticsResponse
 from analytical_memory.api_models import (
     AnalyticalAttributeResponse,
     AnalyticalMetricResponse,
@@ -123,8 +124,40 @@ class MemoryAPI:
             )
         )
 
-    def execute_query(self, document: dict[str, Any]) -> QueryIRResponse:
-        return QueryIRResponse.model_validate(self.application.execute_query(document))
+    def execute_query(
+        self, document: dict[str, Any]
+    ) -> QueryIRResponse | AnalyticsResponse:
+        result = self.application.execute_query(document)
+        return (
+            AnalyticsResponse.model_validate(result)
+            if document.get("query_ir_version") == "2"
+            else QueryIRResponse.model_validate(result)
+        )
+
+    def native_operation(
+        self, operation: str, document: dict[str, Any]
+    ) -> AnalyticsResponse:
+        return AnalyticsResponse.model_validate(
+            self.application.native_operation(operation, document)
+        )
+
+    def analysis_execute(self, document: dict[str, Any]) -> AnalyticsResponse:
+        return self.native_operation("analysis_execute", document)
+
+    def analysis_capture(self, document: dict[str, Any]) -> AnalyticsResponse:
+        return self.native_operation("analysis_capture", document)
+
+    def query_drill_down(self, document: dict[str, Any]) -> AnalyticsResponse:
+        return self.native_operation("query_drill_down", document)
+
+    def data_state(self) -> AnalyticsResponse:
+        return self.native_operation("data_state", {})
+
+    def analysis_read(self, document: dict[str, Any]) -> AnalyticsResponse:
+        return self.native_operation("analysis_read", document)
+
+    def relation_inspect(self, document: dict[str, Any]) -> AnalyticsResponse:
+        return self.native_operation("relation_inspect", document)
 
     def write_analytical_metric(
         self,

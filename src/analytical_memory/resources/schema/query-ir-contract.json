@@ -662,7 +662,7 @@
     "title": "QueryIRResponse",
     "type": "object"
   },
-  "schema_fingerprint": "3176355e7b7637b312c768bef5a11f299d2cb144cff8645dc0d5c306eb099b39",
+  "schema_fingerprint": "073e47608393613bec0dd411f192010e17fb3787adc484c2ca70b4ba2a53ee2a",
   "semantics": {
     "bindings": "every non-count row maps each node alias to its Node ID",
     "comparison": "literals must match the field effective JSON type; strings and numbers are never coerced",
@@ -681,5 +681,371 @@
     "string_ordering": "Unicode casefold, then original code-point order",
     "unresolved": "typed comparison produces no matches",
     "where": "implicit conjunction; OR is not supported"
+  },
+  "supported_versions": [
+    "1",
+    "2"
+  ],
+  "v2": {
+    "errors": [
+      "analytics_error",
+      "analytics_limit_exceeded",
+      "analytics_integrity_error",
+      "stale_query_result",
+      "observation_unavailable"
+    ],
+    "input_schema": {
+      "$defs": {
+        "BindingCondition": {
+          "additionalProperties": false,
+          "properties": {
+            "bound": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Bound"
+            },
+            "unbound": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Unbound"
+            }
+          },
+          "title": "BindingCondition",
+          "type": "object"
+        },
+        "GroupField": {
+          "additionalProperties": false,
+          "properties": {
+            "as": {
+              "minLength": 1,
+              "title": "As",
+              "type": "string"
+            },
+            "field": {
+              "description": "Field expression or attribute name used by this result item.",
+              "title": "Field",
+              "type": "string"
+            }
+          },
+          "required": [
+            "field",
+            "as"
+          ],
+          "title": "GroupField",
+          "type": "object"
+        },
+        "Measure": {
+          "additionalProperties": false,
+          "properties": {
+            "as": {
+              "minLength": 1,
+              "title": "As",
+              "type": "string"
+            },
+            "distinct_on": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Distinct On"
+            },
+            "field": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Field expression or attribute name used by this result item.",
+              "title": "Field"
+            },
+            "node": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Node directly owning the explained attribute.",
+              "title": "Node"
+            },
+            "op": {
+              "enum": [
+                "count",
+                "count_distinct",
+                "sum"
+              ],
+              "title": "Op",
+              "type": "string"
+            },
+            "when": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/BindingCondition"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "as",
+            "op"
+          ],
+          "title": "Measure",
+          "type": "object"
+        },
+        "OptionalPattern": {
+          "additionalProperties": false,
+          "properties": {
+            "edges": {
+              "description": "Relation edges returned by the traversal.",
+              "items": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "maxItems": 1,
+              "minItems": 1,
+              "title": "Edges",
+              "type": "array"
+            },
+            "nodes": {
+              "description": "Nodes returned or affected by the operation.",
+              "items": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "maxItems": 1,
+              "minItems": 1,
+              "title": "Nodes",
+              "type": "array"
+            },
+            "where": {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "maxItems": 32,
+              "title": "Where",
+              "type": "array"
+            }
+          },
+          "required": [
+            "nodes",
+            "edges"
+          ],
+          "title": "OptionalPattern",
+          "type": "object"
+        },
+        "Ratio": {
+          "additionalProperties": false,
+          "properties": {
+            "as": {
+              "minLength": 1,
+              "title": "As",
+              "type": "string"
+            },
+            "denominator": {
+              "description": "Optional denominator used to calculate a metric value.",
+              "title": "Denominator",
+              "type": "string"
+            },
+            "numerator": {
+              "description": "Optional numerator used to calculate a metric value.",
+              "title": "Numerator",
+              "type": "string"
+            },
+            "op": {
+              "const": "ratio",
+              "title": "Op",
+              "type": "string"
+            },
+            "zero_denominator": {
+              "const": "null",
+              "default": "null",
+              "title": "Zero Denominator",
+              "type": "string"
+            }
+          },
+          "required": [
+            "as",
+            "op",
+            "numerator",
+            "denominator"
+          ],
+          "title": "Ratio",
+          "type": "object"
+        },
+        "ResultOrdering": {
+          "additionalProperties": false,
+          "properties": {
+            "direction": {
+              "default": "asc",
+              "description": "Direction applied by traversal or ordering.",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "title": "Direction",
+              "type": "string"
+            },
+            "result": {
+              "description": "Native result with exact values, revision guards and provenance.",
+              "title": "Result",
+              "type": "string"
+            }
+          },
+          "required": [
+            "result"
+          ],
+          "title": "ResultOrdering",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "derive": {
+          "items": {
+            "$ref": "#/$defs/Ratio"
+          },
+          "maxItems": 16,
+          "title": "Derive",
+          "type": "array"
+        },
+        "group_by": {
+          "items": {
+            "$ref": "#/$defs/GroupField"
+          },
+          "maxItems": 8,
+          "title": "Group By",
+          "type": "array"
+        },
+        "limit": {
+          "default": 100,
+          "description": "Maximum evidence bytes requested for this chunk.",
+          "maximum": 1000,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "match": {
+          "additionalProperties": true,
+          "title": "Match",
+          "type": "object"
+        },
+        "measures": {
+          "items": {
+            "$ref": "#/$defs/Measure"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Measures",
+          "type": "array"
+        },
+        "offset": {
+          "default": 0,
+          "description": "Zero-based byte offset of this evidence chunk.",
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "optional_match": {
+          "items": {
+            "$ref": "#/$defs/OptionalPattern"
+          },
+          "maxItems": 1,
+          "title": "Optional Match",
+          "type": "array"
+        },
+        "order_by": {
+          "items": {
+            "$ref": "#/$defs/ResultOrdering"
+          },
+          "maxItems": 16,
+          "title": "Order By",
+          "type": "array"
+        },
+        "query_ir_version": {
+          "const": "2",
+          "title": "Query Ir Version",
+          "type": "string"
+        },
+        "where": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "maxItems": 32,
+          "title": "Where",
+          "type": "array"
+        }
+      },
+      "required": [
+        "query_ir_version",
+        "match",
+        "measures"
+      ],
+      "title": "QueryIRV2Document",
+      "type": "object"
+    },
+    "numeric": "safe integers; exact numerator/denominator; 12-place half-even decimal",
+    "optional": "one anchored node; filters inside optional; active exact logical_key",
+    "pagination": "complete input; output only; stable population and group IDs",
+    "result_schema": {
+      "additionalProperties": false,
+      "description": "Versioned envelope shared by native operations, separate from v1 rows.",
+      "properties": {
+        "format_version": {
+          "const": "1",
+          "default": "1",
+          "description": "Version of the native operation result envelope.",
+          "title": "Format Version",
+          "type": "string"
+        },
+        "result": {
+          "additionalProperties": true,
+          "description": "Native result with exact values, revision guards and provenance.",
+          "title": "Result",
+          "type": "object"
+        }
+      },
+      "required": [
+        "result"
+      ],
+      "title": "AnalyticsResponse",
+      "type": "object"
+    },
+    "semantics_version": "native-analytics-1"
   }
 }
