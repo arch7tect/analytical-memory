@@ -162,6 +162,13 @@ Check plugin diagnostics for its MCP server. Local installs are copied by the
 host; reinstall to update the copy. See the
 [Kimi Code plugin guide](https://moonshotai.github.io/kimi-code/en/customization/plugins.html).
 
+Verify the server through Kimi after activation: both skills and the plugin's
+MCP tools must be available in that session. A successful standalone server probe
+does not prove Kimi loaded the server. If Kimi reports no configured MCP server,
+keep installation pending and inspect plugin diagnostics; do not run the
+quickstart through Python or a separate MCP client as a substitute. Kimi plugin
+server working directories must start with `./`, including the plugin root `./`.
+
 ## Codex
 
 With `HOST=openai` and the corresponding archive extracted:

@@ -78,7 +78,7 @@ def _server(host: str) -> dict[str, Any]:
     else:
         project = "."
         runtime = "scripts/plugin_runtime.py"
-        server = {"command": "uv", "cwd": "."}
+        server = {"command": "uv", "cwd": "./" if host == "kimi" else "."}
     server["args"] = [
         "run",
         "--project",

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from scripts.build_plugin_bundles import HOSTS, build_bundles
@@ -16,6 +17,12 @@ def test_plugin_skills_are_shared_with_openai_metadata_only_for_codex(
     tmp_path: Path,
 ) -> None:
     build_bundles(tmp_path)
+    kimi_root = tmp_path / "kimi" / "analytical-memory"
+    kimi_manifest = json.loads((kimi_root / "kimi.plugin.json").read_text())
+    for server in kimi_manifest["mcpServers"].values():
+        # Kimi ignores plugin servers whose cwd lacks its required ./ prefix.
+        assert server["cwd"].startswith("./")
+        assert (kimi_root / server["cwd"]).resolve().is_relative_to(kimi_root.resolve())
 
     for host in HOSTS:
         skills_root = _skills_root(tmp_path, host)

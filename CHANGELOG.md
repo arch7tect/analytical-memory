@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fix the Kimi bundle's working-directory path so the host loads its MCP server.
 - Default MCP v1 queries and native drill-down to compact values and record IDs;
   preserve full responses with `payload.response_format="full"` and explicit
   provenance expansion. Python/CLI defaults and stored snapshots are unchanged.
