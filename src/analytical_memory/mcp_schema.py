@@ -5,6 +5,10 @@ from typing import Any
 from analytical_memory.agent_texts import agent_text
 
 _OUTPUT_FIELD_DESCRIPTIONS = {
+    "response_format": (
+        "Response presentation: compact retains values and record IDs; "
+        "full includes provenance fields."
+    ),
     "format_version": "Version of the native operation result envelope.",
     "result": "Native result with exact values, revision guards and provenance.",
     "active": "Whether the current relation is active.",
@@ -112,7 +116,9 @@ _OUTPUT_FIELD_DESCRIPTIONS = {
     "privacy_class": "Effective privacy class of this current record.",
     "profile": "Stored embedding profile definition.",
     "profile_id": "Canonical identifier of the embedding profile used for search.",
-    "projections": "Requested projected values with direct provenance.",
+    "projections": (
+        "Requested values and record IDs; full format also includes direct provenance."
+    ),
     "provenance": "Direct provenance records for this ontology item.",
     "provider": "Embedding provider recorded by the profile.",
     "query": "Normalized query criteria echoed by the server.",

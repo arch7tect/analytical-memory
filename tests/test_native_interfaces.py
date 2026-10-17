@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -48,6 +49,56 @@ async def test_native_bundle_capture_and_detail_through_stdio(tmp_path: Path) ->
             assert response.structured_content is not None
             return dict(response.structured_content["result"]["result"])
 
+        v1 = {
+            "query_ir_version": "1",
+            "match": {"nodes": [{"as": "o", "type": "shop.Order"}], "edges": []},
+            "return": [{"field": "o.order_id"}, {"field": "o.amount_cents"}],
+            "order_by": [{"field": "o.order_id", "direction": "asc"}],
+            "limit": 3,
+        }
+        compact_call = await client.call_tool(
+            "memory_query_manage", {"action": "execute", "payload": {"document": v1}}
+        )
+        full_call = await client.call_tool(
+            "memory_query_manage",
+            {
+                "action": "execute",
+                "payload": {"document": v1, "response_format": "full"},
+            },
+        )
+        assert not compact_call.is_error and not full_call.is_error
+        assert compact_call.structured_content and full_call.structured_content
+        compact = compact_call.structured_content["result"]
+        full = full_call.structured_content["result"]
+        assert compact["response_format"] == "compact"
+        assert compact["rows"][0]["bindings"] == full["rows"][0]["bindings"]
+        assert compact["ordering"] == full["ordering"]
+        assert len(json.dumps(compact)) < len(json.dumps(full)) / 2
+        for small_row, full_row in zip(compact["rows"], full["rows"], strict=True):
+            for small, large in zip(
+                small_row["projections"], full_row["projections"], strict=True
+            ):
+                assert small["value"] == large["value"]
+                assert small["record_id"] == large["record_id"]
+                assert "source_id" not in small and large["source_id"]
+        explanation = await client.call_tool(
+            "memory_explain_manage",
+            {
+                "action": "attribute",
+                "payload": {
+                    "attribute_id": compact["rows"][0]["projections"][0]["record_id"]
+                },
+            },
+        )
+        assert not explanation.is_error
+        bad_format = await client.call_tool(
+            "memory_query_manage",
+            {
+                "action": "execute",
+                "payload": {"document": v1, "response_format": "tiny"},
+            },
+        )
+        assert bad_format.is_error
         analysed = await query("analysis_execute", document)
         assert analysed["coverage"]["attributed"] == 10
         direct = await query("execute", document["members"][0]["document"])
@@ -72,6 +123,11 @@ async def test_native_bundle_capture_and_detail_through_stdio(tmp_path: Path) ->
             "analysis_read", {"observation_id": saved["id"], "fresh_only": True}
         )
         assert read["verified"]
+        status = await query(
+            "analysis_read", {"observation_id": saved["id"], "view": "status"}
+        )
+        assert status["verified"] and "results" not in status
+        assert status["observation"] == read["observation"]
         group = direct["groups"][0]
         detail = await query(
             "query_drill_down",
@@ -87,6 +143,91 @@ async def test_native_bundle_capture_and_detail_through_stdio(tmp_path: Path) ->
         assert detail["rows"][0]["attributes"][0]["provenance"]["evidence_object"][
             "digest"
         ]
+        request = {
+            "observation_id": saved["id"],
+            "query_name": "by_carrier_region",
+            "group_key": group["key"],
+            "measure": "affected_orders",
+            "limit": 1,
+        }
+        compact_detail = await query("query_drill_down", request)
+        full_detail_call = await client.call_tool(
+            "memory_query_manage",
+            {
+                "action": "query_drill_down",
+                "payload": {"document": request, "response_format": "full"},
+            },
+        )
+        assert not full_detail_call.is_error and full_detail_call.structured_content
+        full_detail = full_detail_call.structured_content["result"]["result"]
+        assert compact_detail["response_format"] == "compact"
+        assert {
+            k: v
+            for k, v in compact_detail.items()
+            if k not in {"rows", "response_format"}
+        } == {k: v for k, v in full_detail.items() if k != "rows"}
+        assert compact_detail["total_members"] == 3 and compact_detail["truncated"]
+        assert compact_detail["mode"] == "observation_time"
+        assert (
+            len(json.dumps(compact_detail["rows"]))
+            < len(json.dumps(full_detail["rows"])) / 2
+        )
+        assert (
+            compact_detail["rows"][0]["node"]["id"]
+            == full_detail["rows"][0]["node"]["id"]
+        )
+        assert "source_id" not in compact_detail["rows"][0]["attributes"][0]
+        assert compact_detail["rows"][0]["node"]["privacy_class"] == "public"
+        assert compact_detail["rows"][0]["attributes"][0]["privacy_class"] == "public"
+        from analytical_memory.retail_quickstart import EXAMPLES
+
+        MemoryAPI(app).jsonl_import(
+            EXAMPLES / "correction.jsonl",
+            "shop.Ticket",
+            [{"field": "ticket_id", "type": "string"}],
+            app.schema.fingerprint,
+        )
+        historical = await query(
+            "query_drill_down",
+            {
+                **request,
+                "measure": "delivery_tickets",
+                "limit": 100,
+            },
+        )
+        live_request = {
+            "query": document["members"][0]["document"],
+            "group_key": group["key"],
+            "measure": "delivery_tickets",
+            "expected_state": analysed["state"],
+        }
+        stale = await client.call_tool(
+            "memory_query_manage",
+            {
+                "action": "query_drill_down",
+                "payload": {"document": live_request},
+            },
+        )
+        assert stale.is_error
+        current = await query(
+            "query_drill_down",
+            {
+                **live_request,
+                "expected_state": MemoryAPI(app).data_state().result,
+            },
+        )
+        assert historical["total_members"] == 3 and current["total_members"] == 4
+        assert historical["observation"]["freshness"] == "potentially_stale"
+        assert historical["state"] == analysed["state"]
+        assert current["state"] != historical["state"]
+        public_stale = await client.call_tool(
+            "memory_query_manage",
+            {
+                "action": "query_drill_down",
+                "payload": {"document": {**request, "public": True}},
+            },
+        )
+        assert public_stale.is_error
         bad = await client.call_tool(
             "memory_query_manage",
             {"action": "analysis_read", "payload": {"document": {"public": True}}},

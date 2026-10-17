@@ -33,6 +33,7 @@ from analytical_memory.api_models import (
     TraversalResponse,
 )
 from analytical_memory.mcp_schema import describe_response_schema
+from analytical_memory.response_views import CompactQueryResponse
 
 ContractFingerprint = Annotated[
     str,
@@ -230,13 +231,25 @@ class RelationDeactivateRequest(APIModel):
     )
 
 
-class QueryExecuteRequest(APIModel):
+class ResponseViewRequest(APIModel):
+    response_format: Literal["compact", "full"] = Field(
+        default="compact",
+        description=(
+            "Compact values and record IDs by default; full includes per-field "
+            "provenance. Explicit drill view=provenance always expands provenance."
+        ),
+    )
+
+
+class QueryExecuteRequest(ResponseViewRequest):
     document: dict[str, Any] = Field(
         description="Query IR v1 or v2 document using the selected memory ontology."
     )
 
 
-class QueryOperationResponse(RootModel[QueryIRResponse | AnalyticsResponse]):
+class QueryOperationResponse(
+    RootModel[CompactQueryResponse | QueryIRResponse | AnalyticsResponse]
+):
     pass
 
 
@@ -247,6 +260,10 @@ class NativeRequest(APIModel):
             "lytics reference and operation specification."
         )
     )
+
+
+class DrillRequest(NativeRequest, ResponseViewRequest):
+    pass
 
 
 class CurrentMetricRequest(APIModel):
@@ -497,7 +514,9 @@ class OperationDefinition:
                 self.response_model.model_json_schema(by_alias=True)
             ),
             "preconditions": list(self.preconditions),
-            "spec_version": "1",
+            "spec_version": "2"
+            if self.operation in {"query_execute", "query_drill_down", "analysis_read"}
+            else "1",
         }
         from analytical_memory.analytics import NATIVE_DOCUMENT_MODELS
 
@@ -897,7 +916,7 @@ OPERATION_DEFINITIONS = (
             if operation == "analysis_capture"
             else "memory_query_manage",
             operation,
-            NativeRequest,
+            DrillRequest if operation == "query_drill_down" else NativeRequest,
             AnalyticsResponse,
             mutating=operation == "analysis_capture",
             idempotent=True,

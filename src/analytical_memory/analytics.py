@@ -949,6 +949,13 @@ class DrillDocument(APIModel):
 
 
 class ReadDocument(APIModel):
+    view: Literal["results", "status"] = Field(
+        default="results",
+        description=(
+            "Status returns verified observation metadata and freshness without "
+            "analytical result bodies; all integrity and public-use checks still apply."
+        ),
+    )
     observation_id: str = Field(min_length=1, description="Saved observation ID.")
     fresh_only: bool = Field(
         default=False, strict=True, description="Reject stale or unknown observations."

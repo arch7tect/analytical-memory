@@ -150,3 +150,15 @@ adapting caller metrics. Every restored/ transferred target has a new generation
 and revision zero. Saved values remain available; execute and capture explicitly
 to obtain a current observation. Transfer format 2 includes native manifests,
 while other raw evidence follows the existing separate copy procedure.
+
+## Compact presentation and status reads
+
+MCP drill-down defaults to compact entity/attribute values with IDs; it preserves
+all reconciliation, pagination, state, freshness and evidence-availability
+metadata. Set `payload.response_format="full"` for the previous shape, or select
+`document.view="provenance"` for explicit full evidence. Saved detail still uses
+observation-time values. Python and CLI drill-down defaults remain full.
+
+`analysis_read` accepts `view="status"` to omit saved result bodies after the
+same manifest, privacy and freshness checks. The default `view="results"`
+retains the previous response. See [the MCP contract](mcp.md#compact-query-responses).

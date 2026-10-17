@@ -22,6 +22,11 @@ def query_ir_contract_document(schema_fingerprint: str) -> dict[str, Any]:
     from analytical_memory.api_models import QueryIRDocument, QueryIRResponse
 
     return {
+        "mcp_response": {
+            "spec": "memory://operations/query_execute",
+            "default": "compact",
+            "full": "payload.response_format=full restores the result_schema below",
+        },
         "supported_versions": ["1", "2"],
         "v2": {
             "input_schema": QueryIRV2Document.model_json_schema(by_alias=True),

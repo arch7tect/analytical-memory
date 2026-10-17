@@ -60,6 +60,11 @@ from analytical_memory.mcp_operations import (
 from analytical_memory.mcp_schema import DescribedMCPResponse
 from analytical_memory.memories import MemoryRouter, contextual_capabilities
 from analytical_memory.query_ir import query_ir_contract_document
+from analytical_memory.response_views import (
+    CompactQueryResponse,
+    compact_drill,
+    compact_query,
+)
 from analytical_memory.version import __version__
 
 MemorySelection = Annotated[
@@ -216,6 +221,10 @@ class MemoryJoinMaterializationResponse(
     DescribedMCPResponse, JoinMaterializationResponse
 ):
     memory: ResolvedMemory
+
+
+class MemoryCompactQueryResponse(DescribedMCPResponse, CompactQueryResponse):
+    memory: str
 
 
 class MemoryQueryIRResponse(DescribedMCPResponse, QueryIRResponse):
@@ -1188,13 +1197,18 @@ def create_mcp_server(
             ),
         ],
         memory: MemorySelection = None,
-    ) -> MemoryQueryIRResponse | MemoryAnalyticsResponse:
+        response_format: Literal["compact", "full"] = "compact",
+    ) -> MemoryQueryIRResponse | MemoryCompactQueryResponse | MemoryAnalyticsResponse:
         try:
             selected, api = selected_api(memory)
             query = document
             response = api.execute_query(query)
             if query.get("query_ir_version") == "2":
                 return _tag_response(response, selected, MemoryAnalyticsResponse)
+            if response_format == "compact" and isinstance(response, QueryIRResponse):
+                return _tag_response(
+                    compact_query(response), selected, MemoryCompactQueryResponse
+                )
             return _tag_response(response, selected, MemoryQueryIRResponse)
         except (MemoryErrorBase, OSError, ValueError) as exc:
             raise _tool_error(exc, memory) from exc
@@ -1998,11 +2012,15 @@ def create_mcp_server(
             def native_handler(request: Any) -> MemoryAnalyticsResponse:
                 try:
                     selected, api = selected_api(memory)
-                    return _tag_response(
-                        api.native_operation(action, request.document),
-                        selected,
-                        MemoryAnalyticsResponse,
-                    )
+                    response = api.native_operation(action, request.document)
+                    if (
+                        action == "query_drill_down"
+                        and request.response_format == "compact"
+                    ):
+                        response = response.model_copy(
+                            update={"result": compact_drill(response.result)}
+                        )
+                    return _tag_response(response, selected, MemoryAnalyticsResponse)
                 except (MemoryErrorBase, OSError, ValueError) as exc:
                     raise _tool_error(exc, memory) from exc
 
@@ -2012,7 +2030,9 @@ def create_mcp_server(
                 "query_execute",
                 payload,
                 memory,
-                lambda request: execute_query(request.document, memory),
+                lambda request: execute_query(
+                    request.document, memory, request.response_format
+                ),
             )
         if action == "current_metric":
             return _invoke_managed(

@@ -711,7 +711,11 @@ def operate(
                 public_gate(connection, obs, manifest)
             return {
                 "observation": obs,
-                "results": manifest["results"],
+                **(
+                    {"results": manifest["results"]}
+                    if document["view"] == "results"
+                    else {}
+                ),
                 "verified": True,
             }
         saved = operation == "query_drill_down" and "observation_id" in document

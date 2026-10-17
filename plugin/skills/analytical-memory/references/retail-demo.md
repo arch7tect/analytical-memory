@@ -64,8 +64,9 @@ When asked to save, use `memory_ingest_manage` action `analysis_capture` with
 returned observation ID. If the state changed, rerun before capturing.
 
 After enrichment, query the warehouse values and call `analysis_read` with the
-saved observation ID to explain freshness. After correction, rerun the same
-analysis and compare with that saved observation. For historical contacts use
+saved observation ID and `view="status"` to explain freshness. After correction, rerun the same
+analysis and compare with that saved observation (`view="results"` if the
+original results are no longer in context). For historical contacts use
 `query_drill_down` with `observation_id`, `query_name="by_carrier_region"`, the
 same group key, and `measure="delivery_tickets"`. For current contacts use the
 live query, current state and the same measure. Do not replace the saved result
@@ -75,3 +76,10 @@ Classification uses `issue_code`. The correction changes T14's code while
 retaining its original message. Explain this when showing the two together.
 Report actual results and freshness; do not fabricate a successful step after
 an installation, tool or state-guard failure.
+
+Keep the default compact query/drill format. Values remain in `projections`
+for ordinary queries and `attributes` for entity drill-down. Reuse the recipe,
+parsed example documents and stable operation contracts within the session;
+refresh ontology and expected data state after writes. Read detailed provenance
+only when the human asks for its evidence, using the original observation for
+historical records.

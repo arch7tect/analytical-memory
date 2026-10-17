@@ -797,3 +797,85 @@ def test_populated_pre_native_database_upgrades_additively(
     assert store.snapshot_records()["node"][0]["id"] == "retained"
     assert store.integrity()["ok"]
     assert store.analytics_operation("data_state", {})["data_revision"] == 0
+
+
+def test_status_read_retains_freshness_privacy_and_integrity_gates(
+    native: MemoryAPI,
+) -> None:
+    document = populate(native)
+    saved = capture(native, document)
+    request = {"observation_id": saved["id"], "view": "status"}
+    status = native.analysis_read({**request, "public": True}).result
+    assert status["verified"] and "results" not in status
+    assert status["observation"]["freshness"] == "current"
+    native.declare_entity(
+        "shop.Ticket",
+        "public",
+        {"issue_code": {"type": "string", "privacy": "private"}},
+        native.application.schema.fingerprint,
+    )
+    assert (
+        native.analysis_read(request).result["observation"]["freshness"]
+        == "potentially_stale"
+    )
+    with pytest.raises(StaleQueryResult):
+        native.analysis_read({**request, "fresh_only": True})
+    with pytest.raises(ObservationUnavailable):
+        native.analysis_read({**request, "public": True})
+
+    evidence = native.application.evidence_store
+    assert isinstance(evidence, FileEvidenceStore)
+    path = evidence.object_path(saved["manifest_digest"])
+    # The fixture's unique manifest is deliberately corrupted to test the read gate.
+    path.write_bytes(b"corrupt test manifest")
+    with pytest.raises(ObservationUnavailable, match="failed verification"):
+        native.analysis_read(request)
+
+
+def test_compact_preserves_null_missing_and_binding_alias(
+    native: MemoryAPI, tmp_path: Path
+) -> None:
+    from analytical_memory.api_models import QueryIRResponse
+    from analytical_memory.response_views import compact_drill, compact_query
+
+    source = tmp_path / "values.jsonl"
+    source.write_text(
+        '{"id":"null","value":null}\n{"id":"missing"}\n{"id":"present","value":3}\n'
+    )
+    native.jsonl_import(
+        source,
+        "demo.Item",
+        [{"field": "id", "type": "string"}],
+        native.application.schema.fingerprint,
+    )
+    result = native.execute_query(
+        {
+            "query_ir_version": "1",
+            "match": {"nodes": [{"type": "demo.Item", "as": "node"}]},
+            "return": [{"field": "node.id"}, {"field": "node.value"}],
+        }
+    )
+    assert isinstance(result, QueryIRResponse)
+    rows = {
+        row.projections[0].value: row.projections[1]
+        for row in compact_query(result).rows
+    }
+    assert rows["null"].value is None and rows["null"].record_id is not None
+    assert rows["missing"].value is None and rows["missing"].record_id is None
+    assert rows["present"].value == 3
+    query = {
+        "query_ir_version": "2",
+        "match": {"nodes": [{"type": "demo.Item", "as": "node"}]},
+        "measures": [{"as": "items", "op": "count_distinct", "node": "node"}],
+    }
+    aggregate = query_result(native, query)
+    detail = native.query_drill_down(
+        {
+            "query": query,
+            "expected_state": aggregate["state"],
+            "group_key": {},
+            "measure": "items",
+            "view": "bindings",
+        }
+    ).result
+    assert compact_drill(detail)["rows"] == detail["rows"]

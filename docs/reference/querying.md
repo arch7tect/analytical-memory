@@ -210,3 +210,12 @@ uv run memory query execute --document examples/quickstart/query.json
 Variable-length paths, aggregation beyond count, grouping, OR, cursor
 pagination, textual GQL parsing, and text or vector ranking inside Query IR are
 deferred.
+
+## MCP presentation
+
+The MCP query manager defaults to compact v1 projections: field, JSON type,
+value and attribute `record_id`, with alias bindings and pagination unchanged.
+Request `payload.response_format="full"` for the original per-field provenance
+shape. The Python/CLI Query IR result schema remains full. See the
+[compact MCP contract](mcp.md#compact-query-responses) for expansion and
+missing-versus-null semantics.

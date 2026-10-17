@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Default MCP v1 queries and native drill-down to compact values and record IDs;
+  preserve full responses with `payload.response_format="full"` and explicit
+  provenance expansion. Python/CLI defaults and stored snapshots are unchanged.
+- Add verified freshness-only analysis reads with `document.view="status"`.
+- Teach plugin skills to reuse stable contracts and keep routine table output
+  compact, while refreshing current ontology and data state after writes.
+
 All notable changes to Analytical Memory are documented here.
 
 ## 0.7.1 - 2026-10-17

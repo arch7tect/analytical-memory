@@ -206,3 +206,32 @@ Contextual capabilities are version 6. `operation_defaults.interfaces` supplies
 shared Python/CLI/MCP availability; an operation's own `interfaces` overrides
 it. Full meanings and effects remain in the linked lazy operation specs. This
 keeps capability discovery bounded as the native actions are added.
+
+## Compact query responses
+
+`memory_query_manage` actions `execute` (Query IR v1) and `query_drill_down`
+now default to `payload.response_format="compact"`. This changes presentation,
+not query selection or stored evidence. Clients that consume the previous full
+shape can set `payload.response_format="full"`. Python and CLI defaults are
+unchanged; Query IR v2 aggregates also retain their existing shape.
+
+Compact v1 rows retain `bindings` and ordered `projections` containing `field`,
+`json_type`, `record_id` and `value`. `record_id` is the current attribute ID:
+use the attribute explanation operation for provenance. A missing attribute
+has null `record_id`; an explicit null retains its attribute ID. Ordering,
+truncation, counts and schema/ontology fingerprints are preserved.
+
+Compact entity drill rows retain `node.id`, `node.namespace`, `node.type`, `node.privacy_class`, and
+`attributes` containing `id`, `attribute_name`, `json_type`, `privacy_class`, `value`. Binding
+views retain their alias-to-node mappings. Every outer state guard, population
+identifier, pagination indicator, reconciliation, freshness and raw-source
+availability result is preserved. `view="provenance"` explicitly expands full
+provenance even with the default compact format. For historical evidence,
+repeat the saved observation request with that view; current attribute
+explanation describes current data, not observation-time values.
+
+For freshness-only reads use `analysis_read` with
+`payload.document={"observation_id":"...","view":"status"}`. It returns verified
+observation metadata, including freshness and current state, without result
+bodies. Manifest integrity, `fresh_only` and `public` gates still run. Omit
+`view` or use `"results"` to obtain the saved analysis results.
