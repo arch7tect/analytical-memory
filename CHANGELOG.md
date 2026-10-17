@@ -2,6 +2,17 @@
 
 All notable changes to Analytical Memory are documented here.
 
+## 0.6.1 - 2026-10-17
+
+- Reorganized human documentation around a product README, a guide index,
+  a runnable walkthrough, and separate MCP, plugin, and release instructions.
+- Corrected architecture and reference descriptions to match the implemented
+  import, query, search, provenance, and snapshot contracts.
+- Included linked documentation in all plugin bundles and added local Markdown
+  link and heading checks to CI and bundle validation.
+- Documented Docker PostgreSQL setup and made real PostgreSQL conformance part
+  of the complete local verification procedure.
+
 ## 0.6.0 - 2026-09-02
 
 - Made local full-text search depend only on the field's `searchable` flag,

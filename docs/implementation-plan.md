@@ -1,10 +1,14 @@
-# Analytical Memory Implementation Plan
+# Analytical Memory Implementation History
 
 ## Status
 
-Milestones 0 through 7 are implemented and complete the working v1. Milestones
-0 through 4 remain the
-description of the original foundation. Milestone 5, approved by ADR 0001, is a
+Milestones 0 through 8 are implemented. This document is a completed delivery
+ledger, not an installation or current API reference. Milestones 0 through 4
+retain historical commands and the superseded normalized-batch model. Use the
+[documentation index](README.md), [current design](design.md), and
+[contributor verification steps](../CONTRIBUTING.md) for current behavior.
+
+Milestone 5, approved by ADR 0001, is a
 clean-break contract with dynamic ontology, JSON Query IR, and a simpler
 current-state model for imported and analytical data.
 
@@ -12,6 +16,14 @@ The M5 migration deliberately supersedes parts of the agent-facing M0-4 data
 semantics without rewriting the historical milestone record. Existing tests
 may be replaced when they assert superseded behavior; development databases are
 reinitialized instead of migrated.
+
+Subsequent releases added guarded full-memory lifecycle, array-valued source
+joins, required-on-create field constraints, compact lazy MCP discovery, and
+owner-controlled current-data reclassification. Local full-text search now
+depends on `searchable` independently of privacy; export and external embeddings
+remain public-only. See the [changelog](../CHANGELOG.md) and current references
+for the exact released behavior. The original milestone criteria below are
+preserved as delivery history rather than rewritten as today's commands.
 
 ## Delivery objective
 

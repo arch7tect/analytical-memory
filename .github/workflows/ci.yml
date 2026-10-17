@@ -38,6 +38,7 @@ jobs:
       - run: uv run mypy src tests
       - run: uv run python scripts/compile_schema.py --check
       - run: uv run python scripts/compile_query_ir_contract.py --check
+      - run: uv run python scripts/check_docs.py
       - run: uv run python scripts/smoke.py
       - run: uv run python scripts/benchmark.py --check
       - run: uv run memory-quickstart

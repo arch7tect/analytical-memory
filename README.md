@@ -1,147 +1,61 @@
 # Analytical Memory
 
-Analytical Memory is an evidence-backed, local-first memory whose ontology grows
-with the data it receives. Clients can discover the current ontology, import new
-object types incrementally, create explicit graph relations, run relational and
-graph queries through a backend-neutral JSON Query IR, and trace current values
-to their source and raw evidence.
+Analytical Memory helps you explore connected datasets and trace answers back
+to their sources. It keeps structured data, explicit relationships, analytical
+results, and the evidence behind them in a memory you control locally.
 
-SQLite or PostgreSQL 17 stores canonical records and a content-addressed local
-filesystem stores raw evidence. Both backends implement the same explicit
-interface and public use cases.
+Use it with an MCP-compatible assistant, from the command line, or through its
+Python API. SQLite works out of the box; PostgreSQL 17 is available for a
+separate database deployment.
 
-## Current status
+## What you can do
 
-Milestones 0 through 7 are implemented. The working v1 includes:
+- **Bring datasets together.** Import JSONL files independently and connect
+  matching records through explicit join rules.
+- **Explore what is available.** Discover entity types, fields, relationships,
+  and descriptions as the memory grows.
+- **Ask precise questions.** Filter and count records, follow relationships,
+  search text, and optionally find semantically related content.
+- **Inspect the evidence.** Trace current values and analytical results to
+  their source data and recorded method.
+- **Keep projects separate.** Use a default memory or configure independent
+  named memories.
+- **Back up your work.** Verify evidence, create private restore snapshots,
+  and export public data for sharing.
 
-- streaming, atomic JSONL patch/upsert;
-- optional namespace and entity descriptions, declarations, and a data-derived
-  current ontology;
-- explicit one-step joins between independently loaded datasets;
-- one implicit default memory plus explicitly configured named memories;
-- read-only JSON Query IR v1;
-- one current `NodeAttribute` or `Relation` with direct provenance;
-- analytical values written through the same attribute shape;
-- `public` and `private` privacy, with public-only export and external embedding;
-- local evidence, verification, snapshots, and public sanitized export.
+For example, import sessions and messages from two files, connect each message
+to its session, and find the messages associated with failed sessions. The
+[getting started guide](docs/getting-started.md) walks through this example.
 
-There are no Finding or Assertion records in M5. Development databases created
-with the earlier contract are reinitialized by migration 005.
+## Start here
 
-## Quickstart
+- [Install the MCP server](docs/mcp-installation.md) to connect your assistant.
+- [Install a plugin](docs/plugin-installation.md) for Claude Code, Kimi Code,
+  or Codex, including the MCP server and bundled workflows.
+- [Try the command-line walkthrough](docs/getting-started.md) with synthetic
+  sample data.
+- [Browse the documentation](docs/README.md) for configuration, querying,
+  operations, architecture, and development.
 
-Python 3.12 or newer and [uv](https://docs.astral.sh/uv/) are required.
+## What to expect
 
-```console
-uv sync --all-groups --locked
-uv run memory init
-uv run memory schema show
-uv run memory-quickstart
-```
+The current implementation supports atomic JSONL imports, explicit graph joins,
+structured read-only queries, local full-text search, optional semantic search,
+and verified snapshots. See the [release history](CHANGELOG.md) for changes.
 
-Use the `schema_fingerprint` returned by `schema show` as
-`<contract-fingerprint>` below:
+Your database and evidence stay on your machine or your chosen PostgreSQL
+deployment. Optional semantic search sends eligible public text and query text
+to an external embedding provider. The core workflows need no API key.
 
-```console
-uv run memory jsonl import examples/quickstart/sessions.jsonl \
-  --entity-type example.Session \
-  --key '[{"field":"id","type":"string"}]' \
-  --contract-fingerprint <contract-fingerprint>
+Data is public by default. Declare private entities or fields before importing
+sensitive data. Public/private labels govern sharing and external processing;
+local queries can read private data. See [data handling and privacy](docs/getting-started.md#data-handling-and-privacy).
 
-uv run memory jsonl import examples/quickstart/messages.jsonl \
-  --entity-type example.SessionMessage \
-  --key '[{"field":"id","type":"string"}]' \
-  --contract-fingerprint <contract-fingerprint>
+The memory keeps current values and source evidence. It does not automatically
+infer relationships or reconstruct earlier values. It is a local tool without
+multi-user authentication or a hosted HTTP service.
 
-uv run memory ontology describe
+## Contributing and license
 
-uv run memory ontology declare-namespace example \
-  --description "Quickstart data." \
-  --contract-fingerprint <contract-fingerprint>
-
-uv run memory join materialize examples/quickstart/join.json \
-  --contract-fingerprint <contract-fingerprint>
-
-uv run memory query execute --document examples/quickstart/query.json
-```
-
-The commands write local state under the ignored `.local/` directory. Import
-keys are lookup expressions, not persistent identity records. Repeating the
-same import is idempotent; a later record patches only the fields it contains.
-Declared required fields are enforced when a record creates a Node, while an
-update may omit them and retain the current values.
-
-## MCP
-
-Initialize the selected stores and start the local stdio server:
-
-```console
-uv run memory init
-uv run memory-mcp
-```
-
-An MCP client should start with `memory://guide` and `memory://catalog`, choose
-one memory, and follow the selected tool's direct link to a lazy operation
-specification. The full operation index remains available when the operation is
-not known. Compact manager tools can import, declare, connect, analyze, and
-query without direct database or source-code access. See the [MCP
-reference](docs/reference/mcp.md).
-
-Every data tool accepts an optional `memory` name. Omitting it selects the
-backward-compatible `default` memory. `memory://catalog` lists configured names;
-each entry links to a compact per-memory summary, capabilities, and ontology.
-`memory_configure` creates a new store or attaches an already compatible one.
-`memory_lifecycle_manage` reports guarded deletion counts, wipes a selected
-memory, or deletes a named memory.
-
-## Plugins
-
-Build local plugin bundles for Claude Code, Kimi Code, and Codex in one pass:
-
-```console
-uv run python scripts/build_plugin_bundles.py
-```
-
-Each bundle contains the same MCP runtime, the main workflow for importing,
-connecting, and querying data, and a read-only skill for inspecting readiness
-and the current ontology.
-See the [plugin installation guide](docs/plugin-installation.md).
-
-Version tags matching `v<project-version>` trigger a GitHub Release containing
-the Claude, Kimi, and Codex archives, the Python wheel and source distribution,
-and SHA-256 checksums.
-
-## Semantic retrieval
-
-Copy `.env.template` to the ignored `.env` and set `OPENAI_API_KEY`. Only public
-search documents can be sent to the configured external embedding provider.
-
-```console
-uv run memory embedding create-profile description
-uv run memory embedding rebuild <profile-id>
-uv run memory search "related text" --semantic-profile <profile-id>
-```
-
-## Development
-
-```console
-uv run pytest
-uv run ruff check .
-uv run ruff format --check .
-uv run mypy src tests
-uv run python scripts/compile_schema.py --check
-```
-
-See the [system design](docs/design.md),
-[implementation plan](docs/implementation-plan.md), and
-[ADR 0001](docs/decisions/0001-dynamic-ontology-query-ir.md). The
-[backend portability reference](docs/reference/backend-portability.md) covers
-PostgreSQL 17 setup and verified SQLite-to-PostgreSQL transfer. Operational
-backup, integrity, evidence, and retention procedures are in the
-[operations reference](docs/reference/operations.md).
-Release history is in [CHANGELOG.md](CHANGELOG.md); development and verification
-guidance is in [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## License
-
-Apache License 2.0. See [LICENSE](LICENSE).
+[Contributing](CONTRIBUTING.md) explains setup and verification.
+Analytical Memory is licensed under [Apache License 2.0](LICENSE).

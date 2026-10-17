@@ -1,6 +1,6 @@
 # Evidence Portability and Lifecycle
 
-Canonical memory rows and raw evidence bytes are separate. SQLite stores
+Canonical memory rows and raw evidence bytes are separate. The selected relational backend stores
 content identities, acquisitions, relative provider locations, deterministic
 fragments, append-only verification history, retention requirements, and
 retirement tombstones. The local filesystem stores immutable objects by
@@ -20,12 +20,15 @@ Reads return base64 and are limited to 1 MiB per call. Verify and audit append
 new object and fragment checks while preserving earlier outcomes. Provider
 availability remains independent from verification and retention state.
 
-An ingestion batch may add an `evidence.fragment` object. Supported kinds are
-`whole_object`, `structured`, `record_key`, `byte_range`, `line_range`,
-`time_interval`, and `sample_interval`. Locator parameters are canonicalized
-and the extracted bytes are hashed. Structured and record-oriented inputs are
-materialized into canonical JSON or JSON Lines before fragment addressing when
-their source representation is not canonical.
+Current JSONL import copies the input file and binds its records to a
+`whole_object` evidence fragment. Declaration, join, and analytical writes
+create evidence from their canonical request documents. The public JSONL
+request has no `evidence.fragment` member or arbitrary locator argument.
+
+The evidence locator machinery supports `whole_object`, `structured`,
+`record_key`, `byte_range`, `line_range`, `time_interval`, and `sample_interval`.
+Locator parameters are canonicalized and extracted bytes are hashed. These
+lower-level capabilities do not imply an additional public ingestion format.
 
 Effective evidence privacy is monotonic. It is the strictest class contributed
 by the evidence declaration, source, bound targets, and every acquisition.
@@ -62,8 +65,9 @@ uv run memory snapshot import memory.snapshot.zip
 
 A private restore snapshot contains the compiled schema, canonical table rows,
 verified bytes for objects currently recorded as present, and missing or
-retired states for the rest. It excludes FTS and future vector projections;
-FTS is rebuilt after import. Member hashes, evidence digests, row counts,
+retired states for the rest. It includes SearchDocument records but excludes the backend FTS index,
+embedding profiles, and embedding vectors. FTS is rebuilt after import;
+semantic profiles must be recreated and rebuilt explicitly. Member hashes, evidence digests, row counts,
 artifact type, format version, and schema fingerprint are verified before any
 canonical import. Import requires an empty canonical store and preserves IDs,
 timestamps, bindings, verification history, and tombstones.

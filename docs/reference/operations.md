@@ -3,6 +3,12 @@
 This reference covers integrity checks, backup and restore, backend transfer,
 evidence verification, and retention for a local v1 installation.
 
+For installation and path selection, see [MCP installation](../mcp-installation.md).
+Plugin and standalone defaults differ; every command below must use the same
+target configuration as the server. To operate on a named memory, place
+`--memory <name>` before the command group, for example
+`uv run memory --memory research validate`.
+
 ## Readiness and integrity
 
 ```console
@@ -123,4 +129,6 @@ policy for the operator.
   investigation and remove it only through an explicit operator decision.
 - Evidence corruption is reported without rewriting canonical content.
 - On post-commit transfer verification failure, do not select the target;
-  recreate its dedicated schema and retry from the unchanged source artifact.
+  preserve the failed target for investigation. Recreate only the dedicated
+  target after deciding to discard that failed import, then retry from the
+  unchanged source artifact.

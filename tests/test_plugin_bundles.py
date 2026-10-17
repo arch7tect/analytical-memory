@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from scripts.build_plugin_bundles import build_bundles
+from scripts.check_docs import check_documents
 
 SKILLS = {"analytical-memory", "analytical-memory-inspect"}
 
@@ -18,6 +19,8 @@ def test_plugin_skills_are_shared_with_openai_metadata_only_for_codex(
 
     for host in ("claude", "kimi", "openai"):
         skills_root = _skills_root(tmp_path, host)
+        assert check_documents(skills_root.parent) == []
+        assert (skills_root.parent / "docs" / "mcp-installation.md").is_file()
         assert {path.name for path in skills_root.iterdir()} == SKILLS
         for skill_name in SKILLS:
             skill = skills_root / skill_name

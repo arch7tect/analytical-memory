@@ -2,9 +2,13 @@
 
 ## Status
 
-Implemented architecture through Milestone 5 and target architecture for later
-milestones. Milestones 0 through 4 describe the superseded foundation; ADR 0001
-authorizes the clean-break current-state model implemented by M5.
+Current implemented architecture, including named memories and the 0.6.0 privacy
+and local-search behavior. Milestones 0 through 8 are complete. Historical
+acceptance criteria remain in the [implementation history](implementation-plan.md);
+[ADR 0001](decisions/0001-dynamic-ontology-query-ir.md) records the current-state
+model decision. Deferred capabilities are listed at the end of this document.
+
+For setup and everyday use, start with the [documentation index](README.md).
 
 ## Purpose
 
@@ -30,7 +34,8 @@ establish truth. Raw evidence bytes live in a separate content-addressed store.
   attribute, relation, and metric carriers.
 - Bind every current value and computed result directly to its source,
   evidence, and ingestion or analytical run.
-- Support relational, graph, full-text, vector, and hybrid queries in v1.
+- Support relational queries, bounded graph traversal, full-text search, and
+  exact semantic retrieval through separate operations.
 - Keep the logical contract independent of the selected relational backend.
 - Keep the structural contract stable while deriving the current ontology from
   canonical data and explicit declarations.
@@ -176,7 +181,7 @@ The metadata compiler produces a backend-neutral canonical JSON document with:
 - privacy classes and propagation rules;
 - stable node, current-attribute, current-relation, metric, and provenance
   record shapes;
-- normalized ingestion batch schemas;
+- JSONL ingestion and declaration schemas;
 - evidence object and fragment locator schemas;
 - semantic index policies;
 - Query IR operators and result-envelope rules.
@@ -214,8 +219,9 @@ join coverage, and other statistics are excluded from the fingerprint.
 ### Query IR Document
 
 The first query representation is a versioned canonical JSON AST. Its semantic
-model follows property-graph standards: node and edge patterns, predicates,
-projection, ordering, grouping, bounded traversal, and result construction.
+model uses property-graph node and edge patterns, conjunctive predicates,
+projection, ordering, count, and pagination. Grouping and variable-length paths
+are deferred; bounded traversal is a separate operation.
 The JSON form is deliberately a replaceable frontend. A future GQL-compatible
 text parser compiles to the same internal AST and execution semantics.
 
@@ -240,8 +246,11 @@ and ontology fingerprints exclude timestamps, absolute paths, credentials, and
 backend connection values. The runtime fingerprint covers the contract and
 ontology fingerprints plus selected adapter capabilities.
 
-Every write carries the contract fingerprint against which it was prepared. A
-stale contract fails with the current fingerprint and a refresh pointer. A
+Contract-sensitive ingestion and declaration writes carry the structural
+fingerprint against which they were prepared. A stale contract fails with the
+current fingerprint and a refresh pointer. Other mutations have operation-specific
+validation: full-memory wipe and deletion use exact state guards, while relation
+deactivation and Node deletion identify the existing record directly. A
 post-hoc join validates against the current ontology and materializes relations
 inside the same transaction; it has no preview-derived authorization token or
 resolution hash.
@@ -257,24 +266,24 @@ Node -- current NodeAttribute --> typed value
           |
           +-- direct provenance --> EvidenceFragment
 
-text NodeAttribute or EvidenceFragment
+searchable text NodeAttribute
   --> SearchDocument --> EmbeddingRecord --> vector projection
 ```
 
 ### Source
 
-A logical provenance container. It records a stable ID, kind, safe locator,
-optional content hash, privacy class, verification status, and availability.
-It does not imply that source bytes are stored in the relational database.
+A logical provenance container. It records a stable ID, natural lookup key,
+kind, safe locator, privacy class, and recorded time. Evidence records carry
+content digests, verification, and availability separately. Source bytes are
+not stored in the relational database.
 
 ### AnalyticalRun
 
-A bounded analytical execution. It records a stable ID and idempotency key,
-scope, valid-time window, method versions, contract and ontology fingerprints,
-lifecycle state, coverage, limitations, and primary source. Every generated
-attribute, relation, and metric records its producing run directly. An
-AnalyticalRun may optionally reference an ingestion batch but does not require
-one.
+A recorded analytical execution. It stores a stable ID and idempotency key,
+primary source, method, recorded time, and optional ingestion batch. Generated
+attributes, relations, and metrics reference their producing run directly.
+Metric dimensions, method version, coverage, completeness, and invalidation
+live on the Metric record rather than extra AnalyticalRun fields.
 
 ### Node
 
@@ -346,10 +355,12 @@ An immutable computed result scoped to one analytical run. It records a
 definition version, value, unit, numerator, denominator, canonical dimensions,
 method version, and coverage notes.
 
-Metrics are not general-purpose fact carriers. A correction invalidates a run
-or writes a new run and result. A saved current-metric query selects the latest
-complete, non-invalidated run for an exact scope, definition, and dimension set
-using a declared deterministic ordering.
+Metrics are not general-purpose fact carriers. The current analytical metric
+write creates a new run and immutable result; no public invalidation operation
+is exposed. A saved current-metric query selects the latest complete,
+non-invalidated metric for an exact definition version and dimension set, ordered
+by run time, run ID, and metric ID. Completeness and invalidation are Metric
+fields, not AnalyticalRun state.
 
 ### Evidence records
 
@@ -375,9 +386,9 @@ while any acquisition requires retention.
 
 ### SearchDocument
 
-An exact text input derived from one text-valued attribute or evidence
-fragment. It records the target, chunk index, privacy class, content hash,
-extraction or chunking version, and lifecycle state.
+An exact text input derived from one searchable text-valued NodeAttribute. It
+records the target, chunk index, privacy class, content hash, extraction or
+chunking version, and lifecycle state.
 
 ### EmbeddingProfile
 
@@ -412,8 +423,9 @@ representation.
   type and first- and last-seen ingestion batches. Null does not establish or
   change its type; an all-null field remains `unresolved` until the first
   non-null value.
-- `IngestionBatch`: idempotency key, canonical request and result, source and
-  extractor versions, counts, timestamps, and failure summary.
+- `IngestionBatch`: ID, idempotency key, kind, input hash, structural fingerprint,
+  canonical request and result, and recorded time. Counts are carried in the
+  result document; rejected imports do not commit a batch record.
 - `SchemaMigration`: backend profile, migration version, checksum, logical
   target fingerprint, applied time, and tool version.
 
@@ -449,18 +461,25 @@ available. Metrics remain immutable results of one run.
 The application depends on a small provider-neutral port:
 
 ```text
-put(stream, metadata) -> EvidenceObject
+initialize()
+put(source_path, expected_object) -> EvidenceStatus
+put_tracked(source_path, expected_object) -> EvidencePutResult
+put_bytes(data, expected_object) -> EvidenceStatus
 stat(digest) -> EvidenceStatus
-open(digest) -> bounded byte stream
-verify(digest) -> VerificationResult
-iter_missing(digests) -> digest list
-export(digests, destination) -> SnapshotManifest
-import_snapshot(source) -> ImportResult
+read(digest, offset, limit) -> bytes
+copy_verified(digest, destination) -> byte_count
+list_digests(limit) -> (digests, truncated)
+status() -> EvidenceStoreStatus
+retire(digest) -> bool
+remove(digest) -> bool
+wipe() -> removal_counts
 ```
 
-V1 provides a local filesystem adapter. `put` hashes a stream into a temporary
-file and atomically installs it at a deterministic content-addressed path. It
-copies source bytes and never mutates the source.
+V1 provides a local filesystem adapter. `put` copies and hashes a source file
+into a temporary file, checks its expected digest and size, and atomically
+installs it at a deterministic content-addressed path. It never mutates the
+source. Verification history, snapshots, and retention orchestration belong to
+the application layer rather than additional provider methods.
 
 If a database transaction using a newly installed object rolls back, its owner
 removes the temporary file and removes the final object only when that object
@@ -477,8 +496,10 @@ the adapter resolves it beneath a configured root.
 
 ### Deterministic fragments
 
-A fragment may address a whole object, canonical JSON value, record key, byte
-range, line range, time interval, or sample interval. Every locator records
+The evidence locator machinery supports a whole object, canonical JSON value,
+record key, byte range, line range, time interval, or sample interval. Current
+JSONL import binds records to a whole-object fragment; the public import API
+does not accept an arbitrary fragment locator. Every locator records
 extractor identity and version, canonical parameters, extracted byte size, and
 extracted-byte SHA-256.
 
@@ -516,14 +537,16 @@ A private restore snapshot contains:
 - tombstones for retired or known-missing objects;
 - evidence bindings, row counts, byte counts, and member hashes.
 
-Snapshot creation fails if a present object is absent, corrupt, or unverified.
+Snapshot creation verifies present object bytes while copying and fails if an
+object is absent or corrupt. Stale location state requires an evidence audit.
 Import verifies every present member before applying canonical records or
 installing evidence bytes.
 
-Full-text and semantic projections, including profiles and vectors, are
-excluded. A profile is recreated and vectors are rebuilt through a matching
-provider contract after restore. Canonical queries and provenance remain
-available without semantic retrieval.
+SearchDocument records are included, while the backend full-text index is
+excluded and rebuilt after import. Embedding profiles and vectors are excluded.
+A profile is recreated and vectors are rebuilt through a matching provider
+contract after restore. Canonical queries and provenance remain available
+without semantic retrieval.
 
 A privacy-filtered export is a separate sanitized interchange artifact and is
 not accepted by the restore importer.
@@ -531,12 +554,13 @@ not accepted by the restore importer.
 ## JSONL ingestion and ontology evolution
 
 JSONL is the only general ingestion format in v1. Each non-empty line is one
-JSON object. Python accepts a binary stream, the CLI accepts a file or standard
-input, and the local stdio MCP tool accepts a server-local file path together
-with the import parameters. The path is runtime input and is never canonical
-metadata. No surface accepts the whole file as one in-memory JSON string.
-The internal reader boundary remains stream-oriented so CSV can be added later,
-but no CSV parser or public CSV import contract is part of v1.
+JSON object. Python, CLI, and local stdio MCP accept a server-local file path
+together with import parameters. The reader consumes that file incrementally;
+standard-input import and a public stream argument are not implemented. The
+path is runtime input and is never canonical metadata. No surface accepts the
+whole file as one in-memory JSON string. The internal reader boundary remains
+stream-oriented so CSV can be added later, but no CSV parser or public CSV
+import contract is part of v1.
 
 A user or agent may create an EntityDeclaration through API, CLI, or MCP before
 import, but this step is optional. A declaration exists independently from data
@@ -693,9 +717,9 @@ Relation binds directly to declaration evidence and records the creating run
 and batch. Resolution excludes every pair previously materialized by the same
 join, including inactive rows, so an explicit rerun creates current relations
 only for pairs the join has never materialized. The result reports previously
-materialized active and inactive pairs separately. Restoring an inactive pair
-requires an explicit correction operation; rerun never silently reverses a
-correction.
+materialized active and inactive pairs separately. There is no public
+reactivation operation in the current release; rerunning materialization never
+reverses an explicit deactivation.
 
 V1 equality is type-strict and exact after endpoint expansion. String `"12"`
 does not equal number `12`. Normalization and coercion functions require later,
@@ -713,11 +737,11 @@ a later rerun may add a relation to a newly matched target without deactivating
 the relation materialized from the earlier value. Removing obsolete relations
 is an explicit correction in V1.
 
-Disabling a join prevents later execution but does not silently deactivate
-relations. Changing a join declaration is deferred. Removing a materialized
-relation is an explicit operation that sets its current row to inactive and
-updates its direct correction provenance. The relation identity remains
-reserved, so a later join rerun does not silently recreate it.
+Changing or disabling a join declaration through a public operation is
+deferred. Removing a materialized relation is an explicit operation that sets
+its current row to inactive and updates its direct correction provenance. The
+relation identity remains reserved, so a later join rerun does not silently
+recreate it.
 
 ## Query model
 
@@ -788,64 +812,69 @@ The initial IR supports:
 - connected multi-node patterns without implicit Cartesian products;
 - `eq`, `ne`, `lt`, `lte`, `gt`, `gte`, `in`, and `exists` predicates;
 - projection with direct provenance, deterministic ordering, limit, and offset;
-- `count`;
-- active-state, privacy, and provenance filters.
+- `count` as the sole projection;
+- directed active relation matching, with an optional logical-key restriction.
+
+Query IR does not accept separate privacy, provenance, or relation-state filters.
+Local queries can return both public and private data.
 
 Boolean nesting, variable-length paths, grouping, cursor pagination, arbitrary
 expressions, subqueries, mutation, and backend-specific functions are deferred.
-Text, semantic search, and bounded traversal remain separate operations in M5.
+Text search, semantic search, and bounded traversal remain separate operations.
 
 ### Relational queries
 
-Typed filters, joins, aggregates, coverage checks, and metric calculations use
-the Query IR compiled by each relational adapter.
+Typed field filters, explicit graph-pattern joins, projections, and count use
+Query IR compiled by each relational adapter. Other metric calculations run in
+the caller and may be recorded with analytical ingestion; Query IR has no sum,
+average, grouping, or general calculation operators.
 
 ### Graph queries
 
 Traversal follows relation edges only and requires a start node, allowed
 relation types, direction, maximum depth, and result limit. It expands active
 relations by default. Inactive rows require an explicit diagnostic opt-in.
-Attribute filtering happens before traversal.
+Traversal has no attribute-predicate argument. Use a structured query to find
+starting node IDs, then traverse from a selected binding.
 
 ### Full-text and semantic queries
 
-Search targets one advertised text property or evidence-fragment class rather
-than an undifferentiated node. A semantic result is a candidate, not a fact.
-Every result joins back to its SearchDocument, current canonical target,
-direct source provenance, and evidence availability.
+Local full-text search covers active searchable text attributes; semantic
+profiles select one attribute name. Evidence-fragment search is not implemented.
+A semantic result is a candidate, not a fact. Results include their SearchDocument,
+current attribute value, and direct source provenance. Evidence availability is
+inspected separately through evidence status or explanation operations.
 
 ### Hybrid queries
 
-Exact privacy, type, scope, current-value, and active-relation filters run before
-similarity ranking. Results contain coverage and readiness so incomplete
-indexes cannot appear complete.
+Semantic retrieval restricts candidates to current public searchable attributes
+and applies optional namespace and node-type filters before ranking. Arbitrary
+field predicates and graph patterns are not integrated into similarity search;
+callers combine separate operations explicitly. Results contain coverage and
+readiness so incomplete indexes cannot appear complete.
 
 ### Explanation
 
-Every returned canonical or derived record supports an explanation containing:
-
-- canonical IDs and logical keys;
-- current value or relation state and its latest update provenance;
-- ingestion batch, analytical run, and method versions when applicable;
-- source identity;
-- evidence object and fragment hashes;
-- evidence verification and availability;
-- retrieval mode and semantic-index coverage;
-- contract and ontology fingerprints;
-- privacy and other declared limitations.
+Attribute, relation, and metric records have distinct explanation operations.
+Their typed responses expose the current value or relation, source identity,
+provenance identifiers, available evidence digest and live provider status, and
+the structural fingerprint. Relation and metric explanations also include a
+run summary when applicable. Fragment IDs link to evidence, but explanation
+responses do not embed raw bytes or a complete fragment catalog. Retrieval
+coverage belongs to search responses; the ontology fingerprint belongs to query
+and ontology responses rather than every explanation envelope.
 
 ## Vector retrieval contract
 
-V1 always provides an exact application-level search over finite
-little-endian float32 vectors stored as canonical BLOBs. The application owns
+V1 provides exact application-level search over finite little-endian float32
+vectors stored as derived BLOBs under an embedding profile. The application owns
 dimension checks, normalization, similarity, filtering, and deterministic
 ordering.
 
-A backend accelerator is optional and disposable. It supplies candidates only.
-The adapter over-fetches the complete boundary-score class, re-scores candidates
-from canonical BLOBs with the application distance function, and orders by
-exact canonical score followed by document ID. If complete over-fetch cannot be
-proven, the adapter falls back to the application implementation.
+No backend vector accelerator is implemented. A future accelerator must remain
+disposable, preserve exact boundary ties, and use the application implementation
+as its conformance oracle. Current results sort by cosine score followed by
+document ID.
 
 Approximate search is outside v1. Exact search remains the conformance oracle
 for any future optimization.
@@ -879,10 +908,10 @@ schemas and permissions as the Python API. Evidence reads are bounded and
 explicit. Ordinary search and traversal do not return raw evidence bytes.
 
 An external embedding provider receives public text only. Credentials come from
-the gitignored `.env` file, are never stored in SQLite, and are never returned
-by APIs. Passwords, API keys, tokens, private keys, and other content that may
-not be persisted are rejected before canonical or evidence commit rather than
-represented by another privacy class.
+the environment or gitignored `.env` file, are never canonical records, and are
+never returned by discovery APIs. Passwords, API keys, tokens, private keys,
+and other content that may not be persisted are rejected before canonical or
+evidence commit rather than represented by another privacy class.
 
 V1 trusts the local process identity and filesystem permissions. Hashes detect
 corruption but do not authenticate content against a malicious writer. A
@@ -936,20 +965,25 @@ not appear in domain models.
 
 ### CLI
 
-The initial command groups are:
+The current command groups are (use `uv run memory --help` for exact arguments):
 
 ```text
 memory init | status | validate
-memory schema | capabilities
+memory schema show | compile
+memory capabilities
+memory memories list | configure | status | wipe | delete
 memory jsonl import
 memory ontology declare-namespace | declare-entity | describe
 memory query current-metric | execute
 memory traverse | search | explain
-memory join materialize | deactivate
+memory join materialize
+memory relation deactivate
 memory node delete
+memory attribute write-analysis
+memory metric write-analysis
 memory embedding create-profile | status | rebuild
 memory evidence status | read | verify | audit
-memory retention report | plan | retire
+memory retention report | release | plan | retire
 memory snapshot create | verify | import
 memory transfer export | import
 memory export
@@ -987,8 +1021,8 @@ general query language.
 
 Compact manager tools accept an action, an operation-specific payload, and an
 optional memory. Exact payload and result schemas are loaded lazily from the
-operation resources, while configuration and destructive Node deletion remain
-isolated tools. The MCP adapter calls the same application services as the
+operation resources, while configuration, guarded full-memory lifecycle, and destructive Node
+deletion remain distinct tool surfaces. The MCP adapter calls the same application services as the
 Python API and CLI. No tool infers or silently applies a relation.
 
 Tool descriptions link each manager action directly to its exact lazy
@@ -1043,40 +1077,33 @@ specification. Operation payload and result schemas describe every field.
 
 Python dependencies, scripts, and lock state are managed with `uv`.
 `pyproject.toml` is the package, tool, and dependency-group contract. `uv.lock`
-is committed after the first dependency is selected.
+is committed and used for reproducible installation.
 
-The planned repository layout is:
+The current repository layout is:
 
 ```text
 .
-├── pyproject.toml
-├── uv.lock
-├── README.md
-├── docs/
-│   ├── design.md
-│   ├── decisions/          architecture decision records
-│   ├── guides/             operator and contributor workflows
-│   └── reference/          generated or stable API reference
-├── schema/
-│   ├── current.json        compiled structural contract
-│   └── metadata/           source metadata for the contract compiler
-├── migrations/
-│   ├── sqlite/
-│   └── postgresql/
-├── examples/
-│   └── quickstart/         synthetic end-to-end input
-├── src/
-│   └── analytical_memory/
-│       ├── domain.py       records, value objects, and pure semantics
-│       ├── application.py  use cases and orchestration
-│       ├── ports.py        abstract storage and service interfaces
-│       ├── api.py          typed Python API
-│       ├── cli.py          command-line adapter
-│       ├── mcp_server.py   stdio MCP adapter
-│       └── adapters/       SQLite, filesystem, and provider adapters
+├── pyproject.toml, uv.lock
+├── README.md, CONTRIBUTING.md, CHANGELOG.md
+├── docs/                   current guides, references, and decision history
+├── examples/quickstart/    synthetic source-checkout examples
+├── plugin/skills/          shared agent workflows and host metadata
+├── src/analytical_memory/
+│   ├── domain.py           records, value objects, and pure semantics
+│   ├── application.py      use cases and orchestration
+│   ├── ports.py            abstract storage and provider interfaces
+│   ├── api.py, api_models.py
+│   ├── cli.py, mcp_server.py
+│   ├── configuration.py, memories.py
+│   ├── adapters/           SQL backends, filesystem, and embedding provider
+│   └── resources/
+│       ├── agent/          packaged MCP instructions
+│       ├── schema/         compiled contracts and source metadata
+│       ├── migrations/     SQLite and PostgreSQL SQL and manifests
+│       └── examples/       examples shipped in distributions
 ├── tests/                  synthetic unit, contract, and integration tests
-├── scripts/                repository maintenance only
-└── .local/                 gitignored runtime state
+├── scripts/                verification, compilers, and packaging
+└── .local/                 ignored source-checkout runtime state
 ```
 
 Placement rules:
@@ -1086,17 +1113,19 @@ Placement rules:
 - ports are abstract base classes, and adapters implement them through explicit
   inheritance;
 - backend-specific SQL belongs under its adapter and migration tree;
-- authoritative machine-readable contracts live under `schema/`, not `docs/`;
+- authoritative machine-readable contracts live under
+  `src/analytical_memory/resources/schema/`, not `docs/`;
 - `docs/design.md` describes system invariants rather than duplicating schemas;
 - significant design changes receive records under `docs/decisions/`;
 - generated documentation is reproducible and never authoritative;
 - tests use synthetic data and shared contract fixtures;
 - one-off maintenance logic belongs in Python scripts executed with `uv run`.
 
-Delivery sequencing, development commands, milestone acceptance criteria, and
-verification work are defined in the
-[implementation plan](implementation-plan.md). The plan may change as code is
-delivered; the invariants in this document remain the conformance boundary.
+Current development commands and verification gates are in
+[Contributing](../CONTRIBUTING.md). Completed delivery sequencing and acceptance
+criteria remain in the [implementation history](implementation-plan.md). New
+behavior should update the current references and receive a decision record
+when it changes an architectural contract.
 
 ## Deferred capabilities
 

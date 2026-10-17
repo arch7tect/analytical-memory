@@ -29,8 +29,17 @@ def _write_json(path: Path, document: dict[str, Any]) -> None:
 
 def _copy_payload(destination: Path, *, host: str) -> None:
     destination.mkdir(parents=True, exist_ok=True)
-    for name in ("pyproject.toml", "uv.lock", "README.md", "LICENSE"):
+    for name in (
+        "pyproject.toml",
+        "uv.lock",
+        "README.md",
+        "CONTRIBUTING.md",
+        "CHANGELOG.md",
+        "compose.yaml",
+        "LICENSE",
+    ):
         shutil.copy2(ROOT / name, destination / name)
+    shutil.copytree(ROOT / "docs", destination / "docs")
     (destination / "scripts").mkdir()
     shutil.copy2(
         ROOT / "scripts" / "plugin_runtime.py",

@@ -1,6 +1,10 @@
 # MCP Reference
 
-Analytical Memory exposes a local stdio MCP server through `memory-mcp`:
+For client registration and connection troubleshooting, use
+[MCP installation](../mcp-installation.md). For bundled skills and automatic
+initialization, use [plugin installation](../plugin-installation.md).
+
+The standalone server runs locally over stdio through `memory-mcp`:
 
 ```console
 uv run memory init
@@ -22,7 +26,16 @@ Discovery remains available while a store is uninitialized.
 | `ANALYTICAL_MEMORY_SCHEMA` | packaged `schema/current.json` | Structural contract |
 | `ANALYTICAL_MEMORY_DATA_ROOT` | per-user platform data directory | Base for the named-memory catalog |
 | `ANALYTICAL_MEMORY_CATALOG` | `<data-root>/memories.json` | Explicit catalog override |
-| `OPENAI_API_KEY` | unset | Commercial embedding API credential |
+| `ANALYTICAL_MEMORY_PLUGIN_DATA` | per-user platform data directory | Plugin launcher data root; does not change standalone paths |
+| `OPENAI_API_KEY` | unset | Optional external embedding API credential |
+
+Standalone database and evidence defaults are relative to the working directory.
+The plugin launcher sets absolute per-user paths and initializes its default
+store automatically. Configuration loads `.env` discovered by python-dotenv and
+then the per-user data-root `.env`; already-set environment values take precedence.
+Use `--directory` in a client launch command and absolute store paths to make
+selection predictable. Plugin data-root overrides must be set in the launcher
+environment before it starts, since they select where its `.env` is loaded.
 
 Secrets are never included in discovery resources. The local catalog resource
 does include configured database and evidence paths so a local agent can explain

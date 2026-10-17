@@ -7,6 +7,14 @@ of the delivered foundation, but M5 is a clean-break contract and may replace
 their assertion-backed storage, commands, and tests. Development databases are
 reinitialized rather than migrated.
 
+The decision is implemented. M5 reinitialization applies to the pre-M5
+development baseline; it is not a general upgrade instruction for current
+releases. This ADR retains decision context and incorporates later
+required-field, join, and privacy clarifications. Use the
+[current design](../design.md) and [references](../README.md#use-and-operate-the-memory)
+for the supported runtime surface and [operations](../reference/operations.md)
+for backups.
+
 ## Context
 
 The Node, current NodeAttribute, current Relation, Metric, analytical-run, and
@@ -66,7 +74,9 @@ object and input is consumed as a byte stream rather than materialized in
 memory. A separate JSONL inspector is not part of M5.
 
 Import is one atomic operation whose public inputs are a namespaced entity type,
-a typed ordered composite key, and a JSONL stream. All accepted top-level fields
+a typed ordered composite key, and a server-local JSONL file read incrementally.
+The current Python, CLI, and MCP surfaces accept a path, not a public stream or
+standard-input argument. All accepted top-level fields
 become ordinary queryable attributes, including fields selected as the import
 key. When an active declaration exists, its field constraints are enforced.
 Without a declaration, the import accepts every JSON field name and infers one
@@ -128,7 +138,7 @@ definition is an error.
 
 The ontology fingerprint includes namespaces and their descriptions, entity
 types and descriptions, top-level field names and descriptions,
-names, effective types, declared required and nullable constraints, search
+effective types, declared required and nullable constraints, search
 eligibility, and active relation declarations and descriptions. Import key selectors, observed
 presence, counts, ratios, samples, and link coverage are excluded. Materializing
 additional edges under an unchanged declaration does not change it.
@@ -139,9 +149,8 @@ new edges. A user or agent explicitly calls `materialize_join` again; reruns add
 only pairs never previously materialized by that join.
 
 V1 matching is type-strict exact equality. Normalization and coercion are
-future, versioned Query IR operators. Disabling a join prevents later execution
-but does not deactivate existing relations. Correction and deactivation are
-explicit operations.
+future, versioned Query IR operators. Relation deactivation is explicit; public
+operations for disabling/revising a join or reactivating a relation are deferred.
 
 Each join supplies the relation type and a stable logical key equal to the join
 name. Its canonical definition has a fingerprint used to reject conflicting

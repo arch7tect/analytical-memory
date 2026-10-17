@@ -3,11 +3,16 @@
 Analytical Memory exposes a backend-neutral, read-only JSON Query IR. An agent
 can discover the complete machine-readable contract at
 `memory://schema/query-ir/current` and the current data ontology at
-`memory://schema/ontology/current`.
+`memory://schema/ontology/current`. For installation, see the
+[MCP guide](../mcp-installation.md); for a runnable example, see
+[getting started](../getting-started.md).
 
 ## Planning a query
 
-Use this sequence for every new or refreshed connection:
+Choose a memory through `memory://catalog` first. The URIs below refer to the
+default memory; for a named memory use its catalog-linked ontology and
+capabilities resources and pass `memory` with tool calls. Query IR itself is a
+shared packaged contract.
 
 1. Read `memory://capabilities/current` and confirm that `query_execute` is
    routed to `memory_query_manage` with action `execute`.
@@ -109,7 +114,9 @@ not match it.
 
 `{"field": "alias.name"}` returns the current attribute and its direct
 provenance. `{"count": true}` returns a count and must be the only return item.
-The query language does not return raw evidence bytes.
+The query language does not return raw evidence bytes or provide separate
+privacy/provenance predicates. Local queries can read both public and private
+records; use privacy-filtered export when preparing shareable data.
 
 A projected missing attribute is returned with both `value: null` and
 `record_id: null`. An explicit null has `value: null` and a non-null
