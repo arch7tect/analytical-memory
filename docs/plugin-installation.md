@@ -6,19 +6,72 @@ starts the included server; there is no separate MCP installation.
 
 ## Instructions for an assistant performing installation
 
-1. Identify the requested host. Select its release archive below, or use the
+The human entry point is a single request:
+
+> Install the plugin https://github.com/arch7tect/analytical-memory/
+
+Own the complete installation from that request. Read this guide through the
+README link; do not send the user back to manual download or setup instructions.
+Use the current assistant host when it is known (Codex for a request in Codex).
+Ask which host only if the environment does not identify it. Use SQLite by
+default; PostgreSQL is an explicit alternative with the Docker setup below.
+
+1. Identify the requested host. Resolve the latest stable GitHub release (for
+   example, `gh release view --repo arch7tect/analytical-memory` or the public
+   GitHub releases API). Select its release archive below, or use the
    generic archive for OpenCode and other hosts without a matching marketplace.
 2. Download the archive and checksum file from the same release, verify them,
    and extract into a permanent directory. Resolve `BUNDLE_ROOT` and `PAYLOAD_ROOT`.
    Do not clone the repository or build from source.
-3. Check `uv` and the host's local help. Install the complete plugin using its
+3. Check `uv` and the host's local help. If `uv` is missing, use its official
+   installation instructions linked below and verify it is available to the host.
+   Install the complete plugin using its
    host section. In a generic environment, connect **both** its shared skills
    and included server; OpenCode's generator configures both in one operation.
 4. Preserve unrelated host settings and use one Analytical Memory connection.
    For PostgreSQL, configure the plugin's external data-directory `.env` and
    start the [Docker database](reference/backend-portability.md#select-a-backend).
-5. Reconnect the host, verify the two skills and memory readiness, then report
-   the installed path and data directory. Do not import tutorial data during setup.
+5. After registering the clean bundle, [prepare the first launch](#prepare-the-first-launch).
+   Reconnect the host and verify both skills and memory readiness. If the host
+   loads plugins only in a fresh chat, report installation as pending activation
+   and give that single next action; do not claim a live connection in the old
+   chat. After activation, the first quickstart data request can perform the
+   readiness check and continue. Report the installed version, verification
+   status, and any required next action concisely. Keep installed/data paths
+   available for troubleshooting. Do not import tutorial data during setup.
+6. For the subsequent retail demo request, locate `examples/retail/` inside the
+   installed payload. The usage skill's `references/retail-demo.md` describes
+   the MCP operations and fixtures. The file map below also provides the handoff
+   directly; consult the installed MCP operation specifications for exact payloads.
+   Keep the human-facing quickstart free of installer commands and internal payloads.
+
+Installation is complete when the host has the two skills and a working server,
+not merely when an archive exists. Preserve existing memories on repeat requests;
+inspect the installed version before choosing an upgrade or reporting it ready.
+Do not register the GitHub source repository itself as a plugin marketplace:
+the host-specific marketplace is generated inside its release archive.
+
+### Retail example handoff
+
+Resolve these files relative to the installed payload, including when the host
+has copied it into its managed cache. Do not ask the user to locate files.
+
+| Human request | Bundled file | Memory entity / key |
+| --- | --- | --- |
+| Orders | `examples/retail/orders.jsonl` | `shop.Order` / string `order_id` |
+| Support tickets | `examples/retail/tickets.jsonl` | `shop.Ticket` / string `ticket_id` |
+| Connect by order number | `examples/retail/join.json` | Explicit ticket-to-order join |
+| Connected delivery rows | `examples/retail/linked-query.json` | Query across the explicit relation |
+| Carrier and region aggregate | `examples/retail/query.json` | Native grouped query |
+| Delivery analysis | `examples/retail/analysis.json` | Native analysis and coverage |
+| Warehouse enrichment | `examples/retail/enrichment.jsonl` | Update `shop.Order` / string `order_id` |
+| Ticket correction | `examples/retail/correction.jsonl` | Update `shop.Ticket` / string `ticket_id` |
+
+Use a fresh named SQLite memory via `memory_configure`, with absolute database
+and evidence paths outside the installed payload and other evidence roots.
+Pass the chosen memory name to every subsequent operation. Never wipe an existing
+demo to start again. Read the actual structural fingerprint and operation specs;
+use native query/capture/drill actions to compute results from the imported data.
 
 ## Download and unpack
 
@@ -67,12 +120,12 @@ esac
 `BUNDLE_ROOT` is the marketplace root and has a README linking to installation
 and the human quickstart. `PAYLOAD_ROOT` contains `pyproject.toml`,
 `uv.lock`, `src/`, `docs/`, and `examples/retail/`. Keep the extracted bundle in
-place. The [quickstart](getting-started.md) runs commands from `PAYLOAD_ROOT`;
-it also works without a host plugin.
+place. The [quickstart](getting-started.md) is a conversation with the installed
+plugin. The assistant resolves example paths from its installed payload.
 
-For Claude, Kimi, and Codex, register the clean extracted bundle before running
-command-line examples from it. If you used the payload for CLI work first, extract a fresh
-copy into a different directory for plugin installation; this keeps its local
+For Claude, Kimi, and Codex, register the clean extracted bundle before using
+its payload for command-line diagnostics. If you used the payload for CLI work
+first, extract a fresh copy into a different directory for plugin installation; this keeps its local
 Python environment out of the host's managed copy. OpenCode uses the payload
 in place, so its generator and server share the same environment.
 
@@ -190,6 +243,21 @@ server definition. Resolve the definition's relative project/runtime paths
 against `PAYLOAD_ROOT`, register that single server, and expose both skill
 folders through the host's instruction mechanism. Keep the runtime arguments,
 including the locked dependency and PostgreSQL extra options.
+
+## Prepare the first launch
+
+After registering the clean bundle with the host, populate the Python and
+package caches from the extracted payload before reconnecting:
+
+```console
+uv sync --project "$PAYLOAD_ROOT" --frozen --no-dev --no-editable --extra postgres --python 3.12
+```
+
+This downloads the runtime and locked dependencies outside the server startup
+timeout. Wait for it to finish successfully. For hosts that copy plugins, do
+this after registration so the source's new `.venv` is not copied into the host
+cache. Generic hosts use this environment in place. The host must be able to
+find `uv` in its own launch environment as well as in the assistant's shell.
 
 ## Verify the connection
 

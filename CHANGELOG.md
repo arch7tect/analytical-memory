@@ -2,6 +2,15 @@
 
 All notable changes to Analytical Memory are documented here.
 
+## 0.7.1 - 2026-10-17
+
+- Start the human quickstart with a single plugin-installation request, then
+  guide the retail example through prompts, expected answers and structure diagrams.
+- Explain assistant-owned bundle selection, verification, installation and
+  activation; prepare locked dependencies before the first server startup.
+- Include a retail operation reference in the usage skill so assistants can
+  locate fixtures and perform each requested stage through the plugin.
+
 ## 0.7.0 - 2026-10-17
 
 - Add Query IR v2 native optional groups, identity-aware counts and integer sums,

@@ -263,7 +263,7 @@ def build_bundles(output: Path = OUTPUT) -> None:
             "plugin-installation.md#generic-environments-opencode) explains "
             "how to connect both components in other hosts.\n\n"
             f"[Quickstart for people]({payload}/docs/getting-started.md) shows "
-            "commands, returned data, and the evolving structure.\n\n"
+            "prompts, expected answers, and the evolving structure.\n\n"
             f"The application payload is `{payload}/`: it contains `pyproject.toml`, "
             "`uv.lock`, `src/`, `docs/`, and `examples/`. Run application commands "
             "from that directory, not this marketplace root.\n",

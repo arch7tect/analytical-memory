@@ -1,9 +1,15 @@
 ---
 name: analytical-memory
-description: Use Analytical Memory through MCP to select a default or named memory, import JSONL datasets, connect entity types explicitly, inspect the evolving ontology, and run JSON Query IR queries.
+description: Use Analytical Memory through MCP to select a default or named memory, import JSONL datasets, connect entity types explicitly, inspect the evolving ontology, run native analytics and exact drill-down, save analyses and check freshness, or walk through the bundled retail demo.
 ---
 
 # Analytical Memory
+
+The MCP server name is `analytical-memory` (with a hyphen); its resource URIs
+start with `memory://`. Use that exact server name for resource discovery.
+
+For the bundled retail demo, read [the retail operation guide](references/retail-demo.md)
+and perform only the stage requested by the user.
 
 Use one linear pass for each request.
 

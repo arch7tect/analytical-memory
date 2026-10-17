@@ -1,15 +1,16 @@
 # Documentation
 
-User guides run from a downloaded, verified release bundle. Source checkout
+The assistant installs a downloaded, verified release bundle. Source checkout
 commands are for contribution and release work. The quickstart is a human
-walkthrough with commands and results. The root README links
+conversation: installation request, analytical questions, expected answers and
+visible structure changes. The root README links
 directly to plugin installation for assistants arriving via the GitHub repository.
 
 ## Get started
 
 | Guide | Use it to |
 | --- | --- |
-| [Getting started](getting-started.md) | Use a bundle: import, connect, aggregate and drill with commands and results |
+| [Getting started](getting-started.md) | Ask your assistant to install, import, connect, aggregate and explain results |
 | [Plugin installation](plugin-installation.md) | Install the complete plugin for Claude, Kimi, Codex, or a generic host such as OpenCode |
 
 ## Use and operate the memory

@@ -1,507 +1,268 @@
-# Quickstart: from two files to an explained result
+# Quickstart: ask, connect, explain
 
-Import orders, import support tickets, connect them, compare delivery complaints,
-and open the records behind one aggregate. Then add a field and correct a value
-without rebuilding the memory. Each step below gives an action and its result.
-All data is synthetic and no API key is needed.
+Which carrier has more delivery problems, and which orders explain the result?
+Explore this question with Analytical Memory in Codex, starting with installation.
+Copy each **You** message into the chat, then compare the answer with the expected
+result below. Other supported assistants can follow the same conversation.
 
-## 0. Open the bundle and create a demo memory
+The tables below show expected results from the bundled synthetic retail data,
+not a verbatim Codex transcript. Wording and layout may vary. Your assistant
+should obtain the values from your memory. No embedding service is needed;
+the conversation uses your assistant's normal model setup.
 
-Follow [download and unpack](plugin-installation.md#download-and-unpack), then
-open `PAYLOAD_ROOT`. The archive includes the application **and** the fixtures;
-you do not clone GitHub or build from source. The commands use a macOS/Linux
-shell and stay in this directory for the whole walkthrough.
+## 1. Install the plugin
 
-```console
-cd "${PAYLOAD_ROOT:?set PAYLOAD_ROOT to the absolute unpacked payload path}"
-uv sync --frozen --no-dev --python 3.12
-DEMO_ROOT="$HOME/analytical-memory-demo"
-mkdir -p "$DEMO_ROOT"
-uv run --frozen --no-dev memory --backend sqlite memories configure create retail-demo \
-  --backend sqlite --database "$DEMO_ROOT/memory.db" \
-  --evidence-root "$DEMO_ROOT/evidence"
-```
+**You**
 
-Expected response, with paths abbreviated:
+> Install the plugin https://github.com/arch7tect/analytical-memory/
 
-```json
-{"action":"create","memory":"retail-demo","target":{"backend":"sqlite","database":"…/memory.db","evidence_root":"…/evidence"}}
-```
+The assistant follows the repository's [plugin installation instructions](plugin-installation.md),
+selects the release bundle for your host, verifies it, and installs the plugin
+with its skills and included server. You do not need to choose an archive or
+run terminal commands.
 
-Use a new name and data directory if `retail-demo` already exists. Do not wipe an
-existing memory to repeat the example. The catalog uses the same per-user default
-as the plugin. If you override `ANALYTICAL_MEMORY_PLUGIN_DATA`, set
-`ANALYTICAL_MEMORY_DATA_ROOT` to the same directory for CLI use, or give both
-routes the same `ANALYTICAL_MEMORY_CATALOG`. The explicit `--backend sqlite`
-keeps this demo usable when shared configuration selects PostgreSQL.
-Define a short command that always selects this memory, and read its contract:
+**Expected result**
 
-```console
-memory_demo() { uv run --frozen --no-dev memory --backend sqlite --memory retail-demo "$@"; }
-memory_demo schema show > "$DEMO_ROOT/contract.json"
-FINGERPRINT="$(uv run --frozen --no-dev python -c 'import json,sys; print(json.load(open(sys.argv[1]))["schema_fingerprint"])' "$DEMO_ROOT/contract.json")"
-memory_demo ontology describe --namespace shop
-```
+The assistant reports the installed version. If Codex needs a fresh chat to
+load the plugin, it tells you to open one and continue with the next message.
+A downloaded archive alone is not a completed installation. The next step
+checks that the installed plugin can actually create and query a memory.
 
-Expected: `document.entities` and `document.relations` are empty;
-`document.statistics.nodes` is `0`.
+## 2. Load the first dataset
 
-CLI output below is excerpted: omitted fields include hashes, UUIDs, timestamps
-and provenance. Tables render returned values; row order in detail may differ.
-The full responses remain available in your terminal or saved JSON files.
+**You**
 
-## 1. Import orders → discover the first entity
+> Use Analytical Memory. Create a separate memory for the retail demo and load
+> the orders from the plugin's bundled retail example. Show a few orders and
+> the memory's structure. Keep my other memories unchanged.
 
-Look at two rows in `examples/retail/orders.jsonl`:
+**Expected result**
 
-```jsonl
-{"order_id":"O-101","carrier":"FastShip","region":"North","amount_cents":10000}
-{"order_id":"O-102","carrier":"FastShip","region":"North","amount_cents":10000}
-```
+A new named memory, normally `retail-demo`, contains 12 orders. If that name is
+already in use, the assistant chooses a fresh name and reports it. Continue in
+this chat so subsequent requests use that same demo memory.
 
-Import the file using `order_id` as its business key:
-
-```console
-memory_demo jsonl import examples/retail/orders.jsonl \
-  --entity-type shop.Order --key '[{"field":"order_id","type":"string"}]' \
-  --contract-fingerprint "$FINGERPRINT"
-memory_demo ontology describe --namespace shop
-```
-
-Import response excerpt:
-
-```json
-{
-  "records": 12, "created_nodes": 12, "updated_nodes": 0,
-  "attributes_written": 48,
-  "ontology_delta": {
-    "new_entities": ["shop.Order"],
-    "new_fields": ["amount_cents", "carrier", "order_id", "region"],
-    "resolved_types": []
-  }
-}
-```
-
-Queryable structure, rendered from the ontology response:
+| Order | Carrier | Region | Amount, cents |
+| --- | --- | --- | ---: |
+| O-101 | FastShip | North | 10000 |
+| O-104 | FastShip | South | 10000 |
+| O-110 | EcoPost | South | 10000 |
 
 ```text
-Before: shop has no entities
-After:  shop.Order [12 records]
-          order_id: string
-          carrier: string
-          region: string
-          amount_cents: number
-        Relations: none
+Before: empty memory
+After:  Order · 12 records
+          order_id       string
+          carrier        string
+          region         string
+          amount_cents   number
 ```
 
-No entity declaration or table mapping was required. Every order is worth
-10000 cents; equal prices will help test identity-based deduplication later.
+The structure is discovered from the data. You did not define a database table.
+Each order costs 10000 cents; later we will count orders separately from contacts.
 
+## 3. Add support tickets
 
-## 2. Import tickets → a second, independent entity
+**You**
 
-The second file has 16 tickets, including repeated contacts and incomplete keys:
+> In this demo memory, load the support tickets from the bundled retail example.
+> Show a few tickets and how the memory's structure changed.
 
-```jsonl
-{"ticket_id":"T02","order_id":"O-104","issue_code":"late_delivery","message":"Synthetic support contact 2: late_delivery."}
-{"ticket_id":"T03","order_id":"O-104","issue_code":"late_delivery","message":"Synthetic support contact 3: late_delivery."}
-{"ticket_id":"T15","order_id":"O-999","issue_code":"late_delivery","message":"Synthetic support contact 15: late_delivery."}
-{"ticket_id":"T16","issue_code":"damaged","message":"Synthetic support contact 16: damaged."}
-```
+**Expected result**
 
-```console
-memory_demo jsonl import examples/retail/tickets.jsonl \
-  --entity-type shop.Ticket --key '[{"field":"ticket_id","type":"string"}]' \
-  --contract-fingerprint "$FINGERPRINT"
-memory_demo ontology describe --namespace shop
-```
+16 tickets are added alongside the 12 orders.
 
-Response excerpt:
-
-```json
-{
-  "records": 16, "created_nodes": 16, "updated_nodes": 0,
-  "ontology_delta": {
-    "new_entities": ["shop.Ticket"],
-    "new_fields": ["issue_code", "message", "order_id", "ticket_id"],
-    "resolved_types": []
-  }
-}
-```
+| Ticket | Order | Issue |
+| --- | --- | --- |
+| T02 | O-104 | late_delivery |
+| T03 | O-104 | late_delivery |
+| T15 | O-999 | late_delivery |
+| T16 | — | damaged |
 
 ```text
-shop.Order [12]                         shop.Ticket [16]
-  order_id: string                       ticket_id: string
-  carrier: string                        order_id: string
-  region: string                         issue_code: string
-  amount_cents: number                    message: string
+Order · 12 records                 Ticket · 16 records
+  order_id                           ticket_id
+  carrier                            order_id
+  region                             issue_code
+  amount_cents                       message
 
-28 nodes, 111 attributes, 0 relations
+Two entity types. No relationships yet.
 ```
 
-Matching field names do not create edges. T02–T05 all refer to O-104; T15 refers
-to an unknown order and T16 has no order key.
+Several contacts can concern the same order. One ticket refers to an unknown
+order; another has no order number. Matching field names do not automatically
+connect the datasets.
 
+## 4. Connect them and inspect the answer
 
-## 3. Connect the datasets → inspect a joined answer
+**You**
 
-`examples/retail/join.json` explicitly defines the relationship:
+> Connect tickets to orders by order number. Show delivery-related tickets
+> together with their order's carrier and region. Treat late delivery and
+> damage as delivery problems. Which tickets could not be connected?
 
-```json
-{
-  "name": "ticket_to_order", "relation": "order",
-  "from": {"type": "shop.Ticket", "fields": ["order_id"]},
-  "to": {"type": "shop.Order", "fields": ["order_id"]}
-}
-```
+**Expected result**
 
-```console
-memory_demo join materialize examples/retail/join.json \
-  --contract-fingerprint "$FINGERPRINT"
-memory_demo ontology describe --namespace shop \
-  | tee "$DEMO_ROOT/linked-ontology.json"
-memory_demo query execute --document examples/retail/linked-query.json
-```
+14 relationships are created. T15 cannot be connected because O-999 is absent;
+T16 has no order number. The connected delivery query returns 10 contacts,
+including these rows:
 
-Join response excerpt:
-
-```json
-{"created_relations":14,"skipped_unmatched":1,"skipped_null_or_missing":1}
-```
-
-```mermaid
-flowchart LR
-  T["shop.Ticket · 16 records"] -->|"order · ticket_to_order · 14 edges"| O["shop.Order · 12 records"]
-  U["T15: unknown O-999<br/>T16: missing order_id"] -.->|"2 tickets remain unlinked"| T
-```
-
-The query follows this exact relation and keeps `late_delivery` and `damaged`.
-It returns 10 rows. Here are four of their projected values, shown as a table:
-
-| o.order_id | o.carrier | o.region | t.ticket_id | t.issue_code |
+| Order | Carrier | Region | Ticket | Issue |
 | --- | --- | --- | --- | --- |
 | O-104 | FastShip | South | T02 | late_delivery |
 | O-104 | FastShip | South | T03 | late_delivery |
 | O-110 | EcoPost | South | T08 | late_delivery |
 | O-111 | EcoPost | South | T09 | damaged |
 
-Each projection also carries source, fragment, run and batch identifiers.
-The repeated O-104 rows are real contacts, not duplicate orders to count again.
-The two unlinked tickets are absent from this connected query; the next step
-measures their coverage explicitly.
-
-
-## 4. Aggregate → compare contacts with affected orders
-
-Run the native query and save its full response:
-
-```console
-memory_demo query execute --document examples/retail/query.json \
-  | tee "$DEMO_ROOT/aggregate.json"
+```mermaid
+flowchart LR
+  T["Ticket · 16 records"] -->|"14 explicit links"| O["Order · 12 records"]
+  U["T15: unknown order<br/>T16: missing order number"] -.->|"remain unlinked"| T
 ```
 
-The query starts with **all orders**, optionally matches delivery tickets, groups
-by carrier/region, counts distinct identities, sums affected order values once
-per order, and derives the affected-orders/orders ratio. No client calculation
-is needed. The four returned groups are:
+Now a ticket can be explained using information from its order. The two rows
+for O-104 are separate contacts about one order, which matters for the next question.
 
-| Carrier | Region | Orders | Delivery contacts | Affected orders | Rate | Affected value, cents |
-| --- | --- | ---: | ---: | ---: | --- | ---: |
-| EcoPost | South | 3 | 3 | 3 | 3/3 | 30000 |
-| EcoPost | North | 3 | 2 | 2 | 2/3 | 20000 |
-| FastShip | North | 3 | 1 | 1 | 1/3 | 10000 |
-| FastShip | South | 3 | 4 | 1 | 1/3 | 10000 |
+## 5. Compare carriers fairly
 
-Within `result.groups`, the first group's excerpt is:
+**You**
 
-```json
-{
-  "key": {
-    "carrier": {"kind":"value","type":"string","value":"EcoPost"},
-    "region": {"kind":"value","type":"string","value":"South"}
-  },
-  "measures": {"orders":3,"delivery_tickets":3,"affected_orders":3,"affected_order_value":30000},
-  "derived": {"complaint_rate":{"numerator":3,"denominator":3,"decimal":"1.000000000000"}}
-}
+> Compare carriers by the share of orders with delivery problems. Count each
+> affected order once even if it has several tickets. Include all orders in the
+> denominator, including those with no delivery complaints. Also show the number
+> of delivery contacts and how many delivery tickets remain unattributed.
+
+**Expected result**
+
+| Carrier | Delivery contacts | Affected orders | All orders | Share affected |
+| --- | ---: | ---: | ---: | ---: |
+| EcoPost | 5 | 5 | 6 | 83.3% (5/6) |
+| FastShip | 5 | 2 | 6 | 33.3% (2/6) |
+| Total | 10 | 7 | 12 | 58.3% (7/12) |
+
+Of 16 imported tickets, 12 concern delivery: 10 are attributed to orders and
+2 remain unattributed. Billing-only tickets are excluded from delivery contacts.
+
+**What the answer tells you:** equal contact counts hide different numbers of
+affected orders. EcoPost has more affected orders in this small synthetic sample.
+This comparison identifies an association, not a proven cause or a production verdict.
+The plugin computes the aggregates over the full matching population.
+
+## 6. Open one aggregate row
+
+**You**
+
+> Break the result down by carrier and region, including the value of affected
+> orders. Then open the EcoPost / South row: show the exact affected orders and
+> their delivery tickets. Explain how those records produce the aggregate.
+
+**Expected result**
+
+| Carrier | Region | Orders | Delivery contacts | Affected orders | Affected value, cents |
+| --- | --- | ---: | ---: | ---: | ---: |
+| EcoPost | South | 3 | 3 | 3 | 30000 |
+| EcoPost | North | 3 | 2 | 2 | 20000 |
+| FastShip | North | 3 | 1 | 1 | 10000 |
+| FastShip | South | 3 | 4 | 1 | 10000 |
+
+The EcoPost / South row opens into:
+
+| Order | Amount, cents | Delivery ticket | Issue |
+| --- | ---: | --- | --- |
+| O-110 | 10000 | T08 | late_delivery |
+| O-111 | 10000 | T09 | damaged |
+| O-112 | 10000 | T10 | late_delivery |
+
+Three distinct orders contribute 30000 cents. FastShip / South has four
+contacts about a single order, so its affected value is only 10000 cents.
+Affected value means the price of affected orders, not lost revenue.
+
+```text
+Aggregate row → exact contributing orders → related delivery tickets
 ```
 
-Now run the packaged analysis document. It executes carrier/region, carrier,
-grand total, ticket inventory, delivery coverage and join inspection together
-in one consistent snapshot:
+## 7. Save the answer and add a new field
 
-```console
-memory_demo query analysis-execute --document examples/retail/analysis.json \
-  | tee "$DEMO_ROOT/analysis.json"
-```
+**You**
 
-Returned `result.coverage`:
+> Save this delivery analysis so we can revisit its original results and records.
+> Then load the warehouse enrichment from the bundled retail example. Show the
+> structure before and after, and the warehouses for the three EcoPost / South
+> orders. Has the saved analysis become outdated?
 
-```json
-{"imported_tickets":16,"delivery_tickets":12,"attributed":10,"unattributed":2}
-```
+**Expected result**
 
-| Carrier | Delivery contacts | Affected orders | All orders | Exact rate |
-| --- | ---: | ---: | ---: | --- |
-| EcoPost | 5 | 5 | 6 | 5/6 |
-| FastShip | 5 | 2 | 6 | 2/6 |
-| Grand total | 10 | 7 | 12 | 7/12 |
-
-The carrier and total rows are separate native groups. Equal contact counts
-conceal different numbers of affected orders.
-FastShip South has four contacts about **one** order. Its affected value is
-10000, while EcoPost South's three equally priced orders contribute 30000.
-Billing-only and no-contact orders stay in the denominator.
-
-This is association in a small synthetic sample. Affected value is the price
-of affected orders, not lost revenue. Coverage reports the two delivery tickets
-that could not be attributed to a known order.
-
-
-## 5. Open one aggregate → get its exact members
-
-Select the first returned group, EcoPost South. Prepare a drill request and a
-capture request using the **returned state**, not a copied example UUID:
-
-```console
-uv run --frozen --no-dev python - "$DEMO_ROOT" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-root = Path(sys.argv[1])
-result = json.loads((root / "analysis.json").read_text())["result"]
-query = json.loads(Path("examples/retail/query.json").read_text())
-key = next(group["key"] for group in result["members"]["by_carrier_region"]["groups"]
-           if group["key"]["carrier"]["value"] == "EcoPost"
-           and group["key"]["region"]["value"] == "South")
-requests = {
-    "live-detail-request": {"query": query, "group_key": key,
-                            "measure": "affected_orders", "expected_state": result["state"]},
-    "capture-request": {"analysis": json.loads(Path("examples/retail/analysis.json").read_text()),
-                        "expected_state": result["state"], "definition_version": "retail-delivery-1"},
-}
-for name, document in requests.items():
-    (root / f"{name}.json").write_text(json.dumps(document, indent=2) + "\n")
-PY
-memory_demo query drill-down --document "$DEMO_ROOT/live-detail-request.json"
-```
-
-The Python snippet only prepares requests; the server reconstructs membership.
-Returned `result.total_members` is `3`. Values from `result.rows[].attributes`:
-
-| order_id | carrier | region | amount_cents |
-| --- | --- | --- | ---: |
-| O-110 | EcoPost | South | 10000 |
-| O-111 | EcoPost | South | 10000 |
-| O-112 | EcoPost | South | 10000 |
-
-Each attribute includes provenance identifiers. The request specifies the
-original query, exact typed group key, selected measure and generation/revision.
-A changed memory causes a state-guard error instead of mixing populations;
-rerun the analysis and prepare fresh requests if that happens.
-
-
-## 6. Save the analysis → retain an explainable historical result
-
-```console
-memory_demo query analysis-capture --document "$DEMO_ROOT/capture-request.json" \
-  | tee "$DEMO_ROOT/capture.json"
-```
-
-Response excerpt (`id` differs per memory):
-
-```json
-{"result":{"id":"<observation UUID>","definition_version":"retail-delivery-1","data_revision":3,"freshness":"current","privacy_class":"public"}}
-```
-
-The capture retains native metrics and an immutable input manifest. It does not
-advance the fact revision. Prepare two requests from its actual observation ID:
-
-```console
-uv run --frozen --no-dev python - "$DEMO_ROOT" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-root = Path(sys.argv[1])
-observation = json.loads((root / "capture.json").read_text())["result"]["id"]
-key = json.loads((root / "live-detail-request.json").read_text())["group_key"]
-(root / "read-request.json").write_text(json.dumps({"observation_id": observation}))
-(root / "saved-detail-request.json").write_text(json.dumps({
-    "observation_id": observation, "query_name": "by_carrier_region",
-    "group_key": key, "measure": "delivery_tickets",
-}))
-PY
-```
-
-
-## 7. Add warehouse data → extend the structure in place
-
-`enrichment.jsonl` contains only order keys and the new field, for example:
-
-```jsonl
-{"order_id":"O-110","warehouse":"W1"}
-```
-
-```console
-memory_demo jsonl import examples/retail/enrichment.jsonl \
-  --entity-type shop.Order --key '[{"field":"order_id","type":"string"}]' \
-  --contract-fingerprint "$FINGERPRINT"
-memory_demo ontology describe --namespace shop \
-  | tee "$DEMO_ROOT/enriched-ontology.json"
-memory_demo query execute --document examples/retail/query.json
-memory_demo query analysis-read --document "$DEMO_ROOT/read-request.json"
-```
-
-Import response excerpt:
-
-```json
-{"records":12,"created_nodes":0,"updated_nodes":12,"ontology_delta":{"new_entities":[],"new_fields":["warehouse"],"resolved_types":[]}}
-```
+The saved analysis retains its original inputs. The enrichment updates the
+12 existing orders without creating new ones or removing their relationships.
 
 ```text
 Before: Order(order_id, carrier, region, amount_cents)
-After:  Order(order_id, carrier, region, amount_cents, +warehouse: string)
+After:  Order(order_id, carrier, region, amount_cents, +warehouse)
 
-Ticket ──order / ticket_to_order──> Order
-28 nodes remain; all 14 edges remain; existing order fields remain.
-O-110, O-111, O-112 gain warehouse=W1; other orders gain warehouse=W2.
+Ticket ──order──> Order
+Still 28 records and 14 relationships.
 ```
 
-The aggregate still returns the same four rows. The saved observation reports (excerpt from `result`):
+O-110, O-111 and O-112 now have warehouse W1; the other orders have W2.
+The assistant can query the new field immediately. The saved analysis is marked
+potentially stale because the memory has changed, even though these delivery
+totals still agree with its saved values.
 
-```json
-{"observation":{"data_revision":3,"current_state":{"data_revision":4},"freshness":"potentially_stale"}}
-```
+## 8. Correct a ticket and compare past with present
 
-Its input version is older even though the displayed totals happen to agree.
-The ontology fingerprint changes because a queryable field was added.
+**You**
 
+> Load the ticket correction from the bundled retail example. Recalculate the
+> delivery analysis and compare it with our saved result. Open the saved and
+> current EcoPost / South delivery contacts so I can see what changed. Did the
+> structure change as well?
 
-## 8. Correct a value → change the answer without changing the structure
+**Expected result**
 
-`correction.jsonl` updates T14's `issue_code` from billing to late delivery.
-Its original message text is unchanged:
+T14, already connected to O-112, changes its issue code from billing to late
+delivery. Its original message text stays unchanged; this analysis uses the
+issue code. No new record, relationship or field is needed.
 
-```jsonl
-{"ticket_id":"T14","order_id":"O-112","issue_code":"late_delivery","message":"Synthetic support contact 14: billing."}
-```
+| EcoPost / South | Saved result | Current result |
+| --- | ---: | ---: |
+| Delivery contacts | 3 | 4 |
+| Affected orders | 3 | 3 |
+| Affected value, cents | 30000 | 30000 |
+| Delivery ticket IDs | T08, T09, T10 | T08, T09, T10, T14 |
 
-```console
-memory_demo jsonl import examples/retail/correction.jsonl \
-  --entity-type shop.Ticket --key '[{"field":"ticket_id","type":"string"}]' \
-  --contract-fingerprint "$FINGERPRINT"
-memory_demo ontology describe --namespace shop \
-  | tee "$DEMO_ROOT/corrected-ontology.json"
-memory_demo query analysis-execute --document examples/retail/analysis.json
-memory_demo query drill-down --document "$DEMO_ROOT/saved-detail-request.json"
-```
+Across all groups, attributed delivery contacts rise from 10 to 11. Two remain
+unattributed. O-112 was already affected, so adding another delivery contact
+does not increase the affected-order count or value.
 
-T14's edge already exists, so no new join is needed. Compare the results:
+The saved result still explains the earlier answer with its original input
+values. Its freshness warning prevents confusing that answer with the current
+memory. Unlike adding `warehouse`, correcting a value leaves the structure unchanged.
 
-| Result | Before correction | Current | Saved observation |
-| --- | ---: | ---: | ---: |
-| EcoPost South delivery contacts | 3 | 4 | 3 |
-| EcoPost South affected orders | 3 | 3 | 3 |
-| EcoPost South affected value, cents | 30000 | 30000 | 30000 |
-| Attributed delivery contacts, all groups | 10 | 11 | 10 |
-| All delivery contacts including unlinked | 12 | 13 | 12 |
-| Unattributed delivery contacts | 2 | 2 | 2 |
+## What you have built
 
-Saved drill-down returns `mode: "observation_time"`, `total_members: 3` and the
-original T08, T09, T10 values. The current group includes T14 as a fourth ticket.
-The saved observation is `potentially_stale`, and its captured inputs remain
-readable. Create a fresh capture from a fresh analysis state to retain the new
-answer separately.
+| Step | Records | Relationships | Structure |
+| --- | ---: | ---: | --- |
+| Load orders | 12 | 0 | Order and its fields |
+| Load tickets | 28 | 0 | +Ticket and its fields |
+| Connect datasets | 28 | 14 | +Ticket → Order |
+| Calculate, drill, save | 28 | 14 | Unchanged |
+| Add warehouses | 28 | 14 | +Order.warehouse |
+| Correct a ticket | 28 | 14 | Unchanged; answers change |
 
-Check that the ontology fingerprint stayed equal across this value update:
+You can now replace this synthetic case with your own datasets: import them
+separately, connect them explicitly, ask analytical questions, and inspect the
+records behind an answer. The demo memory remains available for further questions.
 
-```console
-uv run --frozen --no-dev python - "$DEMO_ROOT" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-root = Path(sys.argv[1])
-linked = json.loads((root / "linked-ontology.json").read_text())
-before = json.loads((root / "enriched-ontology.json").read_text())
-after = json.loads((root / "corrected-ontology.json").read_text())
-print("Warehouse changed ontology:", linked["ontology_fingerprint"] != before["ontology_fingerprint"])
-print("Correction kept ontology:", before["ontology_fingerprint"] == after["ontology_fingerprint"])
-PY
-memory_demo query data-state
-```
-
-Expected: `Warehouse changed ontology: True`, `Correction kept ontology: True`,
-and `result.data_revision: 5`.
-
-
-## What changed at each stage
-
-| Action | Nodes | Active edges | Queryable structure | Fact revision |
-| --- | ---: | ---: | --- | ---: |
-| Create memory | 0 | 0 | Empty | 0 |
-| Import orders | 12 | 0 | +Order and four fields | 1 |
-| Import tickets | 28 | 0 | +Ticket and four fields | 2 |
-| Materialize join | 28 | 14 | +ticket_to_order relation | 3 |
-| Execute / capture analysis | 28 | 14 | Same ontology | 3 |
-| Import warehouse patch | 28 | 14 | +Order.warehouse | 4 |
-| Correct T14 | 28 | 14 | Same ontology | 5 |
-
-The **contract fingerprint** identifies the product contract and stays fixed.
-The **ontology fingerprint** identifies queryable shape. The memory's
-**generation/revision** identifies the fact state, including provenance.
-A new field and a changed value therefore have different structural effects.
-
-Exact import replay and a fresh join with no new edges leave the revision at 5:
-
-```console
-memory_demo jsonl import examples/retail/correction.jsonl \
-  --entity-type shop.Ticket --key '[{"field":"ticket_id","type":"string"}]' \
-  --contract-fingerprint "$FINGERPRINT"
-memory_demo join materialize examples/retail/join.json \
-  --contract-fingerprint "$FINGERPRINT"
-memory_demo query data-state
-```
-
-Expected: import `replayed: true`, join `created_relations: 0`, revision `5`.
-The memory and evidence remain in `DEMO_ROOT` for further exploration.
-
-## Automatic checks and next steps
-
-To watch the complete case and verify expected values in a separate temporary
-memory, run from the same bundle:
-
-```console
-uv run --frozen --no-dev memory-quickstart
-uv run --frozen --no-dev memory-quickstart --extensions
-```
-
-The extensions exercise a new initially unlinked ticket, explicit linking,
-atomic rejection of a mixed-type patch, local text search, private-result
-sharing rejection and snapshot restore. Add `--json` for full responses.
-The automatic runner removes only its own temporary data. A smaller
-v1 example is available as `memory-quickstart --smoke`.
-
-For an alternative backend, see the bundle's
-[Docker PostgreSQL setup](reference/backend-portability.md#select-a-backend).
-The database runs in Docker; the server and evidence stay on the host.
-
-See [native analytics](reference/native-analytics.md) for query, capture and
-drill contracts, [retrieval](reference/semantic-retrieval.md) for search, and
-[operations](reference/operations.md) for backups and evidence retention.
+See [native analytics](reference/native-analytics.md) for precise query and
+saved-analysis behavior, [search](reference/semantic-retrieval.md) for text
+retrieval, and [operations](reference/operations.md) for backups. If you need
+PostgreSQL, the installation guide uses the included [Docker setup](reference/backend-portability.md#select-a-backend).
 
 ## Data handling and privacy
 
-Data defaults to public. Declare private entities or fields before importing
-sensitive data. Local queries can read private values; labels govern sharing
-and external processing, not user authentication. Native public reuse requires
-a current, verified observation and public captured/current dependencies.
-Captures conservatively retain the bounded fact population, so unrelated
-private facts can also make a capture private.
+The example data is synthetic. Before loading your own sensitive data, declare
+private entities or fields: data defaults to public. Local queries can read
+private values; labels govern sharing and external processing.
 
-Saved analyses retain immutable inputs for historical drill-down. Other current
-values have no general history, and raw-source availability is reported
-separately from saved inputs. Referenced manifests cannot be retired. Optional
-semantic search sends eligible public text and query text to its external
-provider; it is outside this no-key walkthrough.
+Saved analyses retain immutable inputs for historical detail. Other current
+values have no general history. Optional semantic search sends eligible public
+text and query text to an external provider; it is not used in this walkthrough.

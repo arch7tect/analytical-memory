@@ -12,15 +12,19 @@ PostgreSQL 17 when you need a separate database.
 
 **[Plugin installation instructions](docs/plugin-installation.md)** — the entry
 point for installing Analytical Memory with an assistant. Give your assistant
-this repository's GitHub URL and ask it to follow that guide. One release bundle
+this request:
+
+> Install the plugin https://github.com/arch7tect/analytical-memory/
+
+The assistant follows the linked guide. One release bundle
 includes the MCP server, shared skills, documentation, and examples.
 
 - [Claude Code, Kimi Code, and Codex](docs/plugin-installation.md) use their host
   plugin installation.
 - [Generic environments, with OpenCode](docs/plugin-installation.md#generic-environments-opencode)
   connect the same plugin's skills and included server in one configuration.
-- [Quickstart for people](docs/getting-started.md) shows commands, returned data,
-  and diagrams of the evolving structure.
+- [Quickstart for people](docs/getting-started.md) starts with that installation request,
+  then walks through prompts, expected answers, and the evolving structure.
 - [Documentation](docs/README.md) covers configuration, querying, operations,
   architecture, and development.
 
