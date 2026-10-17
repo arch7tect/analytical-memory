@@ -721,6 +721,10 @@ async def test_mcp_configures_and_routes_named_memory(tmp_path: Path) -> None:
             result = await client.read_resource(str(resource.uri))
             assert isinstance(result.contents[0], TextResourceContents)
             assert isinstance(json.loads(result.contents[0].text), dict)
+            discovered = await client.call_tool(
+                "memory_discover", {"uri": str(resource.uri)}
+            )
+            assert discovered.structured_content == json.loads(result.contents[0].text)
         default_namespace = await client.read_resource(
             "memory://schema/ontology/unused"
         )
@@ -746,6 +750,33 @@ async def test_mcp_configures_and_routes_named_memory(tmp_path: Path) -> None:
         assert isinstance(schema_resource.contents[0], TextResourceContents)
         schema_document = json.loads(schema_resource.contents[0].text)
         assert "memory" not in schema_document
+        fingerprint = await client.call_tool(
+            "memory_discover",
+            {"uri": "memory://schema/current", "sections": ["schema_fingerprint"]},
+        )
+        assert fingerprint.structured_content == {
+            "schema_fingerprint": schema_document["schema_fingerprint"]
+        }
+        for arguments in (
+            {"uri": "file:///etc/passwd"},
+            {"uri": "https://example.com"},
+            {"uri": "memory://not-a-resource"},
+            {"uri": "memory://catalog", "sections": ["absent"]},
+            {"uri": "memory://catalog", "sections": []},
+        ):
+            rejected = await client.call_tool("memory_discover", arguments)
+            assert rejected.is_error
+        unknown = await client.call_tool(
+            "memory_discover",
+            {"uri": "memory://memories/unknown/summary", "sections": ["ready"]},
+        )
+        unknown_resource = await client.read_resource(
+            "memory://memories/unknown/summary"
+        )
+        assert isinstance(unknown_resource.contents[0], TextResourceContents)
+        assert unknown.structured_content == json.loads(
+            unknown_resource.contents[0].text
+        )
         schema_copy = tmp_path / "schema.json"
         schema_copy.write_text(canonical_json(schema_document), encoding="utf-8")
         assert (
@@ -802,6 +833,10 @@ async def test_mcp_configures_and_routes_named_memory(tmp_path: Path) -> None:
             operation_spec_sizes.append(len(operation_resource.contents[0].text))
             operation_document = json.loads(operation_resource.contents[0].text)
             operation_documents[definition.operation] = operation_document
+            discovered = await client.call_tool(
+                "memory_discover", {"uri": definition.spec_uri}
+            )
+            assert discovered.structured_content == operation_document
             assert operation_document["mcp_tool"] == definition.mcp_tool
             example_call = operation_document["example"]["call"]
             if definition.action is None:
@@ -918,8 +953,8 @@ async def test_mcp_configures_and_routes_named_memory(tmp_path: Path) -> None:
             )
             for tool in tools
         }
-        assert len(tools) == 12
-        assert len(serialized_tools) <= 23_600
+        assert len(tools) == 13
+        assert len(serialized_tools) <= 25_200
         assert len(serialized_resources) <= 2_500
         assert len(serialized_resource_templates) <= 2_000
         assert serialized_tool_sizes["memory_configure"] <= 2_900
@@ -949,7 +984,8 @@ async def test_mcp_configures_and_routes_named_memory(tmp_path: Path) -> None:
         assert set(callable_capabilities) == set(indexed_operations)
         assert {
             operation["mcp_tool"] for operation in callable_capabilities.values()
-        } == {tool.name for tool in tools}
+        } == {tool.name for tool in tools} - {"memory_discover"}
+        # Discovery bootstraps the operation index; it is not a data operation.
 
         configured = await client.call_tool(
             "memory_configure",
@@ -1019,6 +1055,20 @@ async def test_mcp_configures_and_routes_named_memory(tmp_path: Path) -> None:
         assert isinstance(named_namespace.contents[0], TextResourceContents)
         named_namespace_document = json.loads(named_namespace.contents[0].text)
         assert named_namespace_document["document"]["namespaces"][0]["name"] == "notes"
+
+        for uri in (
+            "memory://memories/research/summary",
+            "memory://memories/research/capabilities/current",
+            "memory://memories/research/schema/ontology/current",
+            "memory://memories/research/schema/ontology/notes",
+        ):
+            resource_result = await client.read_resource(uri)
+            assert isinstance(resource_result.contents[0], TextResourceContents)
+            discovered = await client.call_tool("memory_discover", {"uri": uri})
+            assert discovered.structured_content == json.loads(
+                resource_result.contents[0].text
+            )
+            assert discovered.structured_content["memory"] == "research"
 
         missing = await client.call_tool(
             "memory_search_manage",

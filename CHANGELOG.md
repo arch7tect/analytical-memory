@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Expose resource and operation specifications through `memory_discover` for
+  hosts without a resource browser, with optional top-level section selection.
+- Include a version-checked unattended Kimi Code installer, preserving other
+  plugins and previous copies while preparing the complete plugin runtime.
+- Direct plugin skills to use native host tools and wait for activation instead
+  of constructing auxiliary clients.
+
 - Fix the Kimi bundle's working-directory path so the host loads its MCP server.
 - Default MCP v1 queries and native drill-down to compact values and record IDs;
   preserve full responses with `payload.response_format="full"` and explicit

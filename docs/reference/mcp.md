@@ -87,6 +87,21 @@ Memory-local declarations and embedding profiles are reset. Delete also
 removes a named target's storage and catalog entry. Default may be wiped but
 cannot be deleted.
 
+## Discovery through tools
+
+`memory_discover(uri="memory://catalog")` exposes the same JSON documents as
+MCP resource reads. Use it when the host exposes tools but has no resource
+browser, including Kimi Code. It accepts every published resource/template URI
+below and resolves named memories through the same router, without fallback.
+Unknown URIs fail; it cannot read files or arbitrary URLs.
+
+An optional `sections` list selects exact top-level document keys. For example,
+`uri="memory://schema/current", sections=["schema_fingerprint"]` returns only
+the write contract fingerprint. `sections=["v2"]` selects native Query IR syntax.
+Omit sections to read an entire operation spec. Unknown keys fail; resource
+error envelopes are preserved without filtering. Cache contracts within the
+session and refresh ontology after shape changes.
+
 ## Discovery resources
 
 | URI | Contents |
@@ -113,12 +128,13 @@ queryable shape or its descriptions change, but not when only row counts change.
 
 | Tool | Actions | Behavior |
 | --- | --- | --- |
+| `memory_discover` | — | Read one resource or selected top-level sections through a tool |
 | `memory_configure` | `create`, `attach` | Typed named-memory lifecycle |
 | `memory_lifecycle_manage` | `status`, `wipe`, `delete` | Guarded full-memory lifecycle |
 | `memory_ontology_manage` | `declare_entity`, `declare_namespace` | Optional descriptions and validation metadata |
-| `memory_ingest_manage` | `jsonl_import`, `analytical_attribute`, `analytical_metric` | Atomic source and analysis ingestion |
+| `memory_ingest_manage` | `jsonl_import`, `analytical_attribute`, `analytical_metric`, `analysis_capture` | Atomic source and analysis ingestion |
 | `memory_relation_manage` | `materialize`, `deactivate` | Relation creation and explicit correction |
-| `memory_query_manage` | `execute`, `current_metric`, `traverse` | Bounded local relational and graph reads |
+| `memory_query_manage` | `execute`, `current_metric`, `traverse`, `data_state`, `join_inspect`, `analysis_execute`, `query_drill_down`, `analysis_read` | Bounded local relational and graph reads |
 | `memory_search_manage` | `text` | Local full-text search |
 | `memory_semantic_manage` | `search`, `embedding_status` | Semantic search and provider readiness |
 | `memory_explain_manage` | `attribute`, `relation`, `metric` | Direct provenance explanations |

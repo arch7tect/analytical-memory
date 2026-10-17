@@ -47,6 +47,11 @@ def _copy_payload(destination: Path, *, host: str) -> None:
         ROOT / "scripts" / "plugin_runtime.py",
         destination / "scripts" / "plugin_runtime.py",
     )
+    if host == "kimi":
+        shutil.copy2(
+            ROOT / "scripts" / "install_kimi.py",
+            destination / "scripts" / "install_kimi.py",
+        )
     if host == "generic":
         shutil.copy2(
             ROOT / "scripts" / "configure_opencode.py",

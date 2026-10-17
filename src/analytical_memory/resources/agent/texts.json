@@ -23,7 +23,7 @@
     },
     "purpose": "Use the local MCP memory without database access. Resources describe shape; typed tools perform bounded operations.",
     "results": {
-      "common": "Every tool result includes memory. Check it before reusing IDs. Fingerprints identify contracts; provenance IDs are not business keys.",
+      "common": "Every data-operation result includes memory. Check it before reusing IDs. Fingerprints identify contracts; provenance IDs are not business keys.",
       "evidence": "availability=present/missing; verification=unverified/verified/corrupt. Read base64 chunks until eof. Incomplete/truncated audits are bounded subsets.",
       "import": "records counts lines; created_nodes/updated_nodes split upserts; attributes_written counts present fields; ontology_delta describes new shape.",
       "join": "created_relations counts new edges; skipped_unmatched/skipped_null_or_missing explain omissions.",
@@ -74,5 +74,5 @@
       }
     ]
   },
-  "server_instructions": "Start with memory://guide and memory://catalog. Use one memory name consistently; there is no active selection."
+  "server_instructions": "Read memory://catalog and action specs with memory_discover. Call plugin tools directly; reuse specs."
 }

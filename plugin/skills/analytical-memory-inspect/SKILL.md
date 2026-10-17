@@ -5,6 +5,14 @@ description: Inspect Analytical Memory through MCP when the user asks what data 
 
 # Inspect Analytical Memory
 
+Read every `memory://` URI below using the plugin's `memory_discover` tool
+with `uri` set to that URI. This works even when the host has no resource browser.
+Reuse contracts already read in this session. For a write fingerprint alone,
+request `memory://schema/current` with `sections=["schema_fingerprint"]`.
+Call the host's plugin tools directly for all memory operations. Do not create
+an MCP client, run Python application APIs, or access the database yourself.
+If the tools are missing, finish plugin activation before continuing.
+
 Read `memory://catalog`. Inspect the memory requested by the user; otherwise
 inspect `default`. Read its summary first. There is no active selection and an
 unavailable name must not fall back to default. An empty default does not imply

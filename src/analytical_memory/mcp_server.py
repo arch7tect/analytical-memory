@@ -5,8 +5,8 @@ from collections.abc import Callable
 from typing import Annotated, Any, Literal
 
 from mcp.server import MCPServer
-from mcp.server.mcpserver.exceptions import ToolError
-from mcp.types import ToolAnnotations
+from mcp.server.mcpserver.exceptions import ResourceError, ToolError
+from mcp.types import InputRequiredResult, ToolAnnotations
 from pydantic import BaseModel, Field, ValidationError
 
 from analytical_memory.agent_texts import agent_document, agent_text
@@ -604,6 +604,55 @@ def create_mcp_server(
             return {**selected_application.ontology(namespace), "memory": selected}
 
         return resource_document(memory, document)
+
+    @server.tool(
+        name="memory_discover",
+        description=(
+            "Read one memory:// resource through a tool. Start with memory://catalog; "
+            "read memory://operations/<operation> for an exact action spec. "
+            "Supports every published resource URI, including named ontologies."
+        ),
+        annotations=ToolAnnotations(
+            read_only_hint=True,
+            destructive_hint=False,
+            idempotent_hint=True,
+            open_world_hint=False,
+        ),
+        structured_output=True,
+    )
+    async def memory_discover(
+        uri: Annotated[
+            str, Field(description="Exact published memory:// resource URI.")
+        ] = "memory://catalog",
+        sections: Annotated[
+            list[str] | None,
+            Field(
+                description=(
+                    "Optional top-level keys to return, e.g. [schema_fingerprint] "
+                    "for writes or [v2] for native query syntax. Omit for all keys."
+                ),
+                min_length=1,
+                max_length=16,
+            ),
+        ] = None,
+    ) -> dict[str, Any]:
+        try:
+            resources = await server.read_resource(uri)
+            if isinstance(resources, InputRequiredResult):
+                raise ToolError("Resource requires interactive input")
+            document: dict[str, Any] = json.loads(next(iter(resources)).content)
+            # Keep resource error envelopes intact, even on a section request.
+            if (
+                sections is not None
+                and not {"code", "message", "retryable"} <= document.keys()
+            ):
+                missing = set(sections) - document.keys()
+                if missing:
+                    raise ToolError(f"Unknown resource sections: {sorted(missing)}")
+                document = {key: document[key] for key in sections}
+            return document
+        except ResourceError as exc:
+            raise ToolError(str(exc)) from exc
 
     @server.tool(
         name="memory_configure",

@@ -144,13 +144,30 @@ for host-specific scope behavior.
 
 ## Kimi Code
 
-With `HOST=kimi`, print the payload path in your terminal:
+With `HOST=kimi`, the bundle includes an unattended installer for **Kimi Code
+0.39.1**. The assistant runs it from the verified extracted payload:
 
 ```console
-echo "$PAYLOAD_ROOT"
+uv run --no-project --python 3.12 python "$PAYLOAD_ROOT/scripts/install_kimi.py"
 ```
 
-Paste that absolute path into the first command in Kimi Code:
+It uses `KIMI_CODE_HOME` when set, otherwise `~/.kimi-code`; `--home` selects an
+isolated host directory and `--kimi` selects the executable. It copies both
+skills and server into a fresh managed directory, prepares the locked runtime,
+and registers the plugin using Kimi's version-1 installation registry. Other
+plugin entries and settings are preserved. Updates retain the old copy and a
+registry backup; identical repeat installs reuse the existing copy. Do not edit
+plugin settings concurrently with installation.
+
+The result reports the installed payload `root` and **pending activation**.
+Keep that root to resolve example files. Restart Kimi or run `/reload`, then
+call the native `memory_discover` tool with `uri="memory://catalog"`, followed
+by `uri="memory://memories/default/summary"`. Confirm both plugin skills are
+available. Do not rerun installation just because the current session has not
+reloaded. The installer already prepares the first launch for Kimi.
+
+This adapter is version checked because Kimi's unattended registration format
+is an internal host contract. On another version, use its native TUI commands:
 
 ```text
 /plugins install /absolute/install/directory/analytical-memory-<version>-kimi/analytical-memory
@@ -158,15 +175,15 @@ Paste that absolute path into the first command in Kimi Code:
 /reload
 ```
 
-Check plugin diagnostics for its MCP server. Local installs are copied by the
-host; reinstall to update the copy. See the
-[Kimi Code plugin guide](https://moonshotai.github.io/kimi-code/en/customization/plugins.html).
+These are **interactive commands**, not shell commands: `kimi --prompt
+"/plugins install ..."` sends text to a model and does not install a plugin.
+See the [Kimi Code plugin guide](https://moonshotai.github.io/kimi-code/en/customization/plugins.html).
 
-Verify the server through Kimi after activation: both skills and the plugin's
-MCP tools must be available in that session. A successful standalone server probe
-does not prove Kimi loaded the server. If Kimi reports no configured MCP server,
-keep installation pending and inspect plugin diagnostics; do not run the
-quickstart through Python or a separate MCP client as a substitute. Kimi plugin
+A standalone server probe does not prove Kimi loaded the plugin. If native tools
+are missing, keep installation pending and inspect host plugin diagnostics.
+Do not build a helper client, call Python application APIs, or edit the database
+to continue the quickstart. Specifications and discovery are available through
+`memory_discover`; no external MCP resource reader is required. Kimi plugin
 server working directories must start with `./`, including the plugin root `./`.
 
 ## Codex

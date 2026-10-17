@@ -5,6 +5,14 @@ description: Use Analytical Memory through MCP to select a default or named memo
 
 # Analytical Memory
 
+Read every `memory://` URI below using the plugin's `memory_discover` tool
+with `uri` set to that URI. This works even when the host has no resource browser.
+Reuse contracts already read in this session. For a write fingerprint alone,
+request `memory://schema/current` with `sections=["schema_fingerprint"]`.
+Call the host's plugin tools directly for all memory operations. Do not create
+an MCP client, run Python application APIs, or access the database yourself.
+If the tools are missing, finish plugin activation before continuing.
+
 The MCP server name is `analytical-memory` (with a hyphen); its resource URIs
 start with `memory://`. Use that exact server name for resource discovery.
 

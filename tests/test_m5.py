@@ -2013,7 +2013,7 @@ async def test_real_m5_flow_through_mcp(m5: tuple[Any, ...], tmp_path: Path) -> 
             for operation in capabilities["operations"].values()
             if "mcp_tool" in operation
         }
-        assert declared_tools == tool_names
+        assert declared_tools == tool_names - {"memory_discover"}
         retention_capability = capabilities["operations"]["retention"]
         assert retention_capability["interfaces"] == ["python", "cli"]
         assert "mcp_tool" not in retention_capability
