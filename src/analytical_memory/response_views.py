@@ -25,7 +25,7 @@ class CompactQueryRow(APIModel):
 
 
 class CompactQueryResponse(APIModel):
-    response_format: Literal["compact"] = "compact"
+    response_format: Literal["compact"]
     contract_fingerprint: str
     count: int | None = None
     ontology_fingerprint: str
@@ -36,6 +36,7 @@ class CompactQueryResponse(APIModel):
 
 def compact_query(response: QueryIRResponse) -> CompactQueryResponse:
     result = response.model_dump(mode="json")
+    result["response_format"] = "compact"
     result["rows"] = [
         {
             "bindings": row["bindings"],

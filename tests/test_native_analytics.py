@@ -836,6 +836,7 @@ def test_compact_preserves_null_missing_and_binding_alias(
     native: MemoryAPI, tmp_path: Path
 ) -> None:
     from analytical_memory.api_models import QueryIRResponse
+    from analytical_memory.mcp_operations import QueryOperationResponse
     from analytical_memory.response_views import compact_drill, compact_query
 
     source = tmp_path / "values.jsonl"
@@ -856,6 +857,20 @@ def test_compact_preserves_null_missing_and_binding_alias(
         }
     )
     assert isinstance(result, QueryIRResponse)
+    for full in (
+        result,
+        result.model_copy(update={"rows": [], "count": None}),
+        result.model_copy(update={"rows": [], "count": 0}),
+    ):
+        assert isinstance(
+            QueryOperationResponse.model_validate(full.model_dump(mode="json")).root,
+            QueryIRResponse,
+        )
+        compact = compact_query(full)
+        assert (
+            QueryOperationResponse.model_validate(compact.model_dump(mode="json")).root
+            == compact
+        )
     rows = {
         row.projections[0].value: row.projections[1]
         for row in compact_query(result).rows

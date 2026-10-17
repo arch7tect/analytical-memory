@@ -224,7 +224,7 @@ class MemoryJoinMaterializationResponse(
 
 
 class MemoryCompactQueryResponse(DescribedMCPResponse, CompactQueryResponse):
-    memory: str
+    memory: ResolvedMemory
 
 
 class MemoryQueryIRResponse(DescribedMCPResponse, QueryIRResponse):
@@ -480,8 +480,8 @@ def create_mcp_server(
         "memory://schema/query-ir/current",
         name="query-ir",
         description=(
-            "Authoritative Query IR v1 input/result JSON Schemas, semantics, limits, "
-            "and examples for memory_query_manage action=execute."
+            "Query IR input/full-result schemas, semantics and examples; compact "
+            "MCP results use the query_execute spec linked in mcp_response."
         ),
         mime_type="application/json",
     )

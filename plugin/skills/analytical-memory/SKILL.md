@@ -23,7 +23,8 @@ Use one linear pass for each request.
    entity/field/relation names are needed, and `memory://schema/current` only for
    writes. Read `memory://guide` only for an unfamiliar workflow.
 3. Read the selected operation's exact spec once and reuse it within the session
-   while the server version is unchanged, then perform the operation:
+   until the server is upgraded or reconnected, or a contract mismatch requires
+   refreshing it, then perform the operation:
    - For JSONL ingestion, use `memory_ingest_manage` action `jsonl_import`.
    - To connect existing entity types, use `memory_relation_manage` action
      `materialize`. Never infer joins unless the user asks to connect datasets.

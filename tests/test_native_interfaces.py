@@ -99,6 +99,21 @@ async def test_native_bundle_capture_and_detail_through_stdio(tmp_path: Path) ->
             },
         )
         assert bad_format.is_error
+        for response_format in ("compact", "full"):
+            count_call = await client.call_tool(
+                "memory_query_manage",
+                {
+                    "action": "execute",
+                    "payload": {
+                        "document": {**v1, "return": [{"count": True}]},
+                        "response_format": response_format,
+                    },
+                },
+            )
+            assert not count_call.is_error and count_call.structured_content
+            count_result = count_call.structured_content["result"]
+            assert count_result["count"] == 12 and count_result["rows"] == []
+            assert ("response_format" in count_result) == (response_format == "compact")
         analysed = await query("analysis_execute", document)
         assert analysed["coverage"]["attributed"] == 10
         direct = await query("execute", document["members"][0]["document"])
