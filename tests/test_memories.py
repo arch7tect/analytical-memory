@@ -16,6 +16,7 @@ from mcp.types import TextContent, TextResourceContents
 
 from analytical_memory.adapters.filesystem import FileEvidenceStore
 from analytical_memory.adapters.sqlite import SqliteMemoryStore
+from analytical_memory.analytics import NATIVE_DOCUMENT_MODELS, validate_query
 from analytical_memory.api import MemoryAPI
 from analytical_memory.application import MemoryApplication
 from analytical_memory.canonical import canonical_json, sha256_json
@@ -698,6 +699,12 @@ async def test_mcp_configures_and_routes_named_memory(tmp_path: Path) -> None:
             "memory://memories/{memory}/schema/ontology/{namespace}",
         }
         assert all(tool.description for tool in tools)
+        ontology_tool = next(t for t in tools if t.name == "memory_ontology_manage")
+        ontology_payload = ontology_tool.input_schema["properties"]["payload"]
+        assert "contract_fingerprint" in ontology_payload["required"]
+        assert (
+            ontology_payload["properties"]["contract_fingerprint"]["type"] == "string"
+        )
         assert {
             tool.name: missing_descriptions
             for tool in tools
@@ -839,6 +846,17 @@ async def test_mcp_configures_and_routes_named_memory(tmp_path: Path) -> None:
             assert discovered.structured_content == operation_document
             assert operation_document["mcp_tool"] == definition.mcp_tool
             example_call = operation_document["example"]["call"]
+            if definition.operation in NATIVE_DOCUMENT_MODELS:
+                native_document = example_call["payload"]["document"]
+                NATIVE_DOCUMENT_MODELS[definition.operation].model_validate(
+                    native_document
+                )
+                analysis = native_document.get("analysis", native_document)
+                for member in analysis.get("members", []):
+                    if member["kind"] == "query":
+                        validate_query(member["document"])
+                if "query" in native_document:
+                    validate_query(native_document["query"])
             if definition.action is None:
                 assert operation_document["call_style"] == "direct"
                 assert "action" not in operation_document

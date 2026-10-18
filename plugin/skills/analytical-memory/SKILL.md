@@ -5,6 +5,12 @@ description: Use Analytical Memory through MCP to select a default or named memo
 
 # Analytical Memory
 
+For the retail quickstart, read [the operation guide](references/retail-demo.md)
+before any other data-step action. Once the plugin is installed, use its tools
+for data, setup, samples and coverage. Do not run shell/Python checks, count or
+preview JSONL files, or prepare directories. The importer reads inputs and
+`memory_configure` creates directories. Query the memory to show sample rows.
+
 Read every `memory://` URI below using the plugin's `memory_discover` tool
 with `uri` set to that URI. This works even when the host has no resource browser.
 Reuse contracts already read in this session. For a write fingerprint alone,
@@ -13,11 +19,16 @@ Call the host's plugin tools directly for all memory operations. Do not create
 an MCP client, run Python application APIs, or access the database yourself.
 If the tools are missing, finish plugin activation before continuing.
 
+Select a named memory on operation tools with `memory="<name>"`.
+`memory_discover` has no `memory` argument: use
+`memory://memories/<name>/schema/ontology/current` for its ontology and
+`memory://memories/<name>/summary` for its summary. Unqualified ontology URIs
+describe default. `sections` is a JSON array, not a JSON-encoded string.
+
 The MCP server name is `analytical-memory` (with a hyphen); its resource URIs
 start with `memory://`. Use that exact server name for resource discovery.
 
-For the bundled retail demo, read [the retail operation guide](references/retail-demo.md)
-and perform only the stage requested by the user.
+For the retail demo, perform only the stage requested by the user.
 
 Use one linear pass for each request.
 
@@ -33,6 +44,9 @@ Use one linear pass for each request.
 3. Read the selected operation's exact spec once and reuse it within the session
    until the server is upgraded or reconnected, or a contract mismatch requires
    refreshing it, then perform the operation:
+   - Create a named memory with `memory_configure`, then import. Imports discover
+     namespaces, entities and fields automatically; declarations are optional
+     constraints, not setup steps. Never call a write with an empty trial payload.
    - For JSONL ingestion, use `memory_ingest_manage` action `jsonl_import`.
    - To connect existing entity types, use `memory_relation_manage` action
      `materialize`. Never infer joins unless the user asks to connect datasets.
@@ -53,6 +67,12 @@ for evidence. If a write fails with `schema_changed`, refresh the structural
 schema once and retry once. Never fall back to another memory after an error.
 Return the result, resolved memory, and relevant entity, relation, or Node IDs
 concisely.
+
+Manager `payload` must be a JSON object, never serialized JSON text. For
+document-based actions, wrap the input in `payload.document`; `data_state` needs
+`payload={"document":{}}`. Reuse returned `expected_state` when available.
+For Query IR, `nodes` and `edges` belong inside `match`; preserve the structure
+of bundled query documents. Read a needed spec before issuing dependent calls.
 
 
 ## Native analytics

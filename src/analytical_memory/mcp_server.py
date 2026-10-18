@@ -69,7 +69,7 @@ from analytical_memory.version import __version__
 
 MemorySelection = Annotated[
     str | None,
-    Field(description=("Memory from memory://catalog; omitted=default. No fallback.")),
+    Field(description="Catalog name; omit=default; no fallback."),
 ]
 ContractFingerprint = Annotated[
     str,
@@ -120,7 +120,25 @@ ResolvedMemory = Annotated[
 ]
 ManagerPayload = Annotated[
     dict[str, Any],
-    Field(description="Payload matching the selected action's exact spec URI."),
+    Field(description="Object per action spec; never JSON text."),
+]
+
+
+# Expose the shared requirement without bypassing action-specific error envelopes.
+OntologyPayload = Annotated[
+    dict[str, Any],
+    Field(
+        description="Fields per action spec.",
+        json_schema_extra={
+            "properties": {
+                "contract_fingerprint": {
+                    "type": "string",
+                    "description": "schema_fingerprint from memory://schema/current.",
+                }
+            },
+            "required": ["contract_fingerprint"],
+        },
+    ),
 ]
 
 
@@ -610,7 +628,8 @@ def create_mcp_server(
         description=(
             "Read one memory:// resource through a tool. Start with memory://catalog; "
             "read memory://operations/<operation> for an exact action spec. "
-            "Supports every published resource URI, including named ontologies."
+            "For named ontology use memory://memories/{name}/schema/ontology/current. "
+            "The URI selects the memory; this tool has no memory argument."
         ),
         annotations=ToolAnnotations(
             read_only_hint=True,
@@ -657,7 +676,7 @@ def create_mcp_server(
     @server.tool(
         name="memory_configure",
         description=(
-            "Create/attach a named target without selecting it. Spec: "
+            "Create memory and directories, or attach. No mkdir. Spec: "
             "memory://operations/memory_configure."
         ),
         annotations=ToolAnnotations(
@@ -1825,7 +1844,8 @@ def create_mcp_server(
     @server.tool(
         name="memory_ontology_manage",
         description=(
-            "Ontology writes. Specs: declare_entity=memory://operations/"
+            "Optional declarations; imports need none. "
+            "Specs: declare_entity=memory://operations/"
             "entity_declaration; declare_namespace=memory://operations/"
             "namespace_declaration."
         ),
@@ -1842,7 +1862,7 @@ def create_mcp_server(
             Literal["declare_entity", "declare_namespace"],
             Field(description="Selected ontology action."),
         ],
-        payload: ManagerPayload,
+        payload: OntologyPayload,
         memory: MemorySelection = None,
     ) -> ManagerResponse:
         if action == "declare_entity":
@@ -2016,7 +2036,8 @@ def create_mcp_server(
     @server.tool(
         name="memory_query_manage",
         description=(
-            "Specs: memory://operations/query_execute; "
+            'data_state payload={"document":{}}. '
+            "memory://operations/query_execute; "
             "memory://operations/query_current_metric; "
             "memory://operations/traverse_relations; "
             "memory://operations/analysis_execute; "

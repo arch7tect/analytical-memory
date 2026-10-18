@@ -74,3 +74,7 @@ the bounded check above; do not substitute a client.
 Report the version, two skills, connection and readiness briefly. Then follow the
 [human quickstart](getting-started.md) when asked. The installed usage skill's
 `references/retail-demo.md` locates all fixtures and explains native operations.
+Load that skill and read its recipe before any data-step action. After activation,
+do not run shell/Python checks, preview/count JSONL, or create directories:
+the plugin configures its storage, imports files, queries samples and reports
+join coverage. Host file reads are for instructions and JSON query definitions.

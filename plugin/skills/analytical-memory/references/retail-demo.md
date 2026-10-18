@@ -5,6 +5,13 @@ quickstart. Perform the requested stage and explain its result; do not run the
 entire scenario ahead of the conversation. The human guide is a sequence of
 prompts, while this reference supplies the operational mapping.
 
+Use native plugin tools for every data step, including samples and join coverage.
+After installation, do not run shell/Python helpers, read JSONL to compute or
+verify answers, or preflight fixtures. Pass JSONL paths directly to the importer.
+The host's read-file tool may read the selected JSON query/declaration file;
+reuse that document as an object without serializing it or rebuilding its shape.
+Report only values returned by the plugin. Installation commands are separate.
+
 ## Locate inputs and select a memory
 
 In an installed bundle, start at the directory containing this skill's
@@ -21,7 +28,18 @@ demo directory outside the plugin and existing evidence roots. Prefer
 `<plugin-data-directory>/demos/<memory-name>/memory.db` with sibling `evidence/`;
 resolve the configured plugin data directory and use absolute paths. Do not wipe,
 reuse, or import into an existing memory unless explicitly requested. Set
-`memory` to the chosen name on every subsequent tool call and report that name.
+`memory` to the chosen name on operation tools and report that name. Discovery
+instead uses `memory://memories/<name>/summary` and
+`memory://memories/<name>/schema/ontology/current`; it has no `memory` argument.
+
+`memory_configure action=create` creates the database, its parent directories and
+the evidence directory itself. Call it with the intended absolute paths directly;
+do not run `mkdir`, `ls`, path probes or any other filesystem preparation. Use its
+returned target paths and the catalog to confirm the configuration.
+
+Create the memory, then import directly. The import discovers `shop`, `Order`,
+`Ticket` and their fields as data arrives. Do not declare namespaces/entities
+or send empty trial writes as preparation.
 
 Confirm readiness, read `memory://schema/current` for the real contract
 fingerprint, and use the selected operation's specification for exact payloads.
@@ -41,9 +59,25 @@ Do not use examples in the human guide as execution output.
 | Correct a ticket | `correction.jsonl` | Import into `shop.Ticket` with the original string key `ticket_id` |
 
 JSONL imports take an absolute `source_path`. Query and analysis actions take
-`payload={"document": <parsed JSON>}`, not a file path. Inspect the selected
+`payload={"document": <JSON object>}`: neither payload nor document is a string
+or file path. For `linked-query.json`, preserve `match.nodes` and `match.edges`
+inside `match`; do not move edges to the root. Inspect the selected
 memory's ontology after each import and join; render entity, field and relation
 changes for the user. Show sample rows by querying the imported data.
+
+The join result supplies `created_relations`, `skipped_unmatched` and
+`skipped_null_or_missing`. Use those counts to explain immediate coverage.
+For deeper coverage use the analysis's `unattributed_reasons` and
+`delivery_coverage` members, or native `relation_inspect`; never recompute joins
+from JSONL. Query the imported tickets when business IDs or field values are
+needed to explain a returned source Node ID.
+
+To identify unmatched tickets immediately after joining, read the
+`memory://operations/relation_inspect` spec. Obtain current state via `data_state`
+if not already returned, then call `relation_inspect` with
+`payload={"document":{"name":"ticket_to_order","expected_state":<state>}}`.
+Both fields are required; an empty document is valid only for `data_state`.
+Use the returned per-source reasons and query their imported business IDs.
 
 The analysis already defines carrier/region, carrier totals, grand totals,
 ticket inventory and coverage. Its optional delivery match preserves all orders
@@ -51,6 +85,12 @@ in the denominator. Count distinct identities, not distinct monetary values;
 never calculate population totals by adding a page of returned detail.
 
 ## Detail, capture and comparison
+
+Reuse the latest returned `expected_state`. If a state is needed separately, read
+`memory://operations/data_state` and call `memory_query_manage` with
+`{"action":"data_state","memory":"<name>","payload":{"document":{}}}`.
+Read required operation specs before their calls, not in parallel with a call
+whose arguments depend on that spec.
 
 For live detail, select the returned EcoPost / South typed group key. Use
 `query_drill_down` with that key, the original `by_carrier_region` query,

@@ -63,7 +63,8 @@ EvidenceDigest = Annotated[
 class ConfigureMemoryRequest(APIModel):
     action: Literal["create", "attach"] = Field(
         description=(
-            "create initializes a new/empty target; attach validates an existing "
+            "create initializes a new/empty target and creates its parent directories; "
+            "no filesystem preparation is needed. attach validates an existing "
             "initialized target without migrating it."
         )
     )
@@ -243,7 +244,10 @@ class ResponseViewRequest(APIModel):
 
 class QueryExecuteRequest(ResponseViewRequest):
     document: dict[str, Any] = Field(
-        description="Query IR v1 or v2 document using the selected memory ontology."
+        description=(
+            "Query IR v1/v2 object using the selected ontology. "
+            "Both nodes and edges belong inside match, not at the root."
+        )
     )
 
 
@@ -524,6 +528,10 @@ class OperationDefinition:
             document["document_schema"] = NATIVE_DOCUMENT_MODELS[
                 self.operation
             ].model_json_schema(by_alias=True)
+            document["example"]["usage"] = (
+                "Use real entity/measure names and returned IDs. Replace the entire "
+                "expected_state with the exact state from this memory's result."
+            )
         if self.idempotency is not None:
             document["idempotency"] = self.idempotency
         recovery = []
@@ -907,6 +915,43 @@ OPERATION_DEFINITIONS: tuple[OperationDefinition, ...] = (
     ),
 )
 
+
+def _native_example(operation: str) -> dict[str, Any]:
+    query = {
+        "query_ir_version": "2",
+        "match": {"nodes": [{"type": "example.Entity", "as": "n"}]},
+        "measures": [{"as": "entities", "op": "count_distinct", "node": "n"}],
+    }
+    analysis = {
+        "members": [{"name": "entity_count", "kind": "query", "document": query}]
+    }
+    state = {"generation": "<returned generation>", "data_revision": 0}
+    documents: dict[str, dict[str, Any]] = {
+        "analysis_execute": analysis,
+        "analysis_capture": {
+            "analysis": analysis,
+            "definition_version": "entity-count-1",
+            "expected_state": state,
+        },
+        "query_drill_down": {
+            "query": query,
+            "group_key": {},
+            "measure": "entities",
+            "expected_state": state,
+        },
+        "relation_inspect": {
+            "name": "<join declaration name>",
+            "expected_state": state,
+        },
+        "analysis_read": {
+            "observation_id": "<returned observation ID>",
+            "view": "status",
+        },
+        "data_state": {},
+    }
+    return {"document": documents[operation]}
+
+
 OPERATION_DEFINITIONS = (
     *OPERATION_DEFINITIONS,
     *(
@@ -920,7 +965,7 @@ OPERATION_DEFINITIONS = (
             AnalyticsResponse,
             mutating=operation == "analysis_capture",
             idempotent=True,
-            example={"document": {}},
+            example=_native_example(operation),
         )
         for operation in (
             "analysis_execute",

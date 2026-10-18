@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Clarify native quickstart payloads, named-memory discovery and automatic import
+  structure; use plugin results for samples and join coverage without fixture helpers.
+- Provide schema-valid native operation examples, including state guards, instead
+  of empty placeholder documents; clarify that memory creation prepares directories.
+- Expose the required ontology write fingerprint in the tool's initial payload
+  schema while retaining action-specific validation and structured errors.
+
 - Add a MiMo Code configuration generator and bounded native-host checks for
   the generic bundle, with a short installation guide and native readiness handoff.
 

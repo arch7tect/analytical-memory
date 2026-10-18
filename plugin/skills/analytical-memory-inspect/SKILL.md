@@ -18,6 +18,10 @@ inspect `default`. Read its summary first. There is no active selection and an
 unavailable name must not fall back to default. An empty default does not imply
 that named memories are empty.
 
+For named memories, use `memory://memories/<name>/summary` and
+`memory://memories/<name>/schema/ontology/current`. `memory_discover` selects by
+URI and has no `memory` argument; unqualified ontology URIs describe default.
+
 Read full resources only when the request needs them:
 
 - capabilities for operation availability, provider details, or full limits;

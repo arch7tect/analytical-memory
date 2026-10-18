@@ -74,5 +74,5 @@
       }
     ]
   },
-  "server_instructions": "Read memory://catalog and action specs with memory_discover. Call plugin tools directly; reuse specs."
+  "server_instructions": "Use plugin tools for memory data; no shell checks. Read catalog/specs with memory_discover. Payloads are JSON objects."
 }
