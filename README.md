@@ -21,6 +21,7 @@ includes the MCP server, shared skills, documentation, and examples.
 
 - [Claude Code, Kimi Code, and Codex](docs/plugin-installation.md) use their host
   plugin installation.
+- [MiMo Code](docs/install-mimo.md) has a short installation guide with a bundled configuration command.
 - [Generic environments, with OpenCode](docs/plugin-installation.md#generic-environments-opencode)
   connect the same plugin's skills and included server in one configuration.
 - [Quickstart for people](docs/getting-started.md) starts with that installation request,

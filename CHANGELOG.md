@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add a MiMo Code configuration generator and bounded native-host checks for
+  the generic bundle, with a short installation guide and native readiness handoff.
+
 - Validate the Kimi installer on 2.0.2 and use crash-released OS locks; reject
   malformed existing plugin roots without changing the registry.
 

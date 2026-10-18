@@ -4,6 +4,9 @@ Install Analytical Memory as one plugin: the archive contains its MCP server,
 import/query and inspection skills, documentation, and example data. The host
 starts the included server; there is no separate MCP installation.
 
+**Installing in MiMo Code?** Follow the [short MiMo guide](install-mimo.md).
+It includes configuration and bounded checks; no host internals need inspection.
+
 ## Instructions for an assistant performing installation
 
 The human entry point is a single request:
@@ -19,7 +22,7 @@ default; PostgreSQL is an explicit alternative with the Docker setup below.
 1. Identify the requested host. Resolve the latest stable GitHub release (for
    example, `gh release view --repo arch7tect/analytical-memory` or the public
    GitHub releases API). Select its release archive below, or use the
-   generic archive for OpenCode and other hosts without a matching marketplace.
+   generic archive for MiMo Code, OpenCode and other hosts without a matching marketplace.
 2. Download the archive and checksum file from the same release, verify them,
    and extract into a permanent directory. Resolve `BUNDLE_ROOT` and `PAYLOAD_ROOT`.
    Do not clone the repository or build from source.
@@ -32,7 +35,9 @@ default; PostgreSQL is an explicit alternative with the Docker setup below.
    For PostgreSQL, configure the plugin's external data-directory `.env` and
    start the [Docker database](reference/backend-portability.md#select-a-backend).
 5. After registering the clean bundle, [prepare the first launch](#prepare-the-first-launch).
-   Reconnect the host and verify both skills and memory readiness. If the host
+   Reconnect the host and verify both skills and memory readiness. Use the host
+   connection status and native plugin tools; never generate an MCP client or
+   probe script, call the Python API, or inspect the database for this check. If the host
    loads plugins only in a fresh chat, report installation as pending activation
    and give that single next action; do not claim a live connection in the old
    chat. After activation, the first quickstart data request can perform the

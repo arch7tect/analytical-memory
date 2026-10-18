@@ -53,10 +53,8 @@ def _copy_payload(destination: Path, *, host: str) -> None:
             destination / "scripts" / "install_kimi.py",
         )
     if host == "generic":
-        shutil.copy2(
-            ROOT / "scripts" / "configure_opencode.py",
-            destination / "scripts" / "configure_opencode.py",
-        )
+        for name in ("configure_opencode.py", "configure_mimo.py"):
+            shutil.copy2(ROOT / "scripts" / name, destination / "scripts" / name)
     shutil.copytree(
         ROOT / "src" / "analytical_memory",
         destination / "src" / "analytical_memory",
@@ -261,6 +259,8 @@ def build_bundles(output: Path = OUTPUT) -> None:
         )
         (output / host / "README.md").write_text(
             "# Analytical Memory bundle\n\n"
+            f"**MiMo Code:** start with the [short MiMo installation guide]"
+            f"({payload}/docs/install-mimo.md).\n\n"
             f"[Plugin installation]({payload}/docs/plugin-installation.md) "
             "is the installation entry point for people and assistants. "
             "The plugin includes its skills and MCP server.\n\n"
