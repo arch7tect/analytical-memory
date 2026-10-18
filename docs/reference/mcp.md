@@ -225,6 +225,13 @@ keeps capability discovery bounded as the native actions are added.
 
 ## Compact query responses
 
+Successful structured tool results use whitespace-free JSON in their text block.
+This removes formatting overhead only: keys, values, string whitespace, numeric
+literals, ordering and structured content are unchanged. Text-only clients still
+receive the entire JSON result. Error messages and non-JSON content are unchanged.
+This transport presentation applies equally to compact and full response views;
+it does not change query selection, provenance access or the Python/CLI formats.
+
 `memory_query_manage` actions `execute` (Query IR v1) and `query_drill_down`
 now default to `payload.response_format="compact"`. This changes presentation,
 not query selection or stored evidence. Clients that consume the previous full

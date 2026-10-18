@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Remove insignificant JSON whitespace from successful MCP text responses after
+  validation, preserving every value, identifier and the full structured result.
+
 - Clarify native quickstart payloads, named-memory discovery and automatic import
   structure; use plugin results for samples and join coverage without fixture helpers.
 - Provide schema-valid native operation examples, including state guards, instead

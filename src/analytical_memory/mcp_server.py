@@ -58,6 +58,7 @@ from analytical_memory.mcp_operations import (
     operations_index_document,
 )
 from analytical_memory.mcp_schema import DescribedMCPResponse
+from analytical_memory.mcp_transport import CompactMCPServer
 from analytical_memory.memories import MemoryRouter, contextual_capabilities
 from analytical_memory.query_ir import query_ir_contract_document
 from analytical_memory.response_views import (
@@ -419,7 +420,7 @@ def create_mcp_server(
         except (MemoryErrorBase, OSError, ValueError) as exc:
             return canonical_json(_error_envelope(exc, memory))
 
-    server = MCPServer(
+    server = CompactMCPServer(
         "analytical-memory",
         version=__version__,
         instructions=agent_text("server_instructions"),

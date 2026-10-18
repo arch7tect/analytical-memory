@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 from mcp import Client, StdioServerParameters
+from mcp.types import TextContent
 
 from analytical_memory.adapters.filesystem import FileEvidenceStore
 from analytical_memory.adapters.sqlite import SqliteMemoryStore
@@ -47,6 +48,10 @@ async def test_native_bundle_capture_and_detail_through_stdio(tmp_path: Path) ->
             )
             assert not response.is_error, response.content
             assert response.structured_content is not None
+            assert len(response.content) == 1
+            assert isinstance(response.content[0], TextContent)
+            assert json.loads(response.content[0].text) == response.structured_content
+            assert "\n" not in response.content[0].text
             return dict(response.structured_content["result"]["result"])
 
         v1 = {
