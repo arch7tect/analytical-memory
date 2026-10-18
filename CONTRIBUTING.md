@@ -73,6 +73,21 @@ maintenance rules. Keep setup steps out of the product README and put agent
 instructions in packaged resources or skills. Update documentation with behavior
 changes, and check links with `uv run python scripts/check_docs.py`.
 
+Before every push (including a release), review documentation against the
+implemented behavior:
+
+- Archive implemented proposals with an explicit historical status; preserve
+  their content and move genuinely deferred ideas into `docs/backlog.md`.
+- Update current guides and references, repair links after moves, and keep the
+  human README/quickstart distinct from assistant installation instructions.
+- Keep archived proposals, ADRs, completed implementation/delivery records and
+  the backlog out of plugin bundles. Preserve current architecture, installation,
+  skills, references and examples; bundle links to history must lead to the
+  repository rather than missing local files.
+- Run the documentation link checker and plugin bundle tests, then the complete
+  verification sequence before pushing. Do not rewrite historical verification
+  results as current claims or delete original records during cleanup.
+
 CI also runs `uv run --locked python scripts/build_release.py` to verify plugin
 and distribution packaging. For publication steps, see the
 [release guide](docs/releasing.md).

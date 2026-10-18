@@ -4,6 +4,14 @@ All notable changes to Analytical Memory are documented here.
 
 ## Unreleased
 
+## 0.7.3 - 2026-10-18
+
+- Archive the implemented native analytics proposal, collect deferred ideas in a
+  short backlog, and keep design history out of plugin bundles while preserving
+  links to repository records and all current usage documentation.
+- Require a documentation lifecycle review before every push and release, with
+  link checks and plugin bundle coverage for the published documentation set.
+
 ## 0.7.2 - 2026-10-18
 
 - Remove insignificant JSON whitespace from successful MCP text responses after

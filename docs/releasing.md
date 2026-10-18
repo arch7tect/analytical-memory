@@ -5,6 +5,7 @@ This guide is for maintainers. End-user setup is in
 
 ## Prepare and verify
 
+Complete the [pre-push documentation review](../CONTRIBUTING.md#documentation-and-release-artifacts).
 Update `project.version` in `pyproject.toml`, synchronize the lockfile if needed,
 and record user-visible changes in [CHANGELOG.md](../CHANGELOG.md). Run the full
 [contributor verification sequence](../CONTRIBUTING.md#verification), including
@@ -20,7 +21,11 @@ Artifacts are written to `dist/release/`; unpacked plugins are in `dist/plugins/
 The builder reads the version from `pyproject.toml`. An optional
 `--tag v<project-version>` argument rejects a mismatched tag. Each archive
 contains its host marketplace or plugin layout, runtime, skills, and
-documentation. The `SHA256SUMS` artifact covers the distributions and archives.
+current documentation. Design history (`docs/archive/`, `docs/decisions/`,
+completed implementation/delivery records), proposals and the backlog stay in
+the repository. Bundle links to those documents point to GitHub; installation,
+quickstart, references, and the current system design remain local. The
+`SHA256SUMS` artifact covers the distributions and archives.
 
 Build commands replace their generated output directories. Keep any artifacts
 you need to retain elsewhere before rebuilding.

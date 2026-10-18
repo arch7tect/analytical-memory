@@ -4,7 +4,7 @@ Status: Accepted on 2026-10-17; implemented in Analytical Memory 0.7.0.
 
 ## Decision
 
-Implement the [native analytics and quickstart proposal](../proposals/native-analytics-and-quickstart.md)
+Implement the [native analytics and quickstart proposal](../archive/native-analytics-and-quickstart.md)
 as Milestone 8. Preserve Query IR v1 input and result behavior. Add a separate
 v2 dispatcher with one anchored optional pattern, base scalar groups,
 identity-aware counts and integer sums, exact ratios, stable group identities,

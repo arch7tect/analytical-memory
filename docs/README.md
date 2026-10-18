@@ -18,6 +18,7 @@ directly to plugin installation for assistants arriving via the GitHub repositor
 | Reference | Covers |
 | --- | --- |
 | [MCP](reference/mcp.md) | Configuration, named memories, resources, tools, and errors |
+| [Native analytics](reference/native-analytics.md) | Aggregates, exact drill-down, saved observations and freshness |
 | [Querying](reference/querying.md) | Structured query syntax, supported operators, results, and limits |
 | [Text and semantic retrieval](reference/semantic-retrieval.md) | Searchable fields, local full-text search, and optional external embeddings |
 | [Operations](reference/operations.md) | Readiness, integrity, snapshots, transfer, and guarded deletion |
@@ -31,23 +32,15 @@ directly to plugin installation for assistants arriving via the GitHub repositor
 - [Contributing](../CONTRIBUTING.md) contains development and verification steps.
 - [Release guide](releasing.md) covers artifacts and publication.
 - [Changelog](../CHANGELOG.md) records changes by version.
+- [Backlog](backlog.md) tracks deferred ideas; these are not supported features
+  or a committed release plan.
 
 ## Decision and delivery history
 
-- [ADR 0001](decisions/0001-dynamic-ontology-query-ir.md) records the accepted
-  dynamic ontology and Query IR decision, with subsequent contract clarifications.
-- [Implementation history](implementation-plan.md) retains completed milestone
-  acceptance criteria. Milestones 0–4 describe a superseded ingestion model;
-  use the current guides for commands and behavior.
-
-## Native analytics
-
-- [Native analytics reference](reference/native-analytics.md): v2 queries,
-  bundles, observations, freshness and exact detail.
-- [ADR 0002](decisions/0002-native-analytics-observations.md): accepted decisions.
-- [Delivery record](native-analytics-delivery.md): slices, verification and limits.
-- [Accepted proposal](proposals/native-analytics-and-quickstart.md): original
-  requirements and fixture expectations; the reference defines current syntax.
+[Design history](archive/README.md) indexes accepted decisions, completed delivery
+records, and archived proposals. These documents remain in the source repository;
+plugin bundles include current documentation and link to the repository for history
+and the backlog.
 
 ## Documentation maintenance
 

@@ -755,7 +755,7 @@ expanding the active slice.
 ## Milestone 8: Native analytics and retail walkthrough
 
 Accepted on 2026-10-17 through [ADR 0002](decisions/0002-native-analytics-observations.md).
-The implementation follows the [six delivery slices](proposals/native-analytics-and-quickstart.md)
+The implementation follows the [six delivery slices](archive/native-analytics-and-quickstart.md)
 and preserves every completed milestone's behavior.
 
 1. V2 contracts and synthetic orders/tickets fixtures.

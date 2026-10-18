@@ -1,16 +1,62 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import tomllib
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 PLUGIN_NAME = "analytical-memory"
 MARKETPLACE_NAME = "analytical-memory-local"
 ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / "dist" / "plugins"
 HOSTS = ("claude", "kimi", "openai", "generic")
+REPOSITORY_DOCS = {
+    "archive",
+    "decisions",
+    "proposals",
+    "backlog.md",
+    "implementation-plan.md",
+    "native-analytics-delivery.md",
+}
+REPOSITORY_URL = "https://github.com/arch7tect/analytical-memory/blob/main/"
+DOCUMENT_LINK = re.compile(
+    r"(?P<prefix>\]\(|^ {0,3}\[[^\]\n]+\]:\s*)(?P<target>[^\s)]+)", re.MULTILINE
+)
+
+
+def _link_repository_docs(destination: Path) -> None:
+    for source in destination.rglob("*.md"):
+
+        def replace_link(match: re.Match[str], source: Path = source) -> str:
+            target = match["target"]
+            url = urlsplit(target.strip("<>"))
+            if url.scheme or url.netloc or not url.path:
+                return match[0]
+            resolved = (source.parent / unquote(url.path)).resolve()
+            if not resolved.is_relative_to(destination):
+                return match[0]
+            relative = resolved.relative_to(destination)
+            if (
+                len(relative.parts) < 2
+                or relative.parts[0] != "docs"
+                or relative.parts[1] not in REPOSITORY_DOCS
+            ):
+                return match[0]
+            suffix = ("?" + url.query if url.query else "") + (
+                "#" + url.fragment if url.fragment else ""
+            )
+            link = REPOSITORY_URL + relative.as_posix() + suffix
+            if target.startswith("<"):
+                link = "<" + link + ">"
+            return match["prefix"] + link
+
+        text = source.read_text(encoding="utf-8")
+        linked = DOCUMENT_LINK.sub(replace_link, text)
+        if linked != text:
+            source.write_text(linked, encoding="utf-8")
 
 
 def project_version() -> str:
@@ -40,7 +86,14 @@ def _copy_payload(destination: Path, *, host: str) -> None:
         "LICENSE",
     ):
         shutil.copy2(ROOT / name, destination / name)
-    shutil.copytree(ROOT / "docs", destination / "docs")
+
+    def ignore_repository_docs(directory: str, names: list[str]) -> set[str]:
+        excluded = {".DS_Store"}
+        if Path(directory) == ROOT / "docs":
+            excluded.update(REPOSITORY_DOCS)
+        return excluded.intersection(names)
+
+    shutil.copytree(ROOT / "docs", destination / "docs", ignore=ignore_repository_docs)
     shutil.copytree(ROOT / "examples", destination / "examples")
     (destination / "scripts").mkdir()
     shutil.copy2(
@@ -71,6 +124,7 @@ def _copy_payload(destination: Path, *, host: str) -> None:
         destination / "skills",
         ignore=ignore_host_metadata,
     )
+    _link_repository_docs(destination.resolve())
 
 
 def _server(host: str) -> dict[str, Any]:

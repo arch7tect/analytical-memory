@@ -1,6 +1,6 @@
 # Native analytics and a business quickstart
 
-Status: accepted on 2026-10-17 and implemented in 0.7.0. See [ADR 0002](../decisions/0002-native-analytics-observations.md) and [the current reference](../reference/native-analytics.md). Baseline: Analytical Memory 0.6.1,
+Status: archived; accepted on 2026-10-17 and implemented in 0.7.0. See [ADR 0002](../decisions/0002-native-analytics-observations.md) and [the current reference](../reference/native-analytics.md). Baseline: Analytical Memory 0.6.1,
 commit `c18287aa32a44d00d346a25af128276a4499115b`. Date: 2026-10-17.
 
 Extend the memory so a user can import independent datasets, connect them,
@@ -13,6 +13,12 @@ This document retains the accepted design and its 0.6.1 baseline for decision
 history. The [native analytics reference](../reference/native-analytics.md)
 defines the implemented 0.7.0 contracts; the human quickstart and plugin
 installation guide are the current user procedures.
+
+The original proposal below is preserved as historical context, including its
+future-tense wording and runner-based presentation. For current procedures use
+[plugin installation](../plugin-installation.md) and the
+[human quickstart](../getting-started.md). Outstanding ideas are tracked in the
+[backlog](../backlog.md), not as unfinished steps in this proposal.
 
 ## Product outcome
 

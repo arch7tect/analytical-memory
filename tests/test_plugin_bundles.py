@@ -28,7 +28,35 @@ def test_plugin_skills_are_shared_with_openai_metadata_only_for_codex(
         skills_root = _skills_root(tmp_path, host)
         assert check_documents(skills_root.parent) == []
         assert check_documents(tmp_path / host) == []
-        assert (skills_root.parent / "docs" / "plugin-installation.md").is_file()
+        docs = skills_root.parent / "docs"
+        for current in (
+            "plugin-installation.md",
+            "install-mimo.md",
+            "getting-started.md",
+            "design.md",
+            "reference/native-analytics.md",
+            "reference/mcp.md",
+        ):
+            assert (docs / current).is_file()
+        for history in (
+            "archive",
+            "proposals",
+            "decisions",
+            "implementation-plan.md",
+            "native-analytics-delivery.md",
+            "backlog.md",
+        ):
+            assert not (docs / history).exists()
+        assert not list(docs.rglob(".DS_Store"))
+        assert (
+            "https://github.com/arch7tect/analytical-memory/blob/main/docs/archive/README.md"
+            in (docs / "README.md").read_text()
+        )
+        assert (
+            "https://github.com/arch7tect/analytical-memory/blob/main/docs/decisions/"
+            "0002-native-analytics-observations.md"
+            in (docs / "reference/native-analytics.md").read_text()
+        )
         assert {path.name for path in skills_root.iterdir()} == SKILLS
         for skill_name in SKILLS:
             skill = skills_root / skill_name
