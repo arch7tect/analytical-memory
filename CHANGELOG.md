@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Validate the Kimi installer on 2.0.2 and use crash-released OS locks; reject
+  malformed existing plugin roots without changing the registry.
+
 - Expose resource and operation specifications through `memory_discover` for
   hosts without a resource browser, with optional top-level section selection.
 - Include a version-checked unattended Kimi Code installer, preserving other

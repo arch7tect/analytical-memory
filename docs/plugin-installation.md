@@ -145,7 +145,7 @@ for host-specific scope behavior.
 ## Kimi Code
 
 With `HOST=kimi`, the bundle includes an unattended installer for **Kimi Code
-0.39.1**. The assistant runs it from the verified extracted payload:
+0.39.1 and 2.0.2**. The assistant runs it from the verified extracted payload:
 
 ```console
 uv run --no-project --python 3.12 python "$PAYLOAD_ROOT/scripts/install_kimi.py"

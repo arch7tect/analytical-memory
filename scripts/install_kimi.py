@@ -1,4 +1,4 @@
-"""Install this bundle's complete plugin into Kimi Code 0.39.1."""
+"""Install this bundle's complete plugin into verified Kimi Code versions."""
 
 from __future__ import annotations
 
@@ -8,14 +8,17 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 PLUGIN = "analytical-memory"
-SUPPORTED_VERSION = "0.39.1"
+SUPPORTED_VERSIONS = {"0.39.1", "2.0.2"}
 IGNORED = {".venv", "__pycache__", ".git", ".DS_Store", ".pytest_cache"}
 
 
@@ -32,14 +35,37 @@ def payload_files(root: Path) -> dict[str, str]:
     return result
 
 
+@contextmanager
+def installation_lock(path: Path) -> Iterator[None]:
+    # Keep the inode in place: closing releases the OS lock even after a crash.
+    with path.open("a+b") as stream:
+        try:
+            if sys.platform == "win32":
+                import msvcrt
+
+                if stream.tell() == 0:
+                    stream.write(b"0")
+                    stream.flush()
+                stream.seek(0)
+                msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            raise ValueError("another Analytical Memory installer is running") from exc
+        yield
+
+
 def install(payload: Path, home: Path, *, kimi: str = "kimi") -> dict[str, Any]:
     version = subprocess.run(
         [kimi, "--version"], check=True, capture_output=True, text=True
     ).stdout.strip()
-    if version != SUPPORTED_VERSION:
+    if version not in SUPPORTED_VERSIONS:
         raise ValueError(
             f"Kimi {version}: unattended registration is verified only for "
-            f"{SUPPORTED_VERSION}; use the native /plugins install command instead"
+            f"{sorted(SUPPORTED_VERSIONS)}; "
+            "use the native /plugins install command instead"
         )
     payload = payload.resolve(strict=True)
     home = home.expanduser().resolve()
@@ -67,9 +93,7 @@ def install(payload: Path, home: Path, *, kimi: str = "kimi") -> dict[str, Any]:
     if registry.is_symlink():
         raise ValueError("refusing a symlinked plugin registry")
     lock = directory / ".analytical-memory-install.lock"
-    with lock.open("x"):
-        pass
-    try:
+    with installation_lock(lock):
         before = registry.read_bytes() if registry.exists() else None
         document: dict[str, Any] = (
             json.loads(before) if before is not None else {"version": 1, "plugins": []}
@@ -90,7 +114,11 @@ def install(payload: Path, home: Path, *, kimi: str = "kimi") -> dict[str, Any]:
         if len(matching) > 1:
             raise ValueError("duplicate Analytical Memory installation records")
         old = matching[0] if matching else {}
-        root = Path(old["root"]) if old.get("root") else None
+        if old and (
+            not isinstance(old.get("root"), str) or not Path(old["root"]).is_absolute()
+        ):
+            raise ValueError("existing plugin root must be an absolute path string")
+        root = Path(old["root"]) if old else None
         if (
             root is not None
             and root.is_dir()
@@ -161,6 +189,10 @@ def install(payload: Path, home: Path, *, kimi: str = "kimi") -> dict[str, Any]:
             with temporary.open("x") as stream:
                 json.dump(document, stream, indent=2)
                 stream.write("\n")
+            if (registry.read_bytes() if registry.exists() else None) != before:
+                raise ValueError(
+                    "plugin registry changed concurrently; retry installation"
+                )
             os.replace(temporary, registry)
         finally:
             temporary.unlink(missing_ok=True)
@@ -170,8 +202,6 @@ def install(payload: Path, home: Path, *, kimi: str = "kimi") -> dict[str, Any]:
             "registration": "installed",
             "activation": "restart Kimi or /reload, then call memory_discover",
         }
-    finally:
-        lock.unlink()
 
 
 def main() -> None:
